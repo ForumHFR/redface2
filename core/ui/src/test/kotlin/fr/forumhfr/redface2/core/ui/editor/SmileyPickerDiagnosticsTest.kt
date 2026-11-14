@@ -25,8 +25,8 @@ class SmileyPickerDiagnosticsTest {
         val controller = SmileyPickerController(backgroundScope, { _, _ -> emptyList() }, diagnostics = log)
         controller.dismiss()
         controller.onDetailChanged(perso)
-        controller.open()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onDetailChanged(BUILTIN_HFR_SMILEYS.first())
         controller.onDetailChanged(null)
         controller.dismiss(SmileyPickerCloseCause.INSERTION)
@@ -50,7 +50,7 @@ class SmileyPickerDiagnosticsTest {
                 },
             ),
         )
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onDetailChanged(perso)
         runCurrent()
         result = SmileyWikiKeywordsResult.Loaded(emptyList())
@@ -79,7 +79,7 @@ class SmileyPickerDiagnosticsTest {
             backgroundScope, { _, _ -> emptyList() }, diagnostics = log,
             wikiKeywords = SmileyWikiKeywordsSource(load = { gate.await() }),
         )
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onDetailChanged(perso)
         runCurrent()
         controller.onDetailChanged(null)

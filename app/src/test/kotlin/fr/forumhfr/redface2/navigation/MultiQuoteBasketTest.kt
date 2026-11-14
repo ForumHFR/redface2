@@ -4,7 +4,9 @@ import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteScope
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -22,7 +24,8 @@ class MultiQuoteBasketTest {
             .toggled(topicScope, selection(303, "carol"))
             .toggled(topicScope, selection(202, "bob"))
 
-        assertEquals(listOf(101, 303, 202), basket?.numreponses)
+        assertEquals(listOf(selection(101, "alice"), selection(303, "carol"), selection(202, "bob")),
+            basket?.selections)
         assertEquals(listOf("alice", "carol", "bob"), basket?.selections?.map { it.author })
     }
 
@@ -34,7 +37,7 @@ class MultiQuoteBasketTest {
             // The caller rebuilt a DIFFERENT snapshot and locator for the same post.
             .toggled(topicScope, selection(101, "alice-edited", page = 4, ref = null))
 
-        assertEquals(listOf(202), basket?.numreponses)
+        assertEquals(listOf(selection(202, "bob")), basket?.selections)
     }
 
     @Test
@@ -47,13 +50,72 @@ class MultiQuoteBasketTest {
     }
 
     @Test
+    fun `ED88 a basket-consuming session of the same target consumes the basket`() {
+        val basket = (null as MultiQuoteBasket?).toggled(topicScope, selection(101, "alice"))
+
+        assertTrue(basket.isConsumedBy(topicScope, consumesBasket = true))
+    }
+
+    @Test
+    fun `ED88 a session that never shipped the basket leaves it armed`() {
+        val basket = (null as MultiQuoteBasket?).toggled(topicScope, selection(101, "alice"))
+
+        // « Citer » simple, plain reply, #823 long-press: decided by the open path, not the quotes.
+        assertFalse(basket.isConsumedBy(topicScope, consumesBasket = false))
+    }
+
+    @Test
+    fun `ED88 a basket re-armed on another target is never consumed`() {
+        val elsewhere = (null as MultiQuoteBasket?)
+            .toggled(QuoteScope.Topic(CAT, POST + 1), selection(555, "dave"))
+        val privateBasket = (null as MultiQuoteBasket?)
+            .toggled(QuoteScope.PrivateMessage(POST), selection(101, "alice"))
+
+        assertFalse(elsewhere.isConsumedBy(topicScope, consumesBasket = true))
+        assertFalse(privateBasket.isConsumedBy(topicScope, consumesBasket = true))
+        assertTrue(privateBasket.isConsumedBy(QuoteScope.PrivateMessage(POST), consumesBasket = true))
+    }
+
+    @Test
+    fun `ED88 no basket and no writing target consume nothing`() {
+        val basket = (null as MultiQuoteBasket?).toggled(topicScope, selection(101, "alice"))
+
+        assertFalse((null as MultiQuoteBasket?).isConsumedBy(topicScope, consumesBasket = true))
+        // A new-topic editor has no topic id, hence no scope.
+        assertFalse(basket.isConsumedBy(null, consumesBasket = true))
+    }
+
+    @Test
+    fun `ED88 buffered quick reply delivery applies to the current basket and its exact target`() {
+        var basket = (null as MultiQuoteBasket?).toggled(topicScope, selection(101, "alice"))
+        // Capture the sender, as the sheet does; the receiver reads the current hoisted basket.
+        val bufferedDelivery = { basket = basket.consumedBy(topicScope) }
+        val otherTargets = listOf(
+            QuoteScope.Topic(CAT, POST + 1),
+            QuoteScope.Topic(CAT + 1, POST),
+            QuoteScope.PrivateMessage(POST),
+        )
+        for (target in otherTargets) {
+            basket = basket.toggled(target, selection(555, "dave"))
+            val rearmed = basket
+            bufferedDelivery()
+            assertEquals(rearmed, basket)
+        }
+        basket = basket.toggled(topicScope, selection(101, "alice"))
+        bufferedDelivery()
+        assertNull(basket)
+        bufferedDelivery() // A repeated or late delivery with no basket stays harmless.
+        assertNull(basket)
+    }
+
+    @Test
     fun `selecting in another topic replaces the basket`() {
         val basket = (null as MultiQuoteBasket?)
             .toggled(topicScope, selection(101, "alice"))
             .toggled(QuoteScope.Topic(CAT, POST + 1), selection(555, "dave"))
 
         assertEquals(QuoteScope.Topic(CAT, POST + 1), basket?.scope)
-        assertEquals(listOf(555), basket?.numreponses)
+        assertEquals(listOf(selection(555, "dave")), basket?.selections)
     }
 
     @Test
@@ -70,7 +132,7 @@ class MultiQuoteBasketTest {
 
         val pruned = basket.withoutSelections(privateScope, setOf(101, 303))
 
-        assertEquals(listOf(202), pruned?.numreponses)
+        assertEquals(listOf(selection(202, "bob", page = 4, ref = 3)), pruned?.selections)
         assertEquals(basket, basket.withoutSelections(topicScope, setOf(101)))
     }
 
@@ -79,6 +141,23 @@ class MultiQuoteBasketTest {
         val basket = MultiQuoteBasket(topicScope, listOf(selection(101, "alice")))
 
         assertNull(basket.withoutSelections(topicScope, setOf(101)))
+    }
+
+    @Test
+    fun `1105 basket never exposes ids stripped of their scope and snapshots`() {
+        assertFalse(MultiQuoteBasket::class.java.methods.any { it.name == "getNumreponses" })
+    }
+
+    @Test
+    fun `same numeric id in another category replaces the scoped snapshot`() {
+        val otherScope = QuoteScope.Topic(CAT + 1, POST)
+        val quote = selection(101, "other author", page = 7)
+        val basket = (null as MultiQuoteBasket?)
+            .toggled(topicScope, selection(101, "alice"))
+            .toggled(otherScope, quote)
+
+        assertEquals(otherScope, basket?.scope)
+        assertEquals(listOf(quote), basket?.selections)
     }
 
     @Test

@@ -1,26 +1,26 @@
 package fr.forumhfr.redface2.feature.editor
 
-import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
-import fr.forumhfr.redface2.core.ui.editor.UploadError
-import fr.forumhfr.redface2.core.ui.editor.UploadProgress
-
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftOffer
 import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
-import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
-import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
-import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 /**
  * MVI state of the topic-level form. [TopicFormMode.EditFirstPost] edits the
  * first post of an existing topic (Phase 2D #148) ; [TopicFormMode.New] creates
  * a brand-new topic (Phase 2E #149).
  *
- * Reuses [SubmitError] from `PostEditorState.kt` for the error envelope —
+ * Reuses [EditorError] from the shared `core:ui` catalogue for the error envelope —
  * the failure variants HFR can return are identical for post-level and
  * topic-level edits (same `bdd.php` endpoint, same classifier).
  */
@@ -32,7 +32,8 @@ data class TopicFormState(
     val page: Int?,
     val numreponse: Int?,
     val subject: TextFieldValue = TextFieldValue(),
-    val draft: TextFieldValue = TextFieldValue(),
+    /** Descending projection of the live ViewModel buffer; never an editable source. */
+    val bodyText: String = "",
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,
     val validation: BbcodeValidation = BbcodeValidation.Idle,
@@ -45,9 +46,17 @@ data class TopicFormState(
      * which posts with `subcat=0`). Drives the [canSubmit] branch for the New
      * mode : a sub-category-less cat is submittable with `subcat=0` and no
      * explicit pick, while a cat WITH sub-categories still requires
-     * `selectedSubcat > 0`. Defaults to `true` so the historical contract holds.
+     * `selectedSubcat > 0`.
+     * Defaults to `true` so the historical contract holds.
      */
     val hasSubcategorySelect: Boolean = true,
+    /**
+     * ED-100: the strict first-post parser refused a missing selector. Only the chrome
+     * uses this refusal; [hasSubcategorySelect] keeps mirroring the last loaded form.
+     * Like that mirror, it is not saved in the ED-81 checkpoint and is rebuilt by GET.
+     * A successful form load clears it; other fetch failures keep the refusal.
+     */
+    val firstPostSubcategoryRefused: Boolean = false,
     val pollPresent: Boolean = false,
     val pollEditable: Boolean = false,
     val signatureEnabled: Boolean = false,
@@ -55,11 +64,16 @@ data class TopicFormState(
     val emailNotificationEnabled: Boolean = false,
     /** Selected HFR `MsgIcon` radio value. The topic form exposes the current 1..16 choices. */
     val msgIcon: Int = DEFAULT_MSG_ICON,
+    val isInitializing: Boolean = false,
+    /** Lock the title only while a recreated session waits for its authoritative draft read. */
+    val isRestoringSession: Boolean = false,
+    /** Successful GET in this instance; restored content alone never proves a usable form. */
+    val hasLoadedForm: Boolean = false,
     val isLoadingForm: Boolean = false,
     val isSubmitting: Boolean = false,
     /** ED-161/169: terminal success and in-flight reservation are state, never a replayed effect. */
     val submission: EditorSubmissionState = EditorSubmissionState.Ready,
-    val submitError: SubmitError? = null,
+    val submitError: EditorError? = null,
     /**
      * True once we have hydrated `subject` from the parsed form. Kept independent
      * from [draftHydratedFromServer] so a slow fetch that lands while the user
@@ -69,10 +83,10 @@ data class TopicFormState(
     val subjectHydratedFromServer: Boolean = false,
     /** Exact untouched subject received from HFR; null until a non-blank hydration lands. */
     val subjectHydratedContent: String? = null,
-    /** Mirror of [subjectHydratedFromServer] for the BBCode draft. */
+    /** True once the BBCode body is known, including a blank server body or an explicit restore. */
     val draftHydratedFromServer: Boolean = false,
-    /** Exact untouched body received from HFR; null until a non-blank hydration lands. */
-    val draftHydratedContent: String? = null,
+    /** Exact server seed, set only when body hydration is applied; empty for a new topic. */
+    val draftHydratedContent: String = "",
     /** Mirror of [PostEditorState.optionsHydratedFromForm] for the same anti-clobber reason. */
     val optionsHydratedFromForm: Boolean = false,
     /**
@@ -101,7 +115,14 @@ data class TopicFormState(
      * « Restaurer » and are dropped on « Ignorer ».
      */
     val restorableDraft: String? = null,
+    val draftOffers: List<DraftOffer> = emptyList(),
+    /** A Restore/Ignore write locks every offer until its result, including a failed result. */
+    val draftOfferDecisionPending: Boolean = false,
+    /** After a failed Restore, settle that merged offer before deciding a different one (ED-121). */
+    val draftOfferToResolveId: String? = null,
     val restorableSubject: String? = null,
+    /** ED-10/85: a close could not save the fields; the dialog asks before anything is abandoned. */
+    val showUnsavedCloseDialog: Boolean = false,
     /**
      * #459 — `true` while an image upload (single or batch) is in flight. Drives the toolbar
      * spinner AND locks the body field (`readOnly`) so the caret cannot move between two
@@ -109,12 +130,43 @@ data class TopicFormState(
      */
     val isUploading: Boolean = false,
     /** #459 — typed upload failure surfaced as a dismissible banner ; mirrors [PostEditorState.uploadError]. */
-    val uploadError: UploadError? = null,
+    val uploadError: EditorError? = null,
     /** #459 — « n/N » batch counter (null for a single image) ; mirrors [PostEditorState.uploadProgress]. */
     val uploadProgress: UploadProgress? = null,
     /** #1128 — observed continuously so the next image pick uses the current preference. */
     val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
+    val editorShortcut: EditorShortcut = EditorShortcut.NONE,
 ) {
+    val draftDecisionsEnabled: Boolean get() = !draftOfferDecisionPending
+
+    fun canDecideDraftOffer(id: String? = draftOffers.firstOrNull()?.id): Boolean =
+        draftDecisionsEnabled && (draftOfferToResolveId == null || draftOfferToResolveId == id)
+
+    /** A failed initial fetch leaves the first post unknown until reload or explicit restore. */
+    val isAwaitingInitialBody: Boolean
+        get() = mode == TopicFormMode.EditFirstPost && !draftHydratedFromServer
+
+    /** ED-35: incomplete headers and anonymous forms remain activatable for a local refusal. */
+    val sendActivatable: Boolean
+        get() {
+            val formReady = hasLoadedForm && !isLoadingForm && !isInitializing
+            val bodyReady = !isAwaitingInitialBody && bodyText.isNotBlank()
+            val idle = !isSubmitting && !submission.blocksBodyMutation && !isUploading
+            val supported = mode == TopicFormMode.New || !firstPostSubcategoryRefused
+            val available = formReady && bodyReady && idle
+            return available && supported && hasSubmitContext
+        }
+
+    /** Same route requirements as the context builders; no enabled send can silently lack its route. */
+    private val hasSubmitContext: Boolean
+        get() = when (mode) {
+            TopicFormMode.New -> (cat ?: 0) > 0
+            TopicFormMode.EditFirstPost -> {
+                val topicKnown = cat != null && (subcat ?: 0) > 0 && (topicId ?: 0) > 0
+                topicKnown && (numreponse ?: 0) > 0 && page == 1
+            }
+        }
+
     /**
      * Submit is allowed when the mode-specific routing context is complete,
      * the user has typed a non-blank subject AND content, the form was
@@ -122,6 +174,7 @@ data class TopicFormState(
      * submitting, and no image upload is in flight ([isUploading], #459/#953 F5 —
      * same guard as [PostEditorState.canSubmit] : a tap on « Envoyer » must not
      * race the upload and POST before the `[img]` markup is inserted).
+     * EditFirstPost also requires a known initial body, including an explicit draft restore.
      *
      * #213 — the New (create-topic) branch now supports a category WITHOUT a
      * sub-category (e.g. cat IA, cat=32) : when the parsed form carried no
@@ -139,16 +192,18 @@ data class TopicFormState(
     val armToken: ArmToken? get() = (submission as? EditorSubmissionState.Armed)?.token
 
     val canSubmit: Boolean
-        get() = when (mode) {
+        get() = hasLoadedForm && !isInitializing && when (mode) {
             TopicFormMode.EditFirstPost ->
-                cat != null &&
+                hasSubcategorySelect &&
+                    cat != null &&
                     (subcat != null && subcat > 0) &&
                     topicId != null &&
                     numreponse != null &&
                     page != null &&
                     (selectedSubcat != null && selectedSubcat > 0) &&
                     subject.text.isNotBlank() &&
-                    draft.text.isNotBlank() &&
+                    bodyText.isNotBlank() &&
+                    draftHydratedFromServer &&
                     !isLoadingForm &&
                     !isSubmitting &&
                     !submission.blocksBodyMutation &&
@@ -158,7 +213,7 @@ data class TopicFormState(
                 cat != null &&
                     isSubcatChoiceComplete &&
                     subject.text.isNotBlank() &&
-                    draft.text.isNotBlank() &&
+                    bodyText.isNotBlank() &&
                     !isLoadingForm &&
                     !isSubmitting &&
                     !submission.blocksBodyMutation &&
@@ -182,8 +237,9 @@ data class TopicFormState(
  * intents the post-level editor does not need.
  */
 sealed interface TopicFormIntent {
+    data object Started : TopicFormIntent
+    data object Stopped : TopicFormIntent
     data class SubjectChanged(val value: TextFieldValue) : TopicFormIntent
-    data class ContentChanged(val value: TextFieldValue) : TopicFormIntent
     data class ToolbarActionClicked(val action: BbcodeAction) : TopicFormIntent
     data object TogglePreview : TopicFormIntent
     data class SubmitClicked(val timeoutMillis: Long = 4_000L) : TopicFormIntent
@@ -197,6 +253,11 @@ sealed interface TopicFormIntent {
     data object SubmitConfirmationDismissed : TopicFormIntent
 
     data object ErrorDismissed : TopicFormIntent
+
+    /** Explicit Masquer of a failed attempt write; releases deferred draft information without storage. */
+    data object DraftWriteFailureDismissed : TopicFormIntent
+
+    data object ReloadRequested : TopicFormIntent
     data class SubcatSelected(val id: Int) : TopicFormIntent
     data class ToggleSignature(val enabled: Boolean) : TopicFormIntent
     data class ToggleSmileyDisabled(val disabled: Boolean) : TopicFormIntent
@@ -231,6 +292,12 @@ sealed interface TopicFormIntent {
     /** #405 — discard the cached draft : delete the row and clear the banner. */
     data object DraftDiscardRequested : TopicFormIntent
 
+    /** ED-40/121 — « Restaurer » on the offered version chosen in the sheet's list, by its identity. */
+    data class DraftOfferRestored(val id: String) : TopicFormIntent
+
+    /** ED-121 — « Ignorer » removes only the chosen offered version ; the fields are untouched. */
+    data class DraftOfferDiscarded(val id: String) : TopicFormIntent
+
     /**
      * #803 pattern (state-hygiene audit 2026-07-05) — the user is leaving the form (system
      * back). The ViewModel flushes the pending debounced autosave FIRST, then emits
@@ -239,6 +306,12 @@ sealed interface TopicFormIntent {
      * the ViewModel). Mirrors [PostEditorIntent.CloseRequested].
      */
     data object CloseRequested : TopicFormIntent
+
+    /** "Rester": the unsaved-close dialog is dismissed, the form stays open with its fields. */
+    data object UnsavedCloseDismissed : TopicFormIntent
+
+    /** "Quitter sans enregistrer": the explicit abandonment of what could not be saved. */
+    data object UnsavedCloseConfirmed : TopicFormIntent
 }
 
 /**
@@ -282,10 +355,3 @@ sealed interface TopicFormEffect {
      */
     data object CloseCommitted : TopicFormEffect
 }
-
-internal fun TopicFormState.withDraft(updated: TextFieldValue): TopicFormState =
-    copy(
-        draft = updated,
-        validation = validateBbcodeDraft(updated.text),
-        submitError = if (submitError != SubmitError.Uncertain && updated.text != draft.text) null else submitError,
-    )

@@ -1,11 +1,19 @@
 package fr.forumhfr.redface2
 
+import java.io.IOException
+import java.nio.file.AccessDeniedException
+import java.nio.file.FileVisitResult
 import java.nio.file.Files
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
+import java.nio.file.SimpleFileVisitor
+import java.nio.file.attribute.BasicFileAttributes
 import kotlin.io.path.exists
 import kotlin.io.path.isDirectory
 import kotlin.io.path.readText
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -645,18 +653,7 @@ class DocsConsistencyTest {
     }
 
     private fun sourceTreeIndex(): DefinitionIndex {
-        val files = Files.walk(root).use { paths ->
-            paths
-                .filter(Files::isRegularFile)
-                .filter { path ->
-                    val relative = root.relativize(path)
-                    val segments = (0 until relative.nameCount).map { relative.getName(it).toString() }
-                    "src" in segments &&
-                        "build" !in segments &&
-                        path.fileName.toString().substringAfterLast('.', "") in SOURCE_EXTENSIONS
-                }
-                .toList()
-        }
+        val files = SourceFileCollector(root).also { Files.walkFileTree(root, it) }.files
         return DefinitionIndex(
             files.map { path ->
                 val baseName = path.fileName.toString().substringBeforeLast('.')
@@ -678,6 +675,72 @@ class DocsConsistencyTest {
                 }
             },
         )
+    }
+
+    /**
+     * Collects the indexed sources while staying out of what Gradle, Git and the JVM rewrite during a build (#1545):
+     * build and tool directories are never entered, and an entry that vanishes between its listing and its visit
+     * (a JVM attach file such as `app/.attach_pid<pid>`, a rewritten build output) is skipped instead of failing.
+     */
+    private class SourceFileCollector(private val root: Path) : SimpleFileVisitor<Path>() {
+        val files = mutableListOf<Path>()
+
+        override fun preVisitDirectory(dir: Path, attrs: BasicFileAttributes): FileVisitResult =
+            if (dir != root && dir.fileName.toString() in PRUNED_DIRECTORIES) {
+                FileVisitResult.SKIP_SUBTREE
+            } else {
+                FileVisitResult.CONTINUE
+            }
+
+        override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
+            if (attrs.isRegularFile && isIndexedSource(file)) files.add(file)
+            return FileVisitResult.CONTINUE
+        }
+
+        override fun visitFileFailed(file: Path, exc: IOException): FileVisitResult =
+            if (exc is NoSuchFileException) FileVisitResult.CONTINUE else throw exc
+
+        override fun postVisitDirectory(dir: Path, exc: IOException?): FileVisitResult =
+            if (exc == null || exc is NoSuchFileException) FileVisitResult.CONTINUE else throw exc
+
+        private fun isIndexedSource(path: Path): Boolean {
+            val relative = root.relativize(path)
+            val segments = (0 until relative.nameCount).map { relative.getName(it).toString() }
+            return "src" in segments &&
+                "build" !in segments &&
+                path.fileName.toString().substringAfterLast('.', "") in SOURCE_EXTENSIONS
+        }
+    }
+
+    @Test
+    fun `source index walk prunes build directories and skips vanished entries`() {
+        val tmp = Files.createTempDirectory("docs-walk")
+        try {
+            val sources = Files.createDirectories(tmp.resolve("mod/src/main/kotlin"))
+            val kept = Files.writeString(sources.resolve("Kept.kt"), "class Kept")
+            val build = Files.createDirectories(tmp.resolve("mod/build/generated/src/main"))
+            Files.writeString(build.resolve("Generated.kt"), "class Generated")
+            // Only pruning keeps this one out: the path has a `src` segment and no `build` segment.
+            val toolDir = Files.createDirectories(tmp.resolve(".gradle/src/main/kotlin"))
+            Files.writeString(toolDir.resolve("Decoy.kt"), "class Decoy")
+            val collector = SourceFileCollector(tmp)
+
+            Files.walkFileTree(tmp, collector)
+
+            assertEquals(listOf(kept), collector.files)
+            val buildDir = tmp.resolve("mod/build")
+            val buildAttrs = Files.readAttributes(buildDir, BasicFileAttributes::class.java)
+            assertEquals(FileVisitResult.SKIP_SUBTREE, collector.preVisitDirectory(buildDir, buildAttrs))
+            val attachFile = tmp.resolve("app/.attach_pid4242")
+            val vanished = NoSuchFileException(attachFile.toString())
+            assertEquals(FileVisitResult.CONTINUE, collector.visitFileFailed(attachFile, vanished))
+            assertEquals(FileVisitResult.CONTINUE, collector.postVisitDirectory(tmp, vanished))
+            assertThrows(AccessDeniedException::class.java) {
+                collector.visitFileFailed(attachFile, AccessDeniedException(attachFile.toString()))
+            }
+        } finally {
+            tmp.toFile().deleteRecursively()
+        }
     }
 
     private data class CitedSymbol(
@@ -703,6 +766,7 @@ class DocsConsistencyTest {
         val TRAILING_PARENS = Regex("\\(.*\\)$")
         val LITERAL_STOPLIST = setOf("null", "true", "false")
         val SOURCE_EXTENSIONS = setOf("kt", "kts", "java", "xml")
+        val PRUNED_DIRECTORIES = setOf("build", ".gradle", ".git", ".kotlin", ".idea")
         const val REF_COLUMN_INDEX = 2
         const val REF_COLUMN_MIN_CELLS = 4
     }

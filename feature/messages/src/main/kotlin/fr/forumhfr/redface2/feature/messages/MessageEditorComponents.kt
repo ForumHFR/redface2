@@ -4,39 +4,26 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -51,21 +38,14 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import fr.forumhfr.redface2.core.domain.editor.ArmToken
-import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
-import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitButton
-import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitLabels
-import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitState
-import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
-import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummaryKind
+import fr.forumhfr.redface2.core.ui.R as UiR
 
 /**
  * Building blocks shared by the two private-message editors — the conversation reply
  * (#301, [PrivateMessageReplyScreen]) and the new-conversation composer (#301 follow-up,
- * [PrivateMessageComposeScreen]). Extracted verbatim from the reply screen so the composer
- * does not fork the IME-pinned bar, the option toggles, or the load/error scaffolding.
+ * [PrivateMessageComposeScreen]): header, draft offer, recipient sheet and load/error scaffolding.
+ * The send bar and the options sheet come from the common editor chrome (`core/ui` editor).
  */
 
 @Composable
@@ -96,49 +76,36 @@ internal fun MessageEditorHeader(title: String, onBack: () -> Unit) {
 }
 
 /**
- * #405 — non-destructive draft-restore banner shared by the two private-message editors.
- * « Restaurer » pre-fills the editor from the cached draft ; « Ignorer » deletes the cached row.
- * The draft is never silently applied nor lost.
+ * #405 — non-destructive draft offer of the reply's full-screen form failure; the ↺ status of both editors
+ * opens the shared EditorDraftOfferSheet instead. « Restaurer » pre-fills the editor from the cached draft ;
+ * « Ignorer » deletes the cached row. The draft is never silently applied nor lost. The sentence has no line
+ * cap nor ellipsis, so font scale 1.3 never truncates it (gates R1b R3 m2, C4 m8), above the two 48 dp actions.
  */
 @Composable
-internal fun MessageDraftRestoreBanner(
+internal fun MessageDraftRestoreChoice(
     onRestore: () -> Unit,
     onDiscard: () -> Unit,
+    restoreEnabled: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        tonalElevation = 2.dp,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = stringResource(R.string.messages_draft_restore_message),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            TextButton(
-                onClick = onRestore,
-                modifier = Modifier.heightIn(min = 48.dp),
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
-            ) {
-                Text(text = stringResource(R.string.messages_draft_restore))
-            }
-            TextButton(
-                onClick = onDiscard,
-                modifier = Modifier.heightIn(min = 48.dp),
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
-            ) {
-                Text(text = stringResource(R.string.messages_draft_discard))
-            }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(stringResource(R.string.messages_draft_restore_message), style = MaterialTheme.typography.bodyMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MessageDraftRestoreActions(onRestore, onDiscard, restoreEnabled)
         }
+    }
+}
+
+/** Emits « Restaurer » then « Ignorer » into the caller's row. */
+@Composable
+private fun MessageDraftRestoreActions(
+    onRestore: () -> Unit, onDiscard: () -> Unit, restoreEnabled: Boolean,
+) {
+    TextButton(onRestore, Modifier.heightIn(min = 48.dp), enabled = restoreEnabled) {
+        Text(stringResource(R.string.messages_draft_restore))
+    }
+    TextButton(onDiscard, Modifier.heightIn(min = 48.dp)) {
+        Text(stringResource(R.string.messages_draft_discard))
     }
 }
 
@@ -239,6 +206,9 @@ internal fun MessageFormLoadingState() {
 internal fun MessageFormErrorState(
     onRetry: () -> Unit,
     message: String = stringResource(R.string.messages_reply_form_error),
+    retryLabel: String = stringResource(R.string.messages_retry),
+    onIgnoreQuote: (() -> Unit)? = null,
+    onResumeQuote: (() -> Unit)? = null,
 ) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
@@ -251,164 +221,15 @@ internal fun MessageFormErrorState(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.error,
             )
-            Button(onClick = onRetry) {
-                Text(text = stringResource(R.string.messages_retry))
+            if (onResumeQuote != null) TextButton(onClick = onResumeQuote) {
+                Text(stringResource(UiR.string.editor_action_resume_quote))
             }
-        }
-    }
-}
-
-/**
- * Send button pinned to the bottom, lifted above the IME so the user never dismisses the keyboard to
- * reach « Envoyer ». Mirrors the post editor's submit bar (the editor's `EditorSubmitBar` is module-
- * private, so the window-insets pattern is replicated here). Requires `windowSoftInputMode=adjustNothing`.
- * The armed-confirmation behaviour (#312 v2, countdown drain included) lives in the shared
- * [ArmedSubmitButton].
- */
-@Composable
-@Suppress("LongParameterList") // Mirrors the editor bar's state + actions.
-internal fun MessageSubmitBar(
-    canSubmit: Boolean,
-    isSubmitting: Boolean,
-    confirmArmed: Boolean,
-    onSubmit: (Long) -> Unit,
-    onConfirmSubmit: () -> Unit,
-    onDisarmConfirm: () -> Unit,
-    onOpenOptions: () -> Unit,
-    onOpenSmileys: () -> Unit,
-    armToken: ArmToken? = null,
-) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 3.dp) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            HorizontalDivider()
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    // Single bottom inset = max(navBar, ime) via union(), so the two never stack into a
-                    // phantom gap. Keyboard closed → clears the gesture nav bar; open → rides on the IME.
-                    .windowInsetsPadding(
-                        WindowInsets.navigationBars
-                            .union(WindowInsets.ime)
-                            .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
-                    )
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Tonal container for the secondary trigger, filled for « Envoyer » — same M3
-                // emphasis pair as the post editor's bar. Hidden while the confirmation is
-                // armed so the armed label never wraps (same fix as the editor bar).
-                if (!confirmArmed) {
-                    FilledTonalButton(onClick = onOpenOptions) {
-                        Text(text = stringResource(R.string.messages_reply_actions_options))
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    // #387 — same Options/Smileys/Envoyer trio as the post editor's bar (#388).
-                    FilledTonalButton(onClick = onOpenSmileys) {
-                        Text(text = stringResource(R.string.messages_reply_actions_smileys))
-                    }
-                }
-                Spacer(modifier = Modifier.weight(1f))
-                if (isSubmitting) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(12.dp))
-                }
-                ArmedSubmitButton(
-                    state = ArmedSubmitState(armed = confirmArmed, enabled = canSubmit, armToken = armToken),
-                    labels = ArmedSubmitLabels(
-                        submit = stringResource(R.string.messages_reply_submit),
-                        confirm = stringResource(R.string.messages_reply_submit_confirm),
-                    ),
-                    actions = ArmedSubmitActions(
-                        onSubmit = { onSubmit(4_000L) },
-                        onSubmitWithTimeout = onSubmit,
-                        onConfirmSubmit = onConfirmSubmit,
-                        onDisarm = onDisarmConfirm,
-                    ),
-                )
+            Button(onClick = onRetry, enabled = onResumeQuote == null) {
+                Text(text = retryLabel)
             }
-        }
-    }
-}
-
-@Composable
-@Suppress("LongParameterList") // 3 toggles + 3 callbacks + enabled — each call-site distinct.
-internal fun MessageEditorOptions(
-    signatureEnabled: Boolean,
-    smileyDisabled: Boolean,
-    emailNotificationEnabled: Boolean,
-    enabled: Boolean,
-    onSignatureChanged: (Boolean) -> Unit,
-    onSmileyDisabledChanged: (Boolean) -> Unit,
-    onEmailNotificationChanged: (Boolean) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = stringResource(R.string.messages_reply_options_title),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        MessageOptionToggle(
-            label = stringResource(R.string.messages_reply_option_signature),
-            checked = signatureEnabled,
-            enabled = enabled,
-            onCheckedChange = onSignatureChanged,
-        )
-        MessageOptionToggle(
-            label = stringResource(R.string.messages_reply_option_smiley_disabled),
-            checked = smileyDisabled,
-            enabled = enabled,
-            onCheckedChange = onSmileyDisabledChanged,
-        )
-        MessageOptionToggle(
-            label = stringResource(R.string.messages_reply_option_email_notification),
-            checked = emailNotificationEnabled,
-            enabled = enabled,
-            onCheckedChange = onEmailNotificationChanged,
-        )
-    }
-}
-
-@Composable
-private fun MessageOptionToggle(
-    label: String,
-    checked: Boolean,
-    enabled: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(end = 16.dp),
-        )
-        Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
-    }
-}
-
-/**
- * #618 (Bug 1) — compact owner-only recipients summary shown in the reply composer in place of the
- * old inline editor. « Destinataires : N » + a « Gérer » action; the tap opens the dedicated
- * [RecipientManagerSheet] so the message body and the send bar stay reachable (the inline editor used
- * to crowd them out, especially for a 29+-member DT). Gated by `canManageRecipients` at the call site.
- */
-@Composable
-internal fun MessageRecipientsSummary(count: Int, onManage: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(
-            text = stringResource(R.string.messages_recipients_summary, count),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        TextButton(onClick = onManage) {
-            Text(text = stringResource(R.string.messages_recipients_manage))
+            if (onIgnoreQuote != null) TextButton(onClick = onIgnoreQuote) {
+                Text(stringResource(UiR.string.editor_action_ignore_quote))
+            }
         }
     }
 }
@@ -455,42 +276,3 @@ internal fun RecipientManagerSheet(
 
 /** #606 — HFR's system member of a group conversation ; removing it warrants a warning, not a block. */
 private const val ADMIN_PSEUDO = "Administration"
-
-internal val PrivateMessageReplyError.bannerResId: Int
-    get() = when (this) {
-        PrivateMessageReplyError.Empty -> R.string.messages_reply_error_empty
-        PrivateMessageReplyError.UnknownRecipient -> R.string.messages_compose_error_unknown_recipient
-        PrivateMessageReplyError.Refused -> R.string.messages_reply_error_refused
-        PrivateMessageReplyError.InvalidHashCheck -> R.string.messages_reply_error_invalid_hash
-        PrivateMessageReplyError.AntiFlood -> R.string.messages_reply_error_anti_flood
-        PrivateMessageReplyError.LoginRequired -> R.string.messages_reply_error_login_required
-        PrivateMessageReplyError.Network -> R.string.messages_reply_error_network
-        PrivateMessageReplyError.SessionExpired -> R.string.messages_reply_error_session_expired
-        PrivateMessageReplyError.Uncertain, PrivateMessageReplyError.Unexpected ->
-            R.string.messages_reply_error_unexpected
-        PrivateMessageReplyError.DraftWriteFailed ->
-            fr.forumhfr.redface2.core.ui.R.string.editor_submission_draft_write_failed
-    }
-
-/** ED-112/170: shared cause, existing MP-specific verification detail; no retry invitation. */
-@Composable
-internal fun MessageSubmissionError(error: PrivateMessageReplyError, composing: Boolean) {
-    val summary = when (error) {
-        PrivateMessageReplyError.Uncertain -> EditorSubmissionSummaryKind.Uncertain
-        PrivateMessageReplyError.DraftWriteFailed -> EditorSubmissionSummaryKind.DraftWriteFailed
-        else -> null
-    }
-    if (summary != null) EditorSubmissionSummary(summary)
-    if (error != PrivateMessageReplyError.DraftWriteFailed) {
-        val resource = if (composing &&
-            (error == PrivateMessageReplyError.Uncertain || error == PrivateMessageReplyError.Unexpected)) {
-            R.string.messages_compose_error_unexpected
-        } else {
-            error.bannerResId
-        }
-        Text(
-            text = stringResource(resource), style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.error,
-        )
-    }
-}

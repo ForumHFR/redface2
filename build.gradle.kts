@@ -2,6 +2,22 @@ plugins {
     alias(libs.plugins.kotlin.serialization) apply false
 }
 
+tasks.register("verifyRoborazziDebug") {
+    group = "verification"
+    description = "Verify the six modules' screenshots against versioned references (zero pixel tolerance)."
+    require(providers.gradleProperty("roborazzi.mode").getOrElse("verify") == "verify") {
+        "verifyRoborazziDebug requires -Proborazzi.mode=verify (the default)"
+    }
+    dependsOn(
+        ":core:ui:testDebugUnitTest",
+        ":feature:topic:testDebugUnitTest",
+        ":feature:messages:testDebugUnitTest",
+        ":feature:editor:testDebugUnitTest",
+        ":feature:settings:testDebugUnitTest",
+        ":feature:forum:testDebugUnitTest",
+    )
+}
+
 val detektCli by configurations.creating
 
 dependencies {

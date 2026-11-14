@@ -92,6 +92,7 @@ class BbcodeContentParserTest {
         val paragraph = ast.blocks.single() as PostBlock.Paragraph
         val link = paragraph.inlines.single() as PostInline.Link
         assertEquals("mailto:a@b.c", link.url)
+        assertEquals(listOf(PostInline.Text("a@b.c")), link.children)
     }
 
     @Test
@@ -155,6 +156,153 @@ class BbcodeContentParserTest {
         val ast = parser.parse("[img]/images/forum/icon.gif[/img]")
         val block = ast.blocks.single() as PostBlock.Image
         assertEquals("https://forum.hardware.fr/images/forum/icon.gif", block.url)
+    }
+
+    @Test
+    fun `linked img becomes an inline image inside the link`() {
+        val ast = parser.parse("[url=https://h/f.jpg][img]https://h/r.jpg[/img][/url]")
+        assertEquals(
+            PostContent(listOf(PostBlock.Paragraph(listOf(
+                PostInline.Link("https://h/f.jpg", listOf(PostInline.InlineImage("https://h/r.jpg", null))),
+            )))),
+            ast,
+        )
+    }
+
+    @Test
+    fun `img inside inline formatting stays inside its container`() {
+        val image = PostInline.InlineImage("https://h/a.jpg", null)
+        val wrappers = mapOf(
+            "b" to PostInline.Strong(listOf(image)),
+            "i" to PostInline.Emphasis(listOf(image)),
+            "u" to PostInline.Underline(listOf(image)),
+            "strike" to PostInline.Strike(listOf(image)),
+        )
+        wrappers.forEach { (tag, expected) ->
+            val ast = parser.parse("[$tag][img]https://h/a.jpg[/img][/$tag]")
+            assertEquals(PostContent(listOf(PostBlock.Paragraph(listOf(expected)))), ast)
+        }
+    }
+
+    @Test
+    fun `img inside a color stays inside the color container`() {
+        val ast = parser.parse("[#FF0000][img]https://h/a.jpg[/img][/#FF0000]")
+        assertEquals(
+            PostContent(listOf(PostBlock.Paragraph(listOf(
+                PostInline.Color("#FF0000", listOf(PostInline.InlineImage("https://h/a.jpg", null))),
+            )))),
+            ast,
+        )
+    }
+
+    @Test
+    fun `linked img in prose preserves the surrounding text in one paragraph`() {
+        val ast = parser.parse("before [url=https://h/f.jpg][img]https://h/r.jpg[/img][/url] after")
+        assertEquals(
+            PostContent(listOf(PostBlock.Paragraph(listOf(
+                PostInline.Text("before "),
+                PostInline.Link("https://h/f.jpg", listOf(PostInline.InlineImage("https://h/r.jpg", null))),
+                PostInline.Text(" after"),
+            )))),
+            ast,
+        )
+    }
+
+    @Test
+    fun `url without target uses its inline image URL as target`() {
+        val ast = parser.parse("[url][img]https://h/a.jpg[/img][/url]")
+        assertEquals(
+            PostContent(listOf(PostBlock.Paragraph(listOf(
+                PostInline.Link("https://h/a.jpg", listOf(PostInline.InlineImage("https://h/a.jpg", null))),
+            )))),
+            ast,
+        )
+    }
+
+    @Test
+    fun `unsafe inline img keeps raw bbcode inside its link`() {
+        val ast = parser.parse("[url=https://h/f.jpg][img]javascript:alert(1)[/img][/url]")
+        assertEquals(
+            PostContent(listOf(PostBlock.Paragraph(listOf(
+                PostInline.Link("https://h/f.jpg", listOf(PostInline.Text("[img]javascript:alert(1)[/img]"))),
+            )))),
+            ast,
+        )
+    }
+
+    @Test
+    fun `crossed tags inside inline img preserve the exact text`() {
+        val ast = parser.parse("[b][img]https://h/a.png[i]SECRET[/img][/i][/b]")
+        assertEquals(
+            PostContent(listOf(PostBlock.Paragraph(listOf(
+                PostInline.Strong(listOf(PostInline.Text("[img]https://h/a.png[i]SECRET[/img][/i]"))),
+            )))),
+            ast,
+        )
+    }
+
+    @Test
+    fun `tags inside linked img preserve the exact text`() {
+        listOf("[b]x[/b]", "[unknown]x", "x[/unknown]").forEach { markup ->
+            val image = "[img]https://h/a.png$markup[/img]"
+            val ast = parser.parse("[url=https://h/f.jpg]$image[/url]")
+            assertEquals(
+                PostContent(listOf(PostBlock.Paragraph(listOf(
+                    PostInline.Link("https://h/f.jpg", listOf(PostInline.Text(image))),
+                )))),
+                ast,
+            )
+        }
+    }
+
+    @Test
+    fun `unclosed inline img keeps its open tag and URL as text`() {
+        val ast = parser.parse("[url=https://h/f.jpg][img]https://h/r.jpg[/url]")
+        assertEquals(
+            PostContent(listOf(PostBlock.Paragraph(listOf(
+                PostInline.Link("https://h/f.jpg", listOf(PostInline.Text("[img]https://h/r.jpg"))),
+            )))),
+            ast,
+        )
+    }
+
+    @Test
+    fun `img beyond the inline nesting limit degrades to text without crashing`() {
+        val image = "[img]https://h/a.jpg[/img]"
+        val nested = "[b]".repeat(256) + image + "[/b]".repeat(256)
+        val ast = parser.parse(nested)
+        val paragraph = ast.blocks.single() as PostBlock.Paragraph
+        val deepest = generateSequence(paragraph.inlines) { inlines ->
+            (inlines.singleOrNull() as? PostInline.Strong)?.children
+        }.last()
+        val text = deepest.single() as PostInline.Text
+        assertTrue(text.value.contains(image))
+    }
+
+    @Test
+    fun `inline img URL is not split into smileys`() {
+        listOf("https://h/a:D.gif", "https://h/a:jap:.gif").forEach { url ->
+            val ast = parser.parse("[url=https://h/f.jpg][img]$url[/img][/url]")
+            assertEquals(
+                PostContent(listOf(PostBlock.Paragraph(listOf(
+                    PostInline.Link("https://h/f.jpg", listOf(PostInline.InlineImage(url, null))),
+                )))),
+                ast,
+            )
+        }
+    }
+
+    @Test
+    fun `inline img trims its URL and normalises absolute HFR paths`() {
+        val ast = parser.parse("[b][img] /images/forum/icon.gif [/img][/b]")
+        assertEquals(
+            PostContent(listOf(PostBlock.Paragraph(listOf(
+                PostInline.Strong(listOf(
+                    PostInline.InlineImage("https://forum.hardware.fr/images/forum/icon.gif", null),
+                )),
+            )))),
+            ast,
+        )
     }
 
     @Test
@@ -318,18 +466,15 @@ class BbcodeContentParserTest {
     }
 
     @Test
-    fun `bullet star is preserved as raw text without crashing`() {
-        // We don't model BBCode lists yet — keep [*] visible so users see what they typed.
+    fun `bullet star renders as a visible bullet without a closing tag`() {
         val ast = parser.parse("[*] item 1")
         val paragraph = ast.blocks.single() as PostBlock.Paragraph
-        assertTrue(paragraph.inlines.any { it is PostInline.Text && it.value.contains("[*]") })
+        assertEquals(listOf(PostInline.Text("•  item 1")), paragraph.inlines)
     }
 
     @Test
     fun `full list block survives the parser without crashing and stays readable`() {
-        // Phase 2B-B explicitly defers BBCode lists from the AST (cf. roadmap.md).
-        // The contract is : `[list]…[*]…[/list]` is forwarded verbatim into the
-        // output so the user reads what they typed instead of an empty paragraph.
+        // [list] is not an HFR toolbar tag: keep it visible while rendering standalone [*] markers.
         val ast = parser.parse("[list][*]a[*]b[/list]")
         assertNotNull(ast)
         val rendered = ast.blocks
@@ -339,7 +484,7 @@ class BbcodeContentParserTest {
             .joinToString(separator = "") { it.value }
         // Both items + their bullet markers must still be visible in the output.
         assertTrue("expected '[list]' to survive — rendered=$rendered", rendered.contains("[list]"))
-        assertTrue("expected '[*]a' to survive — rendered=$rendered", rendered.contains("[*]"))
+        assertTrue("expected bullet markers — rendered=$rendered", rendered.contains("•"))
         assertTrue("expected 'a' content to survive — rendered=$rendered", rendered.contains("a"))
         assertTrue("expected 'b' content to survive — rendered=$rendered", rendered.contains("b"))
         assertTrue("expected '[/list]' to survive — rendered=$rendered", rendered.contains("[/list]"))
@@ -460,13 +605,14 @@ class BbcodeContentParserTest {
     }
 
     @Test
-    fun `perso smiley keeps its token as a null-url sprite (renderer shows the text)`() {
+    fun `perso smiley uses shared pure URL derivation without a registry or network`() {
         val ast = parser.parse("gg [:pierre tramo:3] !")
         val paragraph = ast.blocks.single() as PostBlock.Paragraph
         assertEquals(
             listOf(
                 PostInline.Text("gg "),
-                PostInline.Smiley(kind = SmileyKind.Perso("pierre tramo:3"), imageUrl = null),
+                PostInline.Smiley(kind = SmileyKind.Perso("pierre tramo:3"),
+                    imageUrl = "https://forum-images.hardware.fr/images/perso/3/pierre tramo.gif"),
                 PostInline.Text(" !"),
             ),
             paragraph.inlines,

@@ -1,5 +1,8 @@
 package fr.forumhfr.redface2.feature.editor
 
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -11,11 +14,14 @@ import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
+import fr.forumhfr.redface2.core.ui.editor.EditorPreviewState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -42,6 +48,14 @@ class EditorSubmitCallbackRestorationTest {
             PostEditorState(PostEditorMode.Reply, 23, 35421, null, 2, 401),
         )
         every { model.effects } returns effects.receiveAsFlow()
+        every { model.quotesDelivered } returns emptyFlow()
+        every { model.bodyFieldState } returns TextFieldState()
+        every { model.bodyScrollState } returns ScrollState(0)
+        every { model.bodyCaretRevealResetKey } returns 0
+        every { model.bodyInputTransformation } returns InputTransformation {}
+        every { model.previewLayout } returns EditorPreviewState()
+        every { model.chromeEvents } returns PostEditorChromeEvents()
+        every { model.chromeMemory } returns EditorHostMemory<PostEditorChromeSurface>()
         val received = mutableListOf<PostEditorEffect.SubmitSucceeded>()
         restoration.setContent {
             val owner = rememberSubmitAccount(account.value)
@@ -83,6 +97,13 @@ class EditorSubmitCallbackRestorationTest {
             TopicFormState(TopicFormMode.EditFirstPost, 23, 401, 35421, 1, 640),
         )
         every { model.effects } returns effects.receiveAsFlow()
+        every { model.bodyFieldState } returns TextFieldState()
+        every { model.bodyScrollState } returns ScrollState(0)
+        every { model.bodyCaretRevealResetKey } returns 0
+        every { model.bodyInputTransformation } returns InputTransformation {}
+        every { model.previewLayout } returns EditorPreviewState()
+        every { model.editorEvents } returns TopicFormEvents()
+        every { model.chromeMemory } returns TopicFormChromeMemory()
         val received = mutableListOf<TopicFormEffect.SubmitSucceeded>()
         restoration.setContent {
             val owner = rememberSubmitAccount(account.value)

@@ -15,7 +15,7 @@ Comment participer au projet.
 
 ## Où en est le projet
 
-Bêta publique **0.68.0** (3 novembre 2026, F-Droid ; soumise à Google Play) et canal dev aligné sur la bêta au 3 novembre 2026. Les phases 0 à 3 de la [roadmap]({{ site.baseurl }}/specs/roadmap) sont livrées, la refonte UI de la phase 4 aussi (Drapeaux [#603](https://github.com/ForumHFR/redface2/issues/603), Topic [#604](https://github.com/ForumHFR/redface2/issues/604), surface de lecture partagée [#1040](https://github.com/ForumHFR/redface2/issues/1040)). Le travail courant est suivi par **milestones de vue** (*Vue · Topic 2*, *Vue · Éditeur 2*, *Vue · Drapeaux 2*, *Vue · Forum 1*, *Vue · MP 1*, *Vue · Réglages 1*, *Vue · Compte HFR 1*, *Infra & dette*). Pour contribuer :
+Bêta publique **0.70.0** (14 novembre 2026, F-Droid ; soumise à Google Play) et canal dev aligné sur la bêta au 14 novembre 2026. Les phases 0 à 3 de la [roadmap]({{ site.baseurl }}/specs/roadmap) sont livrées, la refonte UI de la phase 4 aussi (Drapeaux [#603](https://github.com/ForumHFR/redface2/issues/603), Topic [#604](https://github.com/ForumHFR/redface2/issues/604), surface de lecture partagée [#1040](https://github.com/ForumHFR/redface2/issues/1040)). Le travail courant est suivi par **milestones de vue** (*Vue · Topic 2*, *Vue · Éditeur 2*, *Vue · Drapeaux 2*, *Vue · Forum 1*, *Vue · MP 1*, *Vue · Réglages 1*, *Vue · Compte HFR 1*, *Infra & dette*). Pour contribuer :
 
 - **Implémenter une issue** d'un milestone de vue ouvert (l'issue décrit le contrat HFR mesuré, la spec touchée et la preuve attendue)
 - **Proposer des features** : ouvrir une issue avec le label `feature`
@@ -259,13 +259,100 @@ Cas particulier : toute contribution qui ajoute ou modifie une fonction de la **
 
 **Rendu visuel (Roborazzi) :**
 
-Screenshot testing **JVM** (sur Robolectric, sans device) via Roborazzi 1.73, consommé comme artefact de test simple (pas le plugin Gradle), avec `roborazzi.test.record=true` forcé.
+Screenshot testing **JVM** (Robolectric, sans device) via Roborazzi **1.77.0**, consommé comme
+artefacts de test sans le plugin Gradle amont. La convention `redface.android.roborazzi` transmet
+les propriétés système `roborazzi.test.record` et `roborazzi.test.verify` aux tests unitaires.
+Le mode unique `-Proborazzi.mode=record|verify` vaut **`verify` par défaut** ; toute autre valeur est rejetée.
 
-- **Mode `record`** (par défaut ici) : un test `captureRoboImage` génère un PNG dans `<module>/build/outputs/roborazzi/` (non versionné) → **inspection visuelle** rapide (~40 s). Lancer via l'env Docker, ex. `./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest`. (Il n'existe **pas** de tâche `recordRoborazzi` : le plugin Gradle Roborazzi n'est pas appliqué — record forcé via `roborazzi.test.record=true`.)
-- **Quand l'utiliser** : `record` est réservé aux **changements de rendu intentionnels** (PostRenderer, écrans refondus) — on régénère puis on regarde l'image. `verifyRoborazzi` (compare) existe mais les **baselines ne sont pas versionnées** en V1 (elles bougeraient à chaque itération des refontes #603/#604).
-- **Statut** : **recommandé** pour tout changement de rendu UI structurant, **pas encore un gate CI dur**. Le passage en `verify` + baselines committées + gate fera l'objet d'une décision dédiée une fois les refontes UI stabilisées.
-- **Couverture actuelle** : `:core:ui` (PostRenderer — code, smiley, citation ; `FlagItem` refonte #603 ; vitrine réglages `SettingsHomeShowcase`) et quelques surfaces ciblées dans `:feature:topic` (extraction zoom) / `:feature:messages` (`MessageCard`, chrome de conversation). Elle s'étend au cas par cas — **pas** d'obligation « tout écran doit avoir un snapshot ».
-- Décision et rationale : [ADR-016]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing).
+Preuves dans le tag officiel **1.77.0** :
+[`RoborazziProperties.kt`](https://github.com/takahirom/roborazzi/blob/1.77.0/include-build/roborazzi-core/src/commonMain/kotlin/com/github/takahirom/roborazzi/RoborazziProperties.kt)
+lit ces propriétés système et `roborazzi.compare.output.dir` ;
+[`RoborazziOptions.common.kt`](https://github.com/takahirom/roborazzi/blob/1.77.0/include-build/roborazzi-core/src/commonMain/kotlin/com/github/takahirom/roborazzi/RoborazziOptions.common.kt)
+expose `CompareOptions(changeThreshold, imageComparator)`. Le plugin amont n'est donc pas nécessaire.
+
+- **Vérifier** : la tâche racine du dépôt `verifyRoborazziDebug` dépend des `testDebugUnitTest` des six
+  modules `core/ui`, `feature/topic`, `feature/messages`, `feature/editor`, `feature/settings`,
+  `feature/forum`, sans filtre de noms de classes. Elle refuse le mode `record`.
+  Les tests unitaires ordinaires comparent aussi par défaut, y compris les captures des classes
+  `ImageViewerScreenTest`, `PostRendererContentGeometryTest`, `ForumCategoryContentInsetsTest` et
+  `ForumCategoryCollapseTest`. Il n'existe pas de tâche amont `verifyRoborazzi` sans suffixe.
+  **`verify` reste bloquant**, y compris pendant la refonte de l'éditeur après l'élagage B (#1417).
+- **Références** : PNG versionnés dans `<module>/src/test/screenshots/`. Une référence absente ou
+  différente fait échouer la vérification ; `verify` ne la crée ni ne l'écrase. Les captures passent
+  par le helper partagé `build-logic/src/roborazziTest/kotlin/` : `changeThreshold = 0f` et
+  `SimpleImageComparator(maxDistance = 0f)` imposent **zéro pixel différent**.
+- **Sorties de diagnostic** : images `*_actual.png` et `*_compare.png` sous
+  `<module>/build/outputs/roborazzi/<tâche>/`, résultats JSON sous
+  `<module>/build/test-results/roborazzi/<tâche>/`. La CI les publie dans l'artefact
+  `roborazzi-comparisons`, même après un échec du job `test`.
+- **Cache** : mode et dossier de références sont des entrées des tâches de test. Une modification ou
+  suppression de PNG invalide leur résultat ; l'enregistrement désactive le cache et l'état à jour
+  de ces tâches, car il doit réellement écrire les références.
+- **Enregistrer** : uniquement pour l'initialisation ou un changement visuel **intentionnel**, dans
+  l'environnement épinglé `scripts/docker-dev.sh` (même image que la CI). Conserver les paramètres
+  déterministes des tests (SDK, densité, locale, police, thème, horloge et données), puis relire les
+  PNG **avant/après dans la PR** avant d'approuver leur mise à jour. **Jamais de régénération
+  automatique en CI** ni pour faire disparaître un échec inexpliqué.
+- Couverture étendue au cas par cas ; aucune obligation de snapshot pour chaque écran.
+  Décision : [ADR-016, évolution #1571]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing).
+
+**Règles de capture (élagage B, décision XaTriX du 13 novembre 2026, #1417) :**
+
+- Une couche par préoccupation : glyphes et états de barre isolés, géométrie dans le scaffold,
+  routage et panneaux sur l'écran intégré. Une invariance s'affirme par une assertion d'égalité.
+- Les nouvelles scènes se capturent **en étoile**, autour du cas clair à échelle 1, sans produit
+  cartésien : largeur/orientation toujours, sombre un état par scène, échelle 1,3 s'il y a du texte.
+  Chaque axe supplémentaire doit couvrir un risque identifié. Le ton du message (famille
+  antérieure à l'audit) reste au niveau B : aux deux largeurs, clair à 1 et 1,3, sombre et AMOLED à 1, pour les sprites
+  et le mode hors ligne.
+- La suite éditeur existante conserve le **niveau B** de l'audit : sans le coin sombre × 1,3 ; scènes
+  « barre seule » des écrans en portrait à 1 dans les deux thèmes. Le scaffold garde ses trois profils
+  pour les six états structurants (normal, Format, envoi en lecture seule, erreur d'upload, détails,
+  en-tête), et le portrait/paysage clair à 1 pour les douze autres. Les références J à preset M restent.
+  Les nouveaux onglets Options suivent l'étoile ci-dessus. Ne pas étendre cet élagage au niveau C.
+- **Zéro doublon exact dans un même module** : `python3 scripts/check-roborazzi-duplicates.py`
+  calcule le SHA-256 des **octets PNG**, sans dépendance Python externe. La garde est bloquante dans
+  `repo-guards`, y compris sur une PR documentaire. Elle inclut les nouvelles références non suivies,
+  exclut les sorties de build, et ne compare pas les modules entre eux. La liste d'exceptions dans le
+  script est vide ; toute exception doit nommer le groupe exact et justifier sa présence.
+- **À chaque `record`, relire la planche avant/après** avant d'approuver les références. Le script
+  `scripts/roborazzi-contact-sheet.py` compare une base Git explicite à l'arbre courant (changements
+  indexés, non indexés et nouveaux PNG non suivis). Il produit des PNG paginés et un index HTML local
+  avec liens vers les originaux à pleine résolution, sans réseau. Un `--output` relatif part de la
+  racine du dépôt ; chaque run efface d'abord les planches, originaux et index d'un run précédent. Le
+  script refuse un dossier qui n'est pas le sien (`index.html` sans sa marque, planches sans cet index)
+  et ne touche alors à rien. Utiliser Python 3 avec
+  **Pillow ≥ 10.1 déjà installé** (sur la box, `/usr/bin/python3` ;
+  aucune installation implicite dans le script). La planche complète la vérification automatique :
+  une référence enregistrée peut elle-même contenir un défaut visuel.
+
+```bash
+# Vérification globale (également exécutée par le job CI test).
+./scripts/docker-dev.sh ./gradlew verifyRoborazziDebug -Proborazzi.mode=verify
+
+# Initialisation explicite des six modules sur box, puis relecture et versionnement des PNG.
+./scripts/docker-dev.sh ./gradlew -Proborazzi.mode=record \
+  :core:ui:testDebugUnitTest :feature:topic:testDebugUnitTest \
+  :feature:messages:testDebugUnitTest :feature:editor:testDebugUnitTest \
+  :feature:settings:testDebugUnitTest :feature:forum:testDebugUnitTest --rerun-tasks
+
+# Mise à jour ciblée d'un changement visuel voulu, puis comparaison sans réenregistrement.
+./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest \
+  -Proborazzi.mode=record --tests '*PostRendererQuoteRoborazziTest*' --rerun-tasks
+# Après chaque record : choisir le commit AVANT l'enregistrement (HEAD pour un record non commité,
+# ou la base de la branche pour relire tout le changement), puis ouvrir l'index et les planches.
+/usr/bin/python3 scripts/roborazzi-contact-sheet.py --base HEAD \
+  --output build/reports/roborazzi-contact-sheet
+# Ouvrir build/reports/roborazzi-contact-sheet/index.html, agrandir les PNG pour les détails.
+# --include-deleted ajoute les suppressions ; un renommage apparaît comme suppression + ajout.
+python3 scripts/check-roborazzi-duplicates.py
+./scripts/docker-dev.sh ./gradlew verifyRoborazziDebug -Proborazzi.mode=verify --rerun-tasks
+```
+
+Garde prouvée à son introduction (#1571, box socadisc, image Docker épinglée) : référence absente →
+échec ; un pixel changé sans mise à jour → échec avec diff ; références approuvées → succès, sur deux
+passes identiques. Toute proposition d'assouplir la tolérance doit d'abord montrer la répétabilité sur
+une seconde box et en CI.
 
 **Smoke test mensuel HFR (fin de phase de lecture) :**
 

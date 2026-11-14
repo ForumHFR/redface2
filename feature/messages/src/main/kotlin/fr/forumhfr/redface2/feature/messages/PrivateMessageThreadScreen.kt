@@ -27,6 +27,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,6 +38,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -82,6 +85,7 @@ import androidx.lifecycle.compose.currentStateAsState
 import fr.forumhfr.redface2.core.domain.author.isRf2Creator
 import fr.forumhfr.redface2.core.domain.author.resolveAuthorRolePill
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
@@ -94,6 +98,7 @@ import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
+import fr.forumhfr.redface2.core.ui.feedback.showAcknowledgement
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.pager.PageFab
 import fr.forumhfr.redface2.core.ui.pager.PageFabDefaults
@@ -103,7 +108,6 @@ import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.AuthorRolePill
 import fr.forumhfr.redface2.core.ui.post.CreatorPseudoText
 import fr.forumhfr.redface2.core.ui.post.HiddenPostCard
-import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
 import fr.forumhfr.redface2.core.ui.post.PostIdentityBand
 import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
 import fr.forumhfr.redface2.core.ui.post.PostImageActions
@@ -131,6 +135,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterNotNull
 
 /**
  * One private-message conversation (#298): renders the messages of a `cat=prive` thread,
@@ -151,6 +156,7 @@ fun PrivateMessageThreadScreen(
     pendingSubmitResult: PrivateMessageSubmitResult? = null,
     onSubmitResultConsumed: (PrivateMessageSubmitResult) -> Unit = {},
     onReply: (threadId: Int, page: Int) -> Unit,
+    onEdit: (threadId: Int, page: Int, numreponse: Int) -> Unit = { _, _, _ -> },
     // #1074 — per-message footer action. The quote target is typed before navigation; no private
     // href or BBCode enters the route.
     onQuote: (threadId: Int, page: Int, quote: PrivateMessageQuote) -> Unit,
@@ -186,18 +192,17 @@ fun PrivateMessageThreadScreen(
     }
 
     // #1040 lot 6 — editor→retained-ViewModel handoff. The event id keys one consumption even when
-    // the editor payload is identical to the previous one; :app clears its slot after this call.
-    LaunchedEffect(pendingSubmitResult?.eventId) {
-        pendingSubmitResult?.let { result ->
-            viewModel.applySubmitResult(result)
-            onSubmitResultConsumed(result)
-        }
-    }
+    // the editor payload is identical to the previous one; :app clears its slot once applied.
+    // The auth flow may arrive after the handoff: retry it when the account becomes known.
+    PrivateMessageSubmitResultEffect(
+        pendingSubmitResult, state.connectedPseudo, viewModel::applySubmitResult, onSubmitResultConsumed,
+    )
 
     // #351 — one-shot effects (same idiom as TopicScreen): a keep-content load failure keeps the
     // page on screen and surfaces a Toast inviting a retry (pull again / tap the pager again).
     val context = LocalContext.current
     val refreshFailedMsg = stringResource(R.string.messages_thread_refresh_failed)
+    val quotePreparationFailedMsg = stringResource(R.string.messages_quote_preparation_failed)
     val imageShareFailedMsg = stringResource(
         fr.forumhfr.redface2.core.ui.R.string.post_image_menu_share_failed,
     )
@@ -208,6 +213,13 @@ fun PrivateMessageThreadScreen(
                     android.widget.Toast.makeText(
                         context,
                         refreshFailedMsg,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+                PrivateMessageThreadEffect.QuotePreparationFailed -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        quotePreparationFailedMsg,
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 }
@@ -251,18 +263,27 @@ fun PrivateMessageThreadScreen(
         isMultiRecipientHint = isMultiRecipientHint,
         callbacks = PrivateMessageThreadCallbacks(
             onBack = onBack,
+            onEdit = { message -> onEdit(request.threadId, state.page, message.numreponse) },
+            onEditAcknowledgementPresented = viewModel::editAcknowledgementPresented,
             onReply = { onReply(request.threadId, state.page) },
             onQuote = { message ->
                 message.quoteRef?.let { ref ->
-                    onQuote(
-                        request.threadId,
-                        state.page,
-                        PrivateMessageQuote(numreponse = message.numreponse, ref = ref),
-                    )
+                    val page = state.page
+                    viewModel.enqueueQuotes(listOf(PendingInlineQuoteRequest.Quote(message.numreponse, page, ref))) {
+                        onQuote(request.threadId, page, PrivateMessageQuote(message.numreponse, ref))
+                    }
                 }
             },
             onToggleMultiQuote = onToggleMultiQuote,
-            onMultiQuote = { onMultiQuote(request.threadId, state.page) },
+            onMultiQuote = {
+                val page = state.page
+                val quotes = multiQuoteSelections.map { selection ->
+                    val locator = selection.locator
+                    PendingInlineQuoteRequest.Quote(locator.numreponse, locator.page,
+                        requireNotNull(locator.ref), selection.truncate)
+                }
+                viewModel.enqueueQuotes(quotes) { onMultiQuote(request.threadId, page) }
+            },
             onClearMultiQuote = onClearMultiQuote,
             onRemoveMultiQuotes = onRemoveMultiQuotes,
             onRetry = viewModel::retry,
@@ -290,6 +311,21 @@ fun PrivateMessageThreadScreen(
         ),
         topBarActions = topBarActions,
     )
+}
+
+/** Retries the same pending handoff when authentication becomes available to the retained reader. */
+@Composable
+internal fun PrivateMessageSubmitResultEffect(
+    pendingSubmitResult: PrivateMessageSubmitResult?,
+    connectedPseudo: String?,
+    applySubmitResult: (PrivateMessageSubmitResult) -> Boolean,
+    onSubmitResultConsumed: (PrivateMessageSubmitResult) -> Unit,
+) {
+    LaunchedEffect(pendingSubmitResult?.eventId, connectedPseudo) {
+        pendingSubmitResult?.let { result ->
+            if (applySubmitResult(result)) onSubmitResultConsumed(result)
+        }
+    }
 }
 
 /**
@@ -503,6 +539,8 @@ internal data class PrivateMessageThreadCallbacks(
     val onPageLandingConsumed: (PrivateMessagePageLanding) -> Unit = {},
     /** Null only in isolated hosts; production supplies it and the list applies reply/ref gates. */
     val onQuote: ((Post) -> Unit)? = null,
+    val onEdit: ((Post) -> Unit)? = null,
+    val onEditAcknowledgementPresented: (Long) -> Unit = {},
     val onToggleMultiQuote: (QuoteSelection) -> Unit = {},
     val onMultiQuote: () -> Unit = {},
     val onClearMultiQuote: () -> Unit = {},
@@ -534,6 +572,15 @@ internal fun PrivateMessageThreadContent(
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val mode = state.mode
+    val snackbarHost = remember(state.connectedPseudo) { SnackbarHostState() }
+    val editedMessage = stringResource(R.string.messages_message_edited)
+    val acknowledgement by rememberUpdatedState(state.editAcknowledgement)
+    val onAcknowledgementPresented by rememberUpdatedState(callbacks.onEditAcknowledgementPresented)
+    LaunchedEffect(snackbarHost) {
+        snapshotFlow { acknowledgement }.filterNotNull().collect { id ->
+            snackbarHost.showAcknowledgement(editedMessage, onPresented = { onAcknowledgementPresented(id) })
+        }
+    }
     val multiQuoteSelections = presentation.multiQuoteSelections
     val listState = rememberLazyListState()
     // Account is part of the alignment owner even when the numeric page stays identical across an
@@ -564,7 +611,7 @@ internal fun PrivateMessageThreadContent(
     val openMessageMenu = remember<(Post, Boolean) -> Unit> {
         { message, contentRevealed ->
             imageMenuTarget = null
-            messageMenuTarget = MessageMenuTarget(message, contentRevealed)
+            messageMenuTarget = MessageMenuTarget(message.numreponse, contentRevealed)
         }
     }
     val content = mode as? PrivateMessageThreadUiState.Mode.Content
@@ -595,6 +642,7 @@ internal fun PrivateMessageThreadContent(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHost) },
         topBar = {
             TopAppBar(
                 title = {
@@ -750,6 +798,13 @@ internal fun PrivateMessageThreadContent(
         mode = mode,
         connectedPseudo = state.connectedPseudo,
         target = messageMenuTarget,
+        editActionsAvailable = state.editActionsAvailable,
+        onEdit = callbacks.onEdit?.let { edit ->
+            { message ->
+                pageInteraction.alignedDepartureAnchor()?.let(callbacks.onAnchorSettled)
+                edit(message)
+            }
+        },
         onOpenProfile = callbacks.onOpenProfile,
         multiQuoteSelections = multiQuoteSelections,
         onToggleMultiQuote = callbacks.onToggleMultiQuote,
@@ -788,7 +843,7 @@ private data class PrivateMessageReaderPresentation(
 
 /** Ephemeral menu target; explicit reveal prevents a hidden body from escaping through copy. */
 private data class MessageMenuTarget(
-    val message: Post,
+    val numreponse: Int,
     val contentRevealed: Boolean,
 )
 
@@ -856,7 +911,11 @@ private fun ThreadPagePickerHost(
 ) {
     if (!open || content == null) return
     val thread = content.thread
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = { true },
+    )
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1133,22 +1192,24 @@ private fun ThreadMessageMenuHost(
     mode: PrivateMessageThreadUiState.Mode,
     connectedPseudo: String?,
     target: MessageMenuTarget?,
+    editActionsAvailable: Boolean,
+    onEdit: ((Post) -> Unit)?,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
     multiQuoteSelections: List<QuoteSelection>,
     onToggleMultiQuote: (QuoteSelection) -> Unit,
     onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit,
     onClear: () -> Unit,
 ) {
-    val targetStillOnPage = mode is PrivateMessageThreadUiState.Mode.Content &&
-        target != null &&
-        mode.thread.messages.any { message -> message.numreponse == target.message.numreponse }
+    // Resolve every action and metadata line against the displayed page, including a refresh
+    // that changes edit permission while the sheet is open.
+    val message = (mode as? PrivateMessageThreadUiState.Mode.Content)?.thread?.messages
+        ?.firstOrNull { it.numreponse == target?.numreponse }
 
     LaunchedEffect(mode, target) {
-        if (!targetStillOnPage) onClear()
+        if (message == null) onClear()
     }
 
-    if (mode is PrivateMessageThreadUiState.Mode.Content && target != null && targetStillOnPage) {
-        val message = target.message
+    if (mode is PrivateMessageThreadUiState.Mode.Content && target != null && message != null) {
         val authorCanonical = remember(message.author) { canonicalizePseudo(message.author) }
         val connectedCanonical = remember(connectedPseudo) {
             connectedPseudo?.let(::canonicalizePseudo)
@@ -1158,9 +1219,13 @@ private fun ThreadMessageMenuHost(
         val quoteSelection = message.toPrivateMessageQuoteSelectionOrNull(mode.thread.page)
         MessageMenuSheet(
             message = message,
+            connectedPseudo = connectedPseudo,
             authorBlocked = authorBlocked,
             contentVisible = contentVisible,
             onDismiss = onClear,
+            onEdit = onEdit?.takeIf {
+                canEditPrivateMessage(message, connectedPseudo, editActionsAvailable, mode.thread)
+            }?.let { edit -> { edit(message) } },
             onOpenProfile = message.profileId?.let { profileId ->
                 { onOpenProfile(profileId, message.author, message.avatarUrl) }
             },

@@ -1,0 +1,153 @@
+package fr.forumhfr.redface2.core.ui.editor
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.hideFromAccessibility
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.ui.R
+
+/**
+ * ED-101/113 container only: the host supplies fields, validation and their enabled state.
+ * Keep this composable mounted, including when [isOpen] is false, and put the editor in [body].
+ * Supply the Message field's [bodyState]. [onReturnToBody] runs once after an open panel closes,
+ * when the body is focusable again; restore focus synchronously, or preserve selection explicitly
+ * when deferring it until input options update. The host captures IME
+ * visibility BEFORE opening, prevents automatic keyboard opening on body focus when it was closed,
+ * then explicitly shows or hides the keyboard to restore that captured state (ED-53).
+ * [initialFocusRequester], when supplied, must be attached to a field in [content] (title or recipients);
+ * otherwise Return receives focus.
+ * [headerActions] stay pinned beside the title while the panel's content scrolls (ED-50).
+ * The host opens this panel on CompleteHeader and closes it in [onClose]. No CSV mapping lives here.
+ * Top/horizontal insets and the editor's outer BackHandler belong to the host. The panel owns its
+ * bottom navigationBars/IME union, outside its scroll viewport.
+ */
+@Composable
+@Suppress("LongParameterList") // Independent slots, visibility, labels, focus targets and close callback.
+fun EditorHeaderPanel(
+    isOpen: Boolean,
+    title: String,
+    bodyState: TextFieldState,
+    onClose: () -> Unit,
+    onReturnToBody: () -> Unit,
+    modifier: Modifier = Modifier,
+    initialFocusRequester: FocusRequester? = null,
+    headerActions: @Composable () -> Unit = {},
+    body: @Composable () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    EditorPanelOverlay(
+        isOpen, title, bodyState, onClose, onReturnToBody, modifier, initialFocusRequester, body,
+        headerActions = headerActions,
+    ) { closeFocus ->
+        TextButton(onClick = onClose, modifier = Modifier.focusRequester(closeFocus)) {
+            Text(stringResource(R.string.editor_panel_return_to_body))
+        }
+        content()
+    }
+}
+
+/** Same composition boundary for both panels: never key or conditionally compose the body. */
+@Composable
+@Suppress("LongParameterList") // Shared overlay boundary; keep body and panel slots separate.
+internal fun EditorPanelOverlay(
+    visible: Boolean,
+    title: String,
+    bodyState: TextFieldState,
+    onClose: () -> Unit,
+    onReturnToBody: () -> Unit,
+    modifier: Modifier = Modifier,
+    initialFocusRequester: FocusRequester? = null,
+    body: @Composable () -> Unit,
+    headerActions: @Composable () -> Unit = {},
+    content: @Composable ColumnScope.(FocusRequester) -> Unit,
+) {
+    val focusManager = LocalFocusManager.current
+    val closeFocus = remember { FocusRequester() }
+    var wasOpen by remember(bodyState) { mutableStateOf(false) }
+    Box(modifier) {
+        Box(Modifier.fillMaxSize().focusProperties {
+            // canFocus=false alone only affects one target, not a subtree. Refuse entry into
+            // this group even for a descendant's programmatic request while it is covered.
+            onEnter = { if (visible) cancelFocusChange() }
+        }.focusGroup().then(if (visible) Modifier.clearAndSetSemantics { hideFromAccessibility() } else Modifier)) {
+            body()
+        }
+        // Registered after the body's handler: a panel opened on entry consumes the first Back.
+        BackHandler(enabled = visible, onBack = onClose)
+        if (visible) Surface(
+            modifier = Modifier.matchParentSize().focusProperties {
+                // Keep keyboard traversal inside the panel, including at either Tab boundary.
+                onExit = { cancelFocusChange() }
+            }.focusGroup().semantics {
+                paneTitle = title
+                isTraversalGroup = true
+            },
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(
+                // The bottom navigationBars/IME union stays on the outer column, outside the scroll viewport.
+                Modifier.fillMaxSize().windowInsetsPadding(editorBottomInsets()).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, Modifier.weight(1f).semantics { heading() },
+                        style = MaterialTheme.typography.titleLarge)
+                    headerActions()
+                }
+                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) { content(closeFocus) }
+            }
+        }
+    }
+    LaunchedEffect(visible, initialFocusRequester, bodyState) {
+        val selectionBeforeFocusChange = bodyState.selection
+        if (visible) {
+            // Also release a body's captured focus; merely hiding semantics does not release it.
+            focusManager.clearFocus(force = true)
+            (initialFocusRequester ?: closeFocus).requestFocus()
+        } else if (wasOpen) {
+            onReturnToBody()
+        }
+        // BTF2 collapses selection on focus loss. A panel must preserve both endpoints,
+        // including a reversed range, without replacing text or adding an undo entry.
+        // Selection-only focus repair keeps the tool capture valid for the unchanged buffer.
+        if (bodyState.selection != selectionBeforeFocusChange) bodyState.edit {
+            selection = selectionBeforeFocusChange
+        }
+        wasOpen = visible
+    }
+}

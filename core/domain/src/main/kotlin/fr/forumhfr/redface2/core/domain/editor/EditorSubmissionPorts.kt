@@ -16,8 +16,13 @@ enum class EditorSubmissionFailure { ATTEMPT, QUIESCE, OUTCOME, CLEANUP }
  * [stopDraftWrites] cancels and joins autosaves before the published marker. [recordFailure] must not throw.
  * A failed marker preserves the text and the one success pop, with a terminal Uncertain(accepted = true).
  * Transport cancellation after emission leaves the durable attempt unresolved; adapters classify other failures.
+ * Proven local cancellation is resolved durably while the editor scope is active.
+ * This never restores an invalidated session.
+ * Scope destruction leaves the durable attempt unresolved, just as process death cannot resolve it.
  */
 interface EditorSubmissionPorts {
+    /** Lifetime of the editor, independent of cancellation of an individual submission job. */
+    val isEditorScopeActive: Boolean
     suspend fun beginAttempt(): BeginAttemptResult
     suspend fun send(attempt: AttemptToken): EditorSendOutcome
     suspend fun stopDraftWrites()

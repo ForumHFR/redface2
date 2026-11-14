@@ -59,6 +59,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -199,7 +200,8 @@ fun TopicScreen(
      * typed text) WITHOUT a banner — re-proposing a draft the user is visibly continuing would be
      * noise. Defaults to a no-op for non-topic callers (previews/tests never escalate).
      * #868-#870 — `consumesBasket` forwards the sheet session's basket consumption : true only when
-     * the escalated sheet was opened by « Citer N » (its successful submit then empties the basket).
+     * the escalated sheet was opened by « Citer N » (its durable quote delivery or, at the latest,
+     * its successful submit then empties the basket, ED-88).
      */
     onEscalateToFullEditor: (
         subcat: Int,
@@ -305,20 +307,16 @@ fun TopicScreen(
      */
     onToggleMultiQuote: (selection: QuoteSelection) -> Unit = {},
     /**
-     * #291 / #604 lot 3 — « Citer N » AT OR ABOVE the full-screen threshold : opens the editor
-     * with the basket's cards (`:app` hands the previews over in memory and clears the basket).
-     * Below the threshold the screen opens the quick-reply sheet itself and consumes the basket
-     * through [onClearMultiQuote] instead. Receives the topic's `(subcat, page)` like [onReply].
+     * #1553: « Citer N » to the full editor, after durable preparation. [quotes] contains only
+     * transient cards; inline coordinates are already in Room. The topic's basket is consumed
+     * once its citations are durable in the draft, a successful submission at the latest (ED-88),
+     * including an inline opening with an empty card handoff.
      */
-    onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
-    /**
-     * #604 lot 3 — clears the multi-quote basket after the sheet consumed it (« Citer N » below
-     * the threshold) : the cards live on in the sheet's ViewModel, and backing out must not
-     * re-arm a stale « Citer N » — same intent-consumed rule as the full-screen path.
-     * #436 — also « Tout vider » : a long press on the « Citer N » FAB empties the whole basket
-     * in one gesture. Owned by `:app` (the basket lives there); the screen only triggers the reset.
-     */
+    onMultiQuote: (subcat: Int, page: Int, quotes: List<QuoteSelection>) -> Unit = { _, _, _ -> },
+    /** #436 — « Tout vider » : a long press on « Citer N » empties the whole basket. */
     onClearMultiQuote: () -> Unit = {},
+    /** ED-88 — consume only the current basket of the quick reply's target, checked by :app. */
+    onQuickReplyBasketConsumed: (cat: Int, topicId: Int) -> Unit = { _, _ -> },
     /**
      * #465 — the user's MANUAL poll-expansion choice for THIS topic, owned by `:app` so it survives
      * leaving and reopening the topic (like the multi-quote basket / scroll anchors ; hoisted when
@@ -403,8 +401,8 @@ fun TopicScreen(
         alignment = alignment,
     )
     // Gate r1 — tap-time departure anchor, but ONLY while aligned : right after a rapid second
-    // page tap the list may still sit at the previous page's offset. A null departure just falls
-    // back to the engine's stored anchor for the departed page.
+    // page tap the list may still sit at the previous page's offset. Unaligned coordinates must
+    // never be reused as a tap-time anchor.
     val alignedDepartureAnchor = {
         val current = viewModel.state.value
         currentAnchor().takeIf {
@@ -458,6 +456,7 @@ fun TopicScreen(
     // upfront keeps the rule happy and avoids re-resolving on every effect.
     // #335 — manual pull-to-refresh failure message (resolved upfront, same rationale).
     val refreshManualFailedMsg = stringResource(R.string.topic_refresh_failed)
+    val quotePreparationFailedMsg = stringResource(R.string.topic_quote_preparation_failed)
     // Chantier C (#546) — intra-topic search failure message (resolved upfront, same rationale).
     val searchFailedMsg = stringResource(R.string.topic_search_failed)
     // Chantier B (#546) — « no further result » Toast (resolved upfront, same rationale).
@@ -540,6 +539,9 @@ fun TopicScreen(
         viewModel.effects.collect { effect ->
             if (effect.isScrollEffect()) scrollLandingJob?.cancel()
             when (effect) {
+                TopicEffect.QuotePreparationFailed -> {
+                    snackbarScope.launch { snackbarHostState.showSnackbar(quotePreparationFailedMsg) }
+                }
                 is TopicEffect.ScrollToPost -> {
                     val page = viewModel.state.value.request.page
                     scrollLandingJob = launch {
@@ -792,8 +794,17 @@ fun TopicScreen(
         onLastReadMarkerMeasured = { lastReadMarkerHeightPx.intValue = it },
         onIntent = viewModel::send,
         onBack = onBack,
-        onReply = onReply,
+        onReply = { subcat, page, quotes ->
+            viewModel.prepareEditorQuotes(quotes) { cards ->
+                if (currentRouteCheck.value()) onReply(subcat, page, cards)
+            }
+        },
         onEscalateToFullEditor = onEscalateToFullEditor,
+        prepareSheetQuotes = { quotes, onPrepared ->
+            viewModel.prepareEditorQuotes(quotes) { cards ->
+                if (currentRouteCheck.value()) onPrepared(cards)
+            }
+        },
         // Vague 4 (#604) lot 1 / #895 étape 4 — a reply POSTed from the quick-reply sheet goes
         // straight to the retained ViewModel (in-place force refresh, #200/#226/#1243) : the sheet
         // never entered the back stack and the topic entry no longer gets replaced.
@@ -813,6 +824,9 @@ fun TopicScreen(
         onGoToPost = { page, numreponse ->
             viewModel.goToPost(page, numreponse, alignedDepartureAnchor())
         },
+        onCitingPostClick = { post ->
+            viewModel.send(TopicIntent.OnCitingPostClick(post, alignedDepartureAnchor()))
+        },
         onOpenProfile = onOpenProfile,
         onOpenImageViewer = onOpenImageViewer,
         onSendPrivateMessage = onSendPrivateMessage,
@@ -824,8 +838,13 @@ fun TopicScreen(
         onFavoriteAction = viewModel::requestAddFavoriteAtPost,
         multiQuoteSelections = multiQuoteSelections,
         onToggleMultiQuote = onToggleMultiQuote,
-        onMultiQuote = onMultiQuote,
+        onMultiQuote = { subcat, page, quotes ->
+            viewModel.prepareEditorQuotes(quotes) { cards ->
+                if (currentRouteCheck.value()) onMultiQuote(subcat, page, cards)
+            }
+        },
         onClearMultiQuote = onClearMultiQuote,
+        onQuickReplyBasketConsumed = onQuickReplyBasketConsumed,
         pollManualExpanded = pollManualExpanded,
         onPollExpansionChanged = onPollExpansionChanged,
         // #1201 — the owner « Clore ce sondage » tap raises the confirmation dialog above.
@@ -1329,11 +1348,14 @@ internal fun TopicContent(
         quotes: List<QuoteSelection>,
         consumesBasket: Boolean,
     ) -> Unit = { _, _, _, _ -> },
+    prepareSheetQuotes: (List<QuoteSelection>, (List<QuoteSelection>) -> Unit) -> Unit =
+        { cards, ready -> ready(cards) },
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
     // #699 — quote-header tap, threaded down to the post cards (cf. TopicScreen KDoc).
     onGoToPost: (page: Int, numreponse: Int) -> Unit = { _, _ -> },
+    onCitingPostClick: (Post) -> Unit,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
     onOpenImageViewer: (ImageViewerRequest) -> Unit = {},
     // #792 — « Envoyer un MP » entry of the post menu, forwarded up to `:app` (MP composer).
@@ -1350,9 +1372,10 @@ internal fun TopicContent(
     // and the basket clear once the sheet consumed the cards.
     multiQuoteSelections: List<QuoteSelection> = emptyList(),
     onToggleMultiQuote: (selection: QuoteSelection) -> Unit = {},
-    onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
+    onMultiQuote: (subcat: Int, page: Int, quotes: List<QuoteSelection>) -> Unit = { _, _, _ -> },
     // #436 — empties the whole basket (« Tout vider », long-press on the « Citer N » FAB).
     onClearMultiQuote: () -> Unit = {},
+    onQuickReplyBasketConsumed: (cat: Int, topicId: Int) -> Unit = { _, _ -> },
     // #465/#1170 — the topic's manual poll choice (owned by :app, null = follow the automatic poll
     // policy) + the callback recording a tap on the poll card. Threaded to the header card's poll.
     pollManualExpanded: Boolean? = null,
@@ -1463,35 +1486,31 @@ internal fun TopicContent(
                         WritingSurface.FULL_EDITOR -> onReply(subcat, page, emptyList())
                     }
                 },
-                // #604 lot 3 / #806 — preset routing (mockup P3, « le cas qui force le plein
-                // écran ») : when the sheet wins, the cards are pre-armed and the basket is
-                // consumed HERE (they live on in the sheet's ViewModel) ; when the full-screen
-                // editor wins (3+ under SHEET, any citation under SHEET_EXCEPT_QUOTES, always
-                // under FULL_EDITOR), the `:app` path (in-memory handoff + basket clear) takes
-                // over. The sheet branch snapshots the selection BEFORE its local clear so the
-                // launch can never observe a half-emptied basket ; the full-editor branch
-                // delegates to the existing `:app` contract, which reads the hoisted basket and
-                // hands it over BEFORE clearing it (RedfaceNavigation, « Citer N » entry) — the
-                // local snapshot is not what that branch ships (gate Codex #806).
+                // #1553: both surfaces choose rendering and await durable inline entry at the
+                // gesture. Only transient cards travel in the launch; the durable delivery of the
+                // citations consumes the basket, a successful send at the latest (ED-88).
                 onMultiQuote = { subcat, page ->
                     val selection = multiQuoteSelections.toList()
                     when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = selection.size)) {
-                        WritingSurface.FULL_EDITOR -> onMultiQuote(subcat, page)
+                        WritingSurface.FULL_EDITOR -> onMultiQuote(subcat, page, selection)
                         WritingSurface.SHEET -> {
-                            // #868/#869 — the basket is NO LONGER cleared here : closing the sheet
-                            // without sending keeps the selection armed (the « Citer N » FAB and
-                            // counter survive a cancel). The clear happens on the sheet's
-                            // SubmitSucceeded (or its escalation's) via consumesBasket below.
-                            quickReplyFor = QuickReplyLaunch(
-                                request = QuickReplyRequest(
-                                    cat = state.request.cat,
-                                    subcat = subcat,
-                                    topicId = state.request.post,
-                                    page = page,
-                                ),
-                                initialQuotes = selection,
-                                consumesBasket = true,
-                            )
+                            // #868/#869 — the basket is NOT cleared here : the selection stays
+                            // armed until this session proves it took it. ED-88 (#1616) — that
+                            // proof is the durable delivery of its citations (onQuotesDelivered),
+                            // with the sheet's SubmitSucceeded (or its escalation's) as safety net,
+                            // both via consumesBasket below.
+                            prepareSheetQuotes(selection) { cards ->
+                                quickReplyFor = QuickReplyLaunch(
+                                    request = QuickReplyRequest(
+                                        cat = state.request.cat,
+                                        subcat = subcat,
+                                        topicId = state.request.post,
+                                        page = page,
+                                    ),
+                                    initialQuotes = cards,
+                                    consumesBasket = true,
+                                )
+                            }
                         }
                     }
                 },
@@ -1599,15 +1618,17 @@ internal fun TopicContent(
                                 // restore banner, not silently appended.
                                 onQuoteRequested = { preview ->
                                     when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = 1)) {
-                                        WritingSurface.SHEET -> quickReplyFor = QuickReplyLaunch(
-                                            request = QuickReplyRequest(
-                                                cat = state.request.cat,
-                                                subcat = mode.topic.subcat,
-                                                topicId = state.request.post,
-                                                page = mode.topic.page,
-                                            ),
-                                            initialQuotes = listOf(preview),
-                                        )
+                                        WritingSurface.SHEET -> prepareSheetQuotes(listOf(preview)) { cards ->
+                                            quickReplyFor = QuickReplyLaunch(
+                                                request = QuickReplyRequest(
+                                                    cat = state.request.cat,
+                                                    subcat = mode.topic.subcat,
+                                                    topicId = state.request.post,
+                                                    page = mode.topic.page,
+                                                ),
+                                                initialQuotes = cards,
+                                            )
+                                        }
                                         WritingSurface.FULL_EDITOR ->
                                             onReply(mode.topic.subcat, mode.topic.page, listOf(preview))
                                     }
@@ -1719,6 +1740,7 @@ internal fun TopicContent(
         QuickReplySheet(
             request = launch.request,
             initialQuotes = launch.initialQuotes,
+            legacyQuoteRequestDropped = launch.legacyQuoteRequestDropped,
             onDismiss = { quickReplyFor = null },
             onEscalate = { quotes ->
                 quickReplyFor = null
@@ -1732,11 +1754,20 @@ internal fun TopicContent(
                     launch.consumesBasket,
                 )
             },
-            onSubmitted = { targetPage, scrollTo, quotedNumreponses ->
-                // #868/#869 — a SUCCESSFUL send of a basket-consuming session (« Citer N » ≤ 2)
-                // finally consumes the selection ; a dismiss/cancel above never does.
+            // ED-88 (#1616) — the basket is emptied as soon as its citations are durable in the
+            // draft (sealed C/Q transaction) : « Citer N » would only offer what is already done.
+            // A failed or dormant delivery never signals, so the basket stays armed. Cards (opt-in
+            // rendering) are transient and never signal either : they wait for the send below.
+            onQuotesDelivered = {
                 if (launch.consumesBasket) {
-                    onClearMultiQuote()
+                    onQuickReplyBasketConsumed(launch.request.cat, launch.request.topicId)
+                }
+            },
+            onSubmitted = { targetPage, scrollTo, quotedNumreponses ->
+                // #868/#869 — safety net (ED-88) : a SUCCESSFUL send of a basket-consuming session
+                // (« Citer N » ≤ 2) consumes whatever selection the delivery left armed (cards).
+                if (launch.consumesBasket) {
+                    onQuickReplyBasketConsumed(launch.request.cat, launch.request.topicId)
                 }
                 quickReplyFor = null
                 onQuickReplySubmitted(targetPage, scrollTo, quotedNumreponses)
@@ -1750,7 +1781,7 @@ internal fun TopicContent(
         CitingPostsSheet(
             state = sheet,
             onDismiss = { onIntent(TopicIntent.OnDismissCitingSheet) },
-            onPostClick = { post -> onIntent(TopicIntent.OnCitingPostClick(post)) },
+            onPostClick = onCitingPostClick,
         )
     }
 }
@@ -1986,7 +2017,11 @@ internal fun TopicTopBar(
     // sheet anchored to the top-bar pill. #1299 replaces redundant adjacent shortcuts here with
     // first/last; the Error path keeps adjacent recovery navigation inline and outside the sheet.
     if (pagePickerOpen && loaded != null) {
-        ModalBottomSheet(onDismissRequest = { pagePickerOpen = false }) {
+        val sheetState = rememberModalBottomSheetState(
+            skipPartiallyExpanded = true,
+            confirmValueChange = { true },
+        )
+        ModalBottomSheet(onDismissRequest = { pagePickerOpen = false }, sheetState = sheetState) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -4344,6 +4379,8 @@ internal data class QuickReplyLaunch(
      * the basket alone — they never shipped it.
      */
     val consumesBasket: Boolean = false,
+    /** ED-132: an old saver tail was dropped; no legacy coordinates are read. */
+    val legacyQuoteRequestDropped: Boolean = false,
 )
 
 /**
@@ -4368,85 +4405,32 @@ internal fun rememberQuickReplyLaunch(): MutableState<QuickReplyLaunch?> =
     rememberSaveable(stateSaver = QuickReplyLaunchSaver) { mutableStateOf(null) }
 
 /**
- * #953 (F3) — explicit [Saver] for the (non-Parcelable) [QuickReplyLaunch] : the flat list is
- * `[cat, subcat, topicId, page, consumesBasket, then page/numreponse/ref/author/excerpt/truncate
- * per quote]` — primitives only, all Bundle-safe. A null launch (sheet closed) is handled by [listSaver]
- * itself : the empty list it produces is stored as null, restored as null, and this saver's
- * `restore` only ever sees non-empty lists.
+ * #1553: save the mount, opening metadata and a dropped-tail flag only. Cards are transient;
+ * inline coordinates live exclusively in Room. Older tails are detected by their presence only.
  */
 internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<QuickReplyLaunch?, Any>(
     save = { launch ->
-        if (launch == null) {
-            emptyList()
-        } else {
-            buildList {
-                add(launch.request.cat)
-                add(launch.request.subcat)
-                add(launch.request.topicId)
-                add(launch.request.page)
-                add(launch.consumesBasket)
-                launch.initialQuotes.forEach { quote ->
-                    add(quote.locator.page)
-                    add(quote.numreponse)
-                    add(quote.locator.ref ?: QUICK_REPLY_SAVER_REF_ABSENT)
-                    add(quote.author)
-                    add(quote.excerpt)
-                    add(quote.truncate)
-                }
-            }
-        }
+        if (launch == null) emptyList() else listOf(
+            launch.request.cat, launch.request.subcat, launch.request.topicId,
+            launch.request.page, launch.consumesBasket, launch.legacyQuoteRequestDropped,
+        )
     },
     restore = { saved ->
-        if (saved.size < QUICK_REPLY_SAVER_HEADER_SIZE) {
-            null
-        } else {
-            QuickReplyLaunch(
-                request = QuickReplyRequest(
-                    cat = saved[0] as Int,
-                    subcat = saved[1] as Int,
-                    topicId = saved[2] as Int,
-                    page = saved[3] as Int,
-                ),
-                initialQuotes = saved
-                    .drop(QUICK_REPLY_SAVER_HEADER_SIZE)
-                    .let { quoteFields ->
-                        quoteFields.chunked(quickReplySaverQuoteFields(quoteFields.size))
-                    }
-                    .map { fields ->
-                        val page = fields[0] as Int
-                        val numreponse = fields[1] as Int
-                        val ref = fields[2] as Int
-                        val author = fields[3] as String
-                        val excerpt = fields[4] as String
-                        val truncate = fields.getOrNull(5) as? Boolean ?: false
-                        QuoteSelection(
-                            locator = QuoteLocator(
-                                page = page,
-                                numreponse = numreponse,
-                                ref = ref.takeUnless { it == QUICK_REPLY_SAVER_REF_ABSENT },
-                            ),
-                            author = author,
-                            excerpt = excerpt,
-                            truncate = truncate,
-                        )
-                    },
-                consumesBasket = saved[4] as Boolean,
-            )
-        }
+        if (saved.size < QUICK_REPLY_SAVER_HEADER_SIZE) null else QuickReplyLaunch(
+            request = QuickReplyRequest(
+                cat = saved[0] as Int,
+                subcat = saved[1] as Int,
+                topicId = saved[2] as Int,
+                page = saved[3] as Int,
+            ),
+            consumesBasket = saved[4] as Boolean,
+            legacyQuoteRequestDropped = saved.getOrNull(5) as? Boolean ?: (saved.size > QUICK_REPLY_SAVER_HEADER_SIZE),
+        )
     },
 )
 
-/** [QuickReplyLaunchSaver] layout: request Ints + consumesBasket before the quote fields. */
+/** Request coordinates and basket-consumption flag; no citation fields. */
 private const val QUICK_REPLY_SAVER_HEADER_SIZE = 5
-
-/** [QuickReplyLaunchSaver] layout : page, numreponse, ref, author, excerpt, truncate per quote. */
-private const val QUICK_REPLY_SAVER_QUOTE_FIELDS = 6
-
-/** Pre-#327 saved launches did not carry the truncate flag. */
-private const val QUICK_REPLY_SAVER_QUOTE_FIELDS_LEGACY = 5
-
-/** Bundle-safe encoding of a nullable quote ref; real HFR refs are non-negative. */
-private const val QUICK_REPLY_SAVER_REF_ABSENT = -1
 
 /** #806 — the two composition surfaces a write tap can open. */
 internal enum class WritingSurface { SHEET, FULL_EDITOR }
@@ -4488,13 +4472,6 @@ internal fun Post.toQuoteSelection(page: Int, truncate: Boolean = false): QuoteS
     excerpt = postContentExcerpt(content),
     truncate = truncate,
 )
-
-private fun quickReplySaverQuoteFields(size: Int): Int =
-    if (size % QUICK_REPLY_SAVER_QUOTE_FIELDS == 0) {
-        QUICK_REPLY_SAVER_QUOTE_FIELDS
-    } else {
-        QUICK_REPLY_SAVER_QUOTE_FIELDS_LEGACY
-    }
 
 internal fun shouldEnableReply(topic: Topic, isAuthenticated: Boolean): Boolean =
     topic.canReply && isAuthenticated

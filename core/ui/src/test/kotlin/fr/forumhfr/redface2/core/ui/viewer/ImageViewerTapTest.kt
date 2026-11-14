@@ -22,6 +22,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.test.core.app.ApplicationProvider
 import coil3.ColorImage
 import coil3.ImageLoader
@@ -57,6 +58,7 @@ class ImageViewerTapTest {
     )
     private var closeCount = 0
     private var doubleTapTimeoutMillis = 0L
+    private var touchSlop = 0f
 
     @After
     fun resetImageLoader() = SingletonImageLoader.reset()
@@ -66,6 +68,20 @@ class ImageViewerTapTest {
 
     @Test
     fun `single taps toggle private image actions and close still works`() = verifySingleTaps(diskCache = false)
+
+    @Test
+    fun `vertical swipes on a short zoomed public image preserve action visibility`() =
+        verifyVerticalSwipes(diskCache = true)
+
+    @Test
+    fun `vertical swipes on a short zoomed private image preserve action visibility`() =
+        verifyVerticalSwipes(diskCache = false)
+
+    @Test
+    fun `sub slop swipes toggle public image actions`() = verifySubSlopSwipes(diskCache = true)
+
+    @Test
+    fun `sub slop swipes toggle private image actions`() = verifySubSlopSwipes(diskCache = false)
 
     @Test
     fun `double taps preserve public image action visibility`() = verifyDoubleTaps(diskCache = true)
@@ -159,6 +175,38 @@ class ImageViewerTapTest {
         assertEquals(1, closeCount)
     }
 
+    private fun verifyVerticalSwipes(diskCache: Boolean) {
+        mountViewer(diskCache = diskCache, wideImage = true)
+        waitForImage()
+        // A 4:1 image still fits vertically at the viewer's 2x double-tap zoom in this portrait host.
+        compose.onNodeWithTag(IMAGE_VIEWER_IMAGE_TAG).performTouchInput { doubleClick() }
+        settleGestures()
+        compose.onNodeWithTag(IMAGE_VIEWER_ACTIONS_TAG).assertIsDisplayed()
+
+        verticalSwipe(distance = touchSlop * SWIPE_SLOP_MULTIPLIER)
+        compose.onNodeWithTag(IMAGE_VIEWER_ACTIONS_TAG).assertIsDisplayed()
+
+        singleTap()
+        compose.onNodeWithTag(IMAGE_VIEWER_ACTIONS_TAG).assertDoesNotExist()
+        verticalSwipe(distance = touchSlop * SWIPE_SLOP_MULTIPLIER)
+        compose.onNodeWithTag(IMAGE_VIEWER_ACTIONS_TAG).assertDoesNotExist()
+
+        // A rejected swipe must not suppress the next real tap.
+        singleTap()
+        compose.onNodeWithTag(IMAGE_VIEWER_ACTIONS_TAG).assertIsDisplayed()
+    }
+
+    private fun verifySubSlopSwipes(diskCache: Boolean) {
+        mountViewer(diskCache = diskCache, wideImage = true)
+        waitForImage()
+
+        verticalSwipe(distance = touchSlop / 2f)
+        compose.onNodeWithTag(IMAGE_VIEWER_ACTIONS_TAG).assertDoesNotExist()
+
+        verticalSwipe(distance = touchSlop / 2f)
+        compose.onNodeWithTag(IMAGE_VIEWER_ACTIONS_TAG).assertIsDisplayed()
+    }
+
     private fun verifyDoubleTaps(diskCache: Boolean) {
         mountViewer(diskCache = diskCache)
         waitForImage()
@@ -177,9 +225,12 @@ class ImageViewerTapTest {
     }
 
     private fun verifyAccessibility(diskCache: Boolean) {
-        mountViewer(diskCache = diskCache)
+        mountViewer(diskCache = diskCache, wideImage = true)
         waitForImage()
         val image = compose.onNodeWithTag(IMAGE_VIEWER_IMAGE_TAG)
+        // Leave the movement guard rejecting touch clicks before invoking the semantic action.
+        verticalSwipe(distance = touchSlop * SWIPE_SLOP_MULTIPLIER)
+        compose.onNodeWithTag(IMAGE_VIEWER_ACTIONS_TAG).assertIsDisplayed()
         image.assertContentDescriptionEquals("photo").assertHasClickAction()
         assertEquals(
             context.getString(R.string.image_viewer_hide_actions),
@@ -217,11 +268,17 @@ class ImageViewerTapTest {
         diskCache: Boolean = false,
         loadGate: CompletableDeferred<Unit>? = null,
         failLoading: Boolean = false,
+        wideImage: Boolean = false,
     ) {
         request = request.copy(diskCache = diskCache)
+        val imageWidth = if (wideImage) 1600 else 360
+        val imageHeight = if (wideImage) 400 else 780
         val engine = FakeImageLoaderEngine.Builder()
-            .intercept(SOURCE_URL, ColorImage(android.graphics.Color.BLUE, width = 360, height = 780))
-            .intercept(NEXT_SOURCE_URL, ColorImage(android.graphics.Color.GREEN, width = 360, height = 780))
+            .intercept(SOURCE_URL, ColorImage(android.graphics.Color.BLUE, width = imageWidth, height = imageHeight))
+            .intercept(
+                NEXT_SOURCE_URL,
+                ColorImage(android.graphics.Color.GREEN, width = imageWidth, height = imageHeight),
+            )
             .build()
         val interceptor = object : Interceptor {
             override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
@@ -238,7 +295,10 @@ class ImageViewerTapTest {
         )
         compose.setContent {
             val configuration = LocalViewConfiguration.current
-            SideEffect { doubleTapTimeoutMillis = configuration.doubleTapTimeoutMillis }
+            SideEffect {
+                doubleTapTimeoutMillis = configuration.doubleTapTimeoutMillis
+                touchSlop = configuration.touchSlop
+            }
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 ImageViewerScreen(request = request, onClose = { closeCount++ }, onSave = {})
             }
@@ -257,6 +317,17 @@ class ImageViewerTapTest {
         settleGestures()
     }
 
+    private fun verticalSwipe(distance: Float) {
+        compose.onNodeWithTag(IMAGE_VIEWER_IMAGE_TAG).performTouchInput {
+            swipe(
+                start = center + Offset(0f, distance / 2f),
+                end = center - Offset(0f, distance / 2f),
+                durationMillis = SWIPE_DURATION_MS,
+            )
+        }
+        settleGestures()
+    }
+
     private fun settleGestures() {
         // A real tap must outlive Telephoto's double-tap window, then the action-bar fade.
         compose.mainClock.advanceTimeBy(doubleTapTimeoutMillis + ANIMATION_SETTLE_MS)
@@ -270,3 +341,5 @@ private const val LOAD_TIMEOUT_MS = 5_000L
 private const val ANIMATION_SETTLE_MS = 200L
 private const val DISABLED_ANIMATION_SETTLE_MS = 100L
 private const val EDGE_INSET_PX = 20f
+private const val SWIPE_SLOP_MULTIPLIER = 8f
+private const val SWIPE_DURATION_MS = 600L

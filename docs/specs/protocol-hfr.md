@@ -51,6 +51,8 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Clore sondage (owner) | GET | `/user/close_sondage.php?config=hfr.inc&cat={cat}&post={topicId}` | **oui** |
 | MP (envoi) | POST | `/bddpost.php?config=hfr.inc&cat=prive&pseudo={dest}` | **oui** |
 | Conversation MP | GET | `/forum2.php?config=hfr.inc&cat=prive&post={mp_id}&page={page}` | **oui** |
+| Formulaire édition MP | GET | `/message.php?config=hfr.inc&cat=prive&post={mp_id}&numreponse={numreponse}&page={page}&p=1&subcat=0&sondage=0&owntopic=0&new=0` | **oui** |
+| Édition MP | POST | `/bdd.php?config=hfr.inc` avec `cat=prive` | **oui** |
 | Liste des MPs | GET | `/forum1.php?config=hfr.inc&cat=prive&page={page}&subcat=&sondage=0&owntopic=0&trash=0&trash_post=0&moderation=0&new=0&nojs=0&subcatgroup=0` | **oui** |
 | Ajouter aux drapeaux | GET | `/user/addflag.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
 | Retirer un drapeau | GET | `/user/delflag.php?config=hfr.inc&cat={cat}&subcat={subcat}&post={topicId}&page={page}&p=1&sondage=0&owntopic={1,2,3}&new=0` | **oui** |
@@ -1320,6 +1322,86 @@ Pour plusieurs citations, le client rejoue séquentiellement le contrat unitaire
 topic sans `ref`. Les captures ci-dessus prouvent seulement chaque formulaire pris isolément : aucune
 capture live n'a encore observé cette séquence de GET ni l'acceptation d'un POST portant plusieurs
 blocs `[quotemsg]`.
+
+### MP/DT — éditer son propre message (#1625)
+{: #private-message-edit }
+
+Contrat **GET** capturé le 2026-11-14, sans soumission du formulaire :
+`private_message_edit_form.html` (1:1, message suivant), `private_message_dt_edit_form.html`
+(DT, participant non créateur) et `private_message_edit_first_post_form.html` (premier message 1:1).
+Leurs sidecars `.source.txt` détaillent la réduction et l'assainissement. Aucune capture d'édition
+en page > 1 n'est disponible ; le client transmet la page demandée sans l'imposer à 1. MPStorage
+conserve sa page 1 par défaut. Le lien capturé ne porte pas `new` ; le client conserve son `new=0`
+historique.
+
+Dans les MP 1:1 comme les DT, « Modifier » exige une session active. L'action utilise le lien
+d'édition parsé, même si la conversation n'est pas répondable. Dès qu'HFR ne sert pas ce lien
+(notamment avec `affichoutils=0`), le repli exige une conversation répondable
+(`PrivateMessageThread.canReply`) et l'égalité entre
+l'auteur du message et le pseudo de la session active, via `canonicalizePseudo`. Le contenu cité
+et `isOwnPost` ne participent pas à ce repli. Le premier message des pages N > 1 est exclu du repli :
+la « Reprise du message précédent » appartient à la page N−1, et son `ref=0` peut être absent quand
+les outils sont masqués. Le menu résout le message par `numreponse` dans la page affichée, y compris
+après rafraîchissement ; le GET d'édition conserve le chemin construit ci-dessus à partir du fil,
+de la page et du message, sans dépendre d'un lien servi. HFR reste l'autorité sur l'autorisation
+finale. L'exclusion MPStorage ci-dessous s'applique aussi au repli ; un échec de lecture du cache
+local laisse les actions indisponibles. Le rafraîchissement retente cette lecture tant que
+`editActionsAvailable=false`, sans découverte réseau.
+
+Le formulaire est `form[name=hop]`, `method=post`, `action=/bdd.php?config=hfr.inc`.
+`EditPostRepository` propose des surcharges pour `PrivateMessageEditContext(threadId, page,
+numreponse)` ; le contexte public `EditPostContext` reste inchangé. Le parser réutilise
+`ReplyFormParser.parseEditPost`, exige la textarea et valide `cat=prive`, `post=threadId`,
+`numreponse` attendu et `numrep` vide. Un formulaire de réponse MP, un formulaire public ou une
+autre cible sont refusés. Une textarea présente mais vide est un corps connu vide ; une textarea
+absente est une erreur de chargement.
+
+L'ordre des noms `input` / `textarea` est conservé dans `ReplyForm.submitFieldOrder`, radios
+dédupliqués. Pour un message suivant, le POST réémet les champs servis dans cet ordre :
+
+```text
+hash_check, subcat, parents, post, stickold, new, cat, numreponse, numrep, page,
+verifrequet, p, sondage, sond, cache, owntopic, config, sujet, pseudo, password,
+MsgIcon, search_smilies, ColorUsedMem, content_form, wysiwyg, submit,
+signature?, smiley?, emaill?
+```
+
+- `cat=prive`, `subcat=0`, `numrep` vide, `verifrequet=1100` ; `page` est la page ciblée.
+- `parents` est renvoyé **tel quel** : message cité dans la capture 1:1, vide dans le DT et au
+  premier message. `stickold` et `cache` restent vides, sans importer les valeurs Topic.
+- `hash_check` provient du formulaire courant ; `content_form` est le BBCode choisi (avec le
+  nettoyage des caractères non-BMP commun aux écritures HFR). Aucun jeton dans un type sérialisable.
+- `signature`, `smiley` et `emaill` ne sont envoyés que si l'option finale est activée ; `MsgIcon`
+  suit le choix final. Les valeurs initiales reflètent le message et l'abonnement du compte.
+- **Premier message** : aucun `subcat` servi, donc aucun ajouté. `sujet` devient un input texte
+  `maxlength=70`, placé après `password` et avant `MsgIcon`. `ReplyForm.isSubjectEditable` l'expose ;
+  le titre peut alors changer via une copie de `ReplyForm.sujet`. Sinon le sujet caché reste celui
+  servi par HFR. Ni sous-catégorie, ni sondage, ni champs `toread` de l'édition Topic FP.
+- **Jamais `delete`**, même si coché ou présent dans la map ; sa case peut supprimer le sujet
+  entier au premier message. Les valeurs de mot de passe sont filtrées au parsing ; seule la case
+  legacy `password` **vide** est réémise si son nom était servi. Aucun `dest` / `newdest`, aucune
+  ligne de destinataires dans les trois captures : ce chemin refuse leur présence et ne gère pas
+  les membres.
+
+**Réponse POST MP** capturée le 2026-11-14 (`private_message_edit_success_response.html`, édition
+à contenu identique du 2e message de la conversation 1:1 de test) : HTTP 200, `div.hop` « Votre
+message a été édité avec succès ! », la même phrase que l'édition Topic, et un `meta Refresh` vers
+`/forum2.php?config=hfr.inc&cat=prive&post={fil}&page=1&…#t{numreponse}`. Cette URL est la forme
+query de `forum2.php`, sans segment `sujet_{id}_{page}` : `ReplySubmitResponseParser` n'en tire que
+l'ancre, et le repository prend fil, page et message dans la cible connue. Les refus connus restent
+des refus. Toute réponse non reconnue reste `ReplyFailureReason.Unknown`, donc **résultat incertain**
+dans le chemin de tentative durable de l'éditeur ; aucun renvoi automatique. Les marqueurs de refus
+des tests unitaires restent synthétiques : aucun refus MP n'a été capturé.
+
+Les diagnostics d'édition MP n'exposent ni sujet, ni corps, ni pseudo, ni identifiants privés, ni
+jeton, ni URL de retour ou message brut d'exception. Le repository refuse le message MPStorage
+identifié par le cache local par compte (`MpStorageLocationStore`) **avant GET et avant POST**, sans
+découverte réseau. À cache froid, le sujet hash du formulaire bloque également le chargement et le
+POST ; le parcours masque en plus l'action depuis le sujet du fil chargé.
+
+Le menu, l'éditeur partagé, les brouillons privés, la navigation et le retour avec accusé « Message
+modifié » sont décrits dans [navigation.md]({{ site.baseurl }}/specs/navigation#private-message-edit)
+et [mvi.md]({{ site.baseurl }}/specs/mvi).
 
 ### Écriture MPStorage — read-modify-write `bdd.php cat=prive` (#593/#597)
 

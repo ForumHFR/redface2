@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.feature.editor
 
-import androidx.compose.ui.text.input.TextFieldValue
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -12,6 +11,17 @@ import org.junit.Test
  */
 class PostEditorStateTest {
 
+    @Test
+    fun `edit cannot submit even nonblank text until initial body is known`() {
+        val unknown = replyState(subcat = 0).copy(mode = PostEditorMode.Edit, numreponse = 101)
+        assertTrue(unknown.isAwaitingInitialBody)
+        assertFalse(unknown.canSubmit)
+        val known = unknown.copy(draftHydratedFromForm = true)
+        assertFalse(known.isAwaitingInitialBody)
+        assertTrue(known.canSubmit)
+        assertFalse(replyState(subcat = 0).isAwaitingInitialBody)
+    }
+
     private fun replyState(subcat: Int?, isUploading: Boolean = false): PostEditorState =
         PostEditorState(
             mode = PostEditorMode.Reply,
@@ -20,7 +30,7 @@ class PostEditorStateTest {
             numreponse = null,
             page = 1,
             subcat = subcat,
-            draft = TextFieldValue("Hello!"),
+            bodyText = "Hello!",
             isUploading = isUploading,
         )
 

@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import fr.forumhfr.redface2.core.ui.editor.imageBbcodeTokenOrNull
 
+/** [onInsert] owns the closing: the post and topic adapters close their surface even on a refused insertion. */
 @Composable
 internal fun ImageUrlDialog(
     onDismiss: () -> Unit,
@@ -48,10 +49,7 @@ internal fun ImageUrlDialog(
         confirmButton = {
             TextButton(
                 enabled = isValid,
-                onClick = {
-                    onInsert(value.trim())
-                    onDismiss()
-                },
+                onClick = { onInsert(value.trim()) },
             ) {
                 Text(stringResource(R.string.editor_image_url_insert))
             }

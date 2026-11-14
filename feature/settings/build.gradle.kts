@@ -1,5 +1,6 @@
 plugins {
     id("redface.android.compose.library")
+    id("redface.android.roborazzi")
     id("redface.android.hilt.library")
 }
 
@@ -13,13 +14,6 @@ android {
             // merged Android resources at JVM unit-test time. Same convention as :feature:topic
             // and :core:ui (Compose UI tests).
             isIncludeAndroidResources = true
-            all {
-                // #595 — preview captures are diagnostic-only Roborazzi records. The Gradle
-                // Roborazzi plugin is still not applied under AGP 9; `testDebugUnitTest` writes
-                // PNGs directly through `captureRoboImage`, same convention as :core:ui.
-                it.systemProperties["robolectric.pixelCopyRenderMode"] = "hardware"
-                it.systemProperties["roborazzi.test.record"] = "true"
-            }
         }
     }
 }

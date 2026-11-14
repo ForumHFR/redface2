@@ -1,0 +1,29 @@
+Provenance — private_message_edit_success_response.html (#1625, réponse au POST d'édition d'un message MP)
+
+CAPTURE INTÉGRALE (non réduite). Capture authentifiée live du 2026-11-14 à 04:44 (heure de Paris), compte
+agent XaTelitte, sur la conversation privée 1:1 de test de private_message_edit_form.html (XaTelitte ->
+mainteneur, 2 messages de XaTelitte, sujet destiné au dépôt public). POST fait sur go explicite du
+mainteneur.
+
+Séquence : GET frais du formulaire d'édition du 2e message (message.php?config=hfr.inc&cat=prive&post=…
+&numreponse=…&page=1&p=1&subcat=0&sondage=0&owntopic=0), puis UN SEUL POST
+/bdd.php?config=hfr.inc, application/x-www-form-urlencoded UTF-8, UA Redface2/0.1, sans Referer, sans
+suivre de redirection. Corps : les contrôles de form[name=hop] dans l'ordre servi, textarea renvoyée
+octet pour octet telle que servie (1 571 octets UTF-8), cases signature/smiley/emaill décochées comme
+servies, `delete` jamais envoyé, `password` vide. Édition à contenu identique : un GET du même
+formulaire après le POST sert la même textarea qu'avant, à l'octet près.
+
+Réponse : HTTP 200, Content-Type text/html; charset=utf-8, 1 780 octets servis, aucun en-tête Location.
+Seule normalisation : un LF final ajouté (1 781 octets dans le dépôt).
+
+CE QUE LA FIXTURE PROUVE (contrat serveur mesuré) :
+- même phrase de succès que l'édition Topic, dans div.hop : « Votre message a été édité avec succès ! » ;
+- meta Refresh vers /forum2.php?config=hfr.inc&cat=prive&post={fil}&page=1&…&numreponse=0…#t{numreponse}
+  (forme query de forum2.php, PAS l'URL réécrite `sujet_{id}_{page}.htm` de l'édition Topic) : le segment
+  `sujet_` est absent, `page=1` y est en clair et l'ancre `#t` désigne le message édité ;
+- aucun titre, corps, pseudo ni jeton dans la réponse.
+
+SANITISATION : post -> 3000003 et numreponse -> 1980000302 (les identifiants fictifs des fixtures de
+formulaire MP ; valeurs réelles non publiées), une occurrence chacun, vérifiée. Aucun autre identifiant dans la page.
+Set-Cookie (4 lignes) hors corps, non conservés. La feuille de style the_style1.php ne porte que
+des couleurs de thème, sans identifiant. Le brut n'est PAS conservé dans le dépôt.

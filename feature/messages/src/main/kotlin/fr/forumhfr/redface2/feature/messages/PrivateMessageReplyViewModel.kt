@@ -1,7 +1,9 @@
 package fr.forumhfr.redface2.feature.messages
 
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.runtime.snapshotFlow
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -10,6 +12,7 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.coroutines.DefaultDispatcher
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerCloseCause
@@ -20,7 +23,10 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDelivery
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSession
+import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionBinding
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionCallbacks
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionEnvironment
@@ -32,41 +38,59 @@ import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
-import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadFailureDiagnostics
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
+import fr.forumhfr.redface2.core.domain.write.MaterializedPrivateMessageReplyForm
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
+import fr.forumhfr.redface2.core.ui.editor.EditorPreviewState
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.MAX_IMAGES_PER_UPLOAD
 import fr.forumhfr.redface2.core.ui.editor.SmileyFavoriteMutations
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerFavoriteSources
 import fr.forumhfr.redface2.core.ui.editor.SmileyWikiKeywordsSource
-import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.editBbcode
 import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
 import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
+import fr.forumhfr.redface2.core.ui.editor.toEditorError
+import fr.forumhfr.redface2.core.ui.editor.toEditorUploadError
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * ED-88/161/169/170/172: private reply with the existing success relay and a durable frozen snapshot.
@@ -79,6 +103,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     @Assisted private val request: PrivateMessageReplyRequest,
     private val repository: PrivateMessageWriteRepository,
     private val previewParser: BbcodePreviewParser,
+    @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val draftStore: EditorDraftStore,
     // #459 — image upload wiring, same trio + diagnostics as the topic-side editors.
@@ -93,22 +118,47 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(PrivateMessageReplyUiState())
+    /** Body and IME state belong to this ViewModel, never to a Bundle saver. */
+    val bodyFieldState: TextFieldState get() = draftSession.bodyFieldState
+    val bodyScrollState: ScrollState get() = draftSession.bodyScrollState
+    internal val bodyCaretRevealResetKey: Int get() = draftSession.bodyCaretRevealResetKey
+
+    private val _state = MutableStateFlow(PrivateMessageReplyUiState(isInitializing = true))
     val state: StateFlow<PrivateMessageReplyUiState> = _state.asStateFlow()
+
+    internal val editorEvents = PrivateMessageReplyEvents()
+    // ED-63/C8: VM lifetime only; visibility remains in the existing preview pipeline.
+    internal val previewLayout by lazy { EditorPreviewState(userPreferencesRepository, viewModelScope) }
+    internal val chromeMemory = PrivateMessageReplyChromeMemory()
+
+    /** Observe synchronously: StateFlow may conflate two identical local refusals. */
+    private fun updateState(transform: (PrivateMessageReplyUiState) -> PrivateMessageReplyUiState) {
+        val previous = _state.value
+        _state.update(transform)
+        if (editorEvents.state.session != submission.session) chromeMemory.reset()
+        editorEvents.open(submission.session)
+        editorEvents.observe(previous, _state.value)
+    }
 
     private val _effects: Channel<PrivateMessageReplyEffect> = Channel(capacity = Channel.BUFFERED)
     val effects: Flow<PrivateMessageReplyEffect> = _effects.receiveAsFlow()
 
+    /** ED-88 (#1616): one signal per sealed C/Q transaction; a conflated channel, never a navigation effect. */
+    private val quotesDeliveredSignal: Channel<Unit> = Channel(capacity = Channel.CONFLATED)
+    val quotesDelivered: Flow<Unit> = quotesDeliveredSignal.receiveAsFlow()
+
     private val context = PrivateMessageReplyContext(
         threadId = request.threadId,
         page = request.page.coerceAtLeast(1),
-        quote = request.quote,
+        quote = null,
     )
     private val quoteMaterializer = PrivateMessageReplyQuoteMaterializer(repository)
 
     private var loadedForm: ReplyForm? = null
         set(value) {
             field = value
+            // The silent InvalidHashCheck refetch keeps the field and its focus composed.
+            // GET outcomes and account changes update formAvailable explicitly.
             if (value == null) smileyPicker.refreshFavorites(null)
         }
 
@@ -146,12 +196,12 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private val draftKey: String = EditorDraftKey.mpReply(request.threadId)
 
     /** #405 — debounced autosave coroutine ; relaunched (cancelling the previous) on each edit. */
-    private val submission = EditorSubmissionBinding(
+    private val submission: EditorSubmissionBinding<PrivateMessageReplyEffect, EditorError> = EditorSubmissionBinding(
         environment = EditorSubmissionEnvironment(viewModelScope, clock, diagnostics),
         drafts = EditorDraftSession(draftStore, draftKey),
-        callbacks = EditorSubmissionCallbacks<PrivateMessageReplyEffect, PrivateMessageReplyError>(
+        callbacks = EditorSubmissionCallbacks<PrivateMessageReplyEffect, EditorError>(
             state = { value ->
-                _state.update {
+                updateState {
                     it.copy(
                         submission = value,
                         isSubmitting = value is EditorSubmissionState.PersistingAttempt ||
@@ -160,16 +210,30 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                     )
                 }
             },
-            error = { value -> _state.update { it.copy(submitError = value) } },
+            error = { value -> updateState { it.copy(submitError = value) } },
             success = { value -> _effects.trySend(value) },
+            clearError = { error -> updateState { it.copy(submitError = it.submitError.takeUnless { it == error }) } },
+            durableWriteSucceeded = {
+                editorEvents.durableWriteSucceeded()
+                draftSession.refreshOffers()
+            },
         ),
         errors = EditorSubmissionErrors(
-            uncertain = PrivateMessageReplyError.Uncertain,
-            draftWriteFailed = PrivateMessageReplyError.DraftWriteFailed,
-            sessionExpired = PrivateMessageReplyError.SessionExpired,
-            unknown = PrivateMessageReplyError.Uncertain,
+            uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageReply),
+            draftWriteFailed = EditorErrors.draftWriteFailed,
+            draftSaveFailed = EditorErrors.draftSaveFailed,
+            sessionExpired = EditorErrors.sessionExpired,
+            unknown = EditorErrors.uncertain(EditorErrorSurface.MessageReply),
+            network = EditorErrors.network,
+            preparationFailed = EditorErrors.invalidForm,
         ),
     )
+
+    private val draftSession: PrivateMessageReplyDraftSession = PrivateMessageReplyDraftSession(
+        saved = savedStateHandle, submission = submission, scope = viewModelScope, draftKey = draftKey,
+        state = PrivateMessageDraftState(read = { _state.value }, update = ::updateState),
+        clearToolSelection = { chromeMemory.host.focus.clearToolSelection() },
+    ).also { it.quoteDeliveryObserver = { quotesDeliveredSignal.trySend(Unit) } }
 
     /**
      * #459 — lowercased pseudo of the authenticated session, or null when anonymous. The upload
@@ -177,6 +241,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      * Mirrors `PostEditorViewModel.activeUserId`.
      */
     private var activeUserId: String? = null
+    private var authObserved = false
 
     /** #459 — in-flight image upload job ; one at a time, cancelled on [onCleared]. */
     private var uploadJob: Job? = null
@@ -188,7 +253,32 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      */
     private var imageInsertMode: EditorImageInsert = EditorImageInsert.REDUCED
 
+    /** Protect real input before readOnly is recomposed; selection alone still disarms. */
+    val bodyInputTransformation = InputTransformation {
+        val changesBody = mutatesBody(asCharSequence())
+        if (!acceptMutation(blockDuringUpload = changesBody)) {
+            revertAllChanges()
+        } else if (changesBody) {
+            draftSession.decideBody()
+        }
+    }
+
+    private fun mutatesBody(text: CharSequence): Boolean = text.toString() != bodyFieldState.text.toString()
+
+    private fun acceptMutation(blockDuringUpload: Boolean = false): Boolean {
+        val resuming = _state.value.isInitializing && draftSession.isRecreation
+        val uploadBlocked = blockDuringUpload && _state.value.isUploading
+        if (resuming || submission.blocksMutation || uploadBlocked) return false
+        return submission.tryDisarm()
+    }
+
+    // Declared before `init`: a delivery can run synchronously during construction.
+    private var deliveredRequest: PendingInlineQuoteRequest? = null
+    private var deliveredBody = ""
+
     init {
+        observeBody()
+        observePreview()
         submission.observePreference(userPreferencesRepository.observeConfirmBeforePosting())
         viewModelScope.launch {
             userPreferencesRepository.observeEditorImageInsert().collect { mode ->
@@ -196,8 +286,13 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             }
         }
         viewModelScope.launch {
+            userPreferencesRepository.observeEditorShortcut().collect { shortcut ->
+                updateState { it.copy(editorShortcut = shortcut) }
+            }
+        }
+        viewModelScope.launch {
             userPreferencesRepository.observeImagePickerMode().collect { mode ->
-                _state.update { it.copy(imagePickerMode = mode) }
+                updateState { it.copy(imagePickerMode = mode) }
             }
         }
         viewModelScope.launch {
@@ -209,60 +304,78 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 // #459 — account switched / logged out mid-session: cancel any in-flight upload
                 // and pending autosave so this session's image URL / PRIVATE draft is never
                 // attributed to the new account (same Codex-reviewed rule as PostEditorViewModel).
-                if (activeUserId != null && newUserId != activeUserId) {
+                if (authObserved && newUserId != activeUserId) {
                     uploadJob?.cancel()
                     submission.accountChanged()
-                    _state.update { it.copy(isUploading = false, uploadProgress = null) }
+                    formJob?.cancel()
+                    loadedForm = null
+                    loadedSubmitContext = null
+                    draftSession.invalidate()
+                    updateState {
+                        it.copy(formAvailable = false, isUploading = false, uploadProgress = null,
+                            restorableDraft = null, draftOffers = emptyList(), conversationTitle = "",
+                            canManageRecipients = false,
+                            recipients = emptyList(), recipientsDirty = false)
+                    }
                 }
+                authObserved = true
                 activeUserId = newUserId
             }
         }
         viewModelScope.launch {
-            restoreDraftIfAny()
+            draftSession.restore()
+            refreshQuoteState()
             loadForm()
         }
     }
 
-    fun retryFormLoad() = loadForm()
-
-    /** ED-81/170: durable status wins over every offer and server prefill. */
-    private suspend fun restoreDraftIfAny() {
-        val entry = submission.restore(draftKey) ?: return
-        if (submission.blocksMutation) return
-        val draft = entry.draft
-        if (entry.attempt != null) {
-            _state.update {
-                it.withDraftPreview(TextFieldValue(draft.body, TextRange(draft.body.length))).copy(
-                    draftHydratedFromForm = true,
-                    restorableDraft = null, submitError = PrivateMessageReplyError.Uncertain,
-                )
-            }
-        } else {
-            val body = draft.body
-            if (body.isNotBlank()) {
-                val fingerprint = draft.restoreOfferFingerprint()
-                val ignored = savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint
-                if (!ignored && _state.value.canOfferDraftRestore(body)) {
-                    _state.update { it.copy(restorableDraft = body) }
-                }
+    private fun observeBody() {
+        viewModelScope.launch {
+            snapshotFlow { bodyFieldState.text.toString() }.collect { body ->
+                draftSession.onBodyChanged(body)
             }
         }
     }
 
-    private fun PrivateMessageReplyUiState.canOfferDraftRestore(cachedBody: String): Boolean =
-        draft.text != cachedBody &&
-            (draft.text.isBlank() || draft.text == draftHydratedContent)
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun observePreview() {
+        viewModelScope.launch {
+            combine(
+                snapshotFlow { bodyFieldState.text.toString() },
+                state.map { it.isPreviewVisible }.distinctUntilChanged(),
+            ) { body, visible -> body.takeIf { visible } }
+                .distinctUntilChanged()
+                .conflate()
+                .mapLatest { body ->
+                    body?.let { it to withContext(defaultDispatcher) { previewParser.parsePreview(it) } }
+                }
+                .collect { parsed ->
+                    if (parsed != null && _state.value.isPreviewVisible &&
+                        bodyFieldState.text.toString() == parsed.first) {
+                        updateState { it.copy(preview = parsed.second) }
+                    }
+                }
+        }
+    }
 
-    /**
-     * #405 — debounced autosave of the body, flagged `isPrivate = true` so the logout purge wipes
-     * it. ED-170: blank content is cleared through CAS; the store refuses a stale owner.
-     */
-    private fun scheduleAutosave() = submission.autosave(::draftSnapshot)
+    fun retryFormLoad() {
+        viewModelScope.launch {
+            if (!submission.isInitialized && !submission.drafts.invalidated) draftSession.restore()
+            draftSession.reconcileAfterConflict()
+            refreshQuoteState()
+            loadForm()
+        }
+    }
 
-    private fun draftSnapshot(): EditorDraftStore.Draft? {
-        val snapshot = _state.value
-        if (snapshot.draft.text.isBlank() && snapshot.restorableDraft != null) return null
-        return EditorDraftStore.Draft(body = snapshot.draft.text, isPrivate = true)
+    private fun refreshQuoteState() {
+        val pending = submission.drafts.pendingInlineQuoteRequest != null
+        val unreadable = submission.drafts.hasUnreadableInlineQuoteRequest
+        val dormant = pending && _state.value.submission is EditorSubmissionState.Uncertain
+        val recovery = unreadable || dormant
+        updateState { it.copy(quotePending = pending || unreadable, unreadableQuoteRequest = unreadable,
+            quoteStorageUnavailable = !submission.isInitialized,
+            formError = it.formError || recovery, isLoadingForm = if (recovery) false else it.isLoadingForm,
+            quoteFetchFailures = if (pending) savedStateHandle[QUOTE_FAILURES_KEY] ?: 0 else 0) }
     }
 
     /** #803 pattern — one-shot latch : a committed close is never re-emitted. */
@@ -275,71 +388,87 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      * after typing (system back or the header's back arrow) cancelled the debounce with the
      * ViewModel and silently dropped the tail of the PRIVATE draft.
      *
-     * Two guards (gate #803) :
+     * Three guards (gate #803 ; ED-10) :
      * - INERT while a POST is in flight — popping would cancel the submit with the viewModelScope
      *   and leave the server state unknown ; on failure `isSubmitting` drops and the back works
      *   again, on success SubmitSucceeded pops anyway ;
      * - ONE-SHOT — a second close racing the first CloseCommitted must not emit a second effect
-     *   (the pop is blind : a second one would remove the screen BELOW).
+     *   (the pop is blind : a second one would remove the screen BELOW) ;
+     * - NEVER SILENT — when the field cannot be saved (delivered quote not durable, or last write
+     *   refused) the reply stays open and asks. The latch is released so a later close retries the
+     *   save ; only "Quitter sans enregistrer" abandons. A storage failure therefore never leaves
+     *   the screen unclosable. CancellationException propagates (scope teardown is not an error).
      */
     fun onCloseRequested() {
         if (submission.blocksClose || closeRequested) return
         submission.disarm()
         closeRequested = true
         viewModelScope.launch {
-            // The close must NEVER stay blocked on a failing flush (Room is not contractually
-            // non-throwing — disk full, corrupted store) : the one-shot latch is already set, so
-            // a swallowed failure here only costs the last <750 ms of typing (the debounced
-            // autosave already persisted the rest) while a rethrow would leave the screen
-            // unclosable. CancellationException still propagates (scope teardown is not an error).
-            try {
-                submission.flush(draftSnapshot())
-            } catch (e: CancellationException) {
-                throw e
+            val saved = try {
+                draftSession.flushForClose()
             } catch (_: IOException) {
-                // Best effort — the previous debounced write is what remains.
+                false
             }
-            _effects.send(PrivateMessageReplyEffect.CloseCommitted)
-        }
-    }
-
-    /** #405 — append the cached body after any live text and clear the banner. */
-    fun onDraftRestoreRequested() {
-        if (submission.blocksMutation) return
-        submission.disarm()
-        val offeredBody = _state.value.restorableDraft ?: return
-        _state.update { current ->
-            val body = if (current.draft.text.isBlank() || current.draft.text == offeredBody) {
-                offeredBody
+            if (saved) {
+                _effects.send(PrivateMessageReplyEffect.CloseCommitted)
             } else {
-                current.draft.text.trimEnd() + "\n\n" + offeredBody
+                closeRequested = false
+                updateState { it.copy(showUnsavedCloseDialog = true) }
             }
-            current.withDraftPreview(TextFieldValue(text = body, selection = TextRange(body.length)))
-                .copy(restorableDraft = null)
         }
-        scheduleAutosave()
     }
 
-    /** ED-170: clear the offered content through CAS, preserving a newer generation. */
-    fun onDraftDiscardRequested() {
-        if (submission.blocksMutation) return
-        submission.disarm()
-        val body = _state.value.restorableDraft ?: return
-        markDraftRestoreOfferIgnored(body)
-        _state.update { it.copy(restorableDraft = null) }
-        viewModelScope.launch { submission.flush(EditorDraftStore.Draft(body = "", isPrivate = true)) }
+    /** The informed choice of the unsaved-close dialog; leaving pops exactly once, without a write. */
+    fun onUnsavedCloseDecided(leave: Boolean) {
+        if (!_state.value.showUnsavedCloseDialog) return
+        updateState { it.copy(showUnsavedCloseDialog = false) }
+        if (leave && !closeRequested) {
+            closeRequested = true
+            _effects.trySend(PrivateMessageReplyEffect.CloseCommitted)
+        }
     }
 
-    private fun markDraftRestoreOfferIgnored(body: String) {
-        savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] =
-            EditorDraftStore.Draft(body = body, isPrivate = true).restoreOfferFingerprint()
+    fun onStarted() = draftSession.onStarted()
+    fun onStopped() = draftSession.onStopped()
+    suspend fun restoreBodyScroll() = draftSession.restoreBodyScroll()
+
+    fun onDraftRestoreRequested(offerId: String? = null) {
+        if (!acceptMutation(blockDuringUpload = true)) return
+        draftSession.restoreOfferedDraft(offerId)
+    }
+
+    fun onDraftDiscardRequested(offerId: String? = null) {
+        if (!acceptMutation()) return
+        draftSession.discardOfferedDraft(offerId)
+    }
+
+
+    fun onPendingQuoteResumed() {
+        if (!_state.value.hasDormantQuote || !acceptMutation()) return
+        submission.acknowledge { loadForm() }
+    }
+
+    fun onPendingQuoteIgnored() {
+        if (!_state.value.canIgnorePendingQuote || !acceptMutation()) return
+        viewModelScope.launch {
+            if (draftSession.ignoreQuote()) {
+                savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
+                updateState { it.copy(quotePending = false, quoteFetchFailures = 0, quoteStorageUnavailable = false) }
+                if (!submission.isInitialized) draftSession.restore()
+                loadForm()
+            }
+        }
     }
 
     private fun loadForm() {
         if (!submission.isInitialized) return
+        val pending = submission.drafts.pendingInlineQuoteRequest
+        if (pending != null && _state.value.submission is EditorSubmissionState.Uncertain) return
         formJob?.cancel()
         val favoriteStamp = smileyPicker.favoriteFormStamp()
-        _state.update { it.copy(isLoadingForm = true, formError = false) }
+        updateState { it.copy(isLoadingForm = true, formError = false) }
+        val opening = submission.session
+        updateState { it.copy(quotePending = pending != null) }
         formJob = viewModelScope.launch {
             try {
                 // #618 — when the user came specifically to MANAGE recipients, the form MUST be the
@@ -347,24 +476,11 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 // fallback (no newdest → no member editor → silently lands on a plain composer). A
                 // failed message.php GET then surfaces as a form error (retry) rather than a dead end.
                 val materialized = quoteMaterializer.fetchFormWithQuotes(
-                    context = context,
-                    selections = request.initialQuotes,
+                    context = if (pending != null) context else loadedSubmitContext ?: context,
+                    selections = pending?.let(::pendingSelections).orEmpty(),
                     allowEmbeddedFallback = !request.openRecipientManager,
                 )
-                val form = materialized.form
-                if (form.isAnonymous) {
-                    // Session vanished between opening the thread and replying — treat like a form
-                    // error so the user re-authenticates (the reply route is only reachable while
-                    // authenticated, so this is rare).
-                    loadedForm = null
-                    loadedSubmitContext = null
-                    _state.update { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
-                    return@launch
-                }
-                loadedForm = form
-                smileyPicker.refreshFavorites(favoriteStamp)
-                loadedSubmitContext = materialized.submitContext
-                _state.update { it.withLoadedForm(form) }
+                acceptLoadedForm(materialized, pending, opening, favoriteStamp)
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: IOException) {
@@ -377,142 +493,91 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         }
     }
 
-    private fun PrivateMessageReplyUiState.withLoadedForm(form: ReplyForm): PrivateMessageReplyUiState {
-        // #1074 — consume HFR's quote BBCode exactly once. If the user typed while the
-        // GET was in flight, keep that text below the verbatim server prefill. A silent
-        // InvalidHashCheck refetch sees draftHydratedFromForm=true and cannot duplicate
-        // the block or clobber later edits.
-        if (this@PrivateMessageReplyViewModel.submission.blocksMutation) return copy(isLoadingForm = false)
-        val hydrated = withFormInitialContent(form)
-        // HFR's private "quick reply" form carries the per-post options as plain hidden
-        // inputs (e.g. `signature=1`), not checkboxes — so `ReplyForm.options` (read from
-        // `checked` attributes) is all-false here. Hydrate from the hidden fields too,
-        // OR'ing with the checkbox view, so the user keeps HFR's default (signature on).
-        //
-        // Hydrate ONLY on the first successful load: a silent refetch after an expired
-        // `hash_check` (InvalidHashCheck) must not reset a toggle the user changed in
-        // between — mirror the post editor's `optionsHydratedFromForm` guard.
-        val hydrateOptions = !hydrated.optionsHydratedFromForm
-        return hydrated.copy(
-            isLoadingForm = false,
-            formAvailable = true,
-            formError = false,
-            signatureEnabled = if (hydrateOptions) {
-                form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
-            } else {
-                hydrated.signatureEnabled
-            },
-            smileyDisabled = if (hydrateOptions) {
-                form.options.smileyDisabled || form.hiddenFields["smiley"] == "1"
-            } else {
-                hydrated.smileyDisabled
-            },
-            emailNotificationEnabled = if (hydrateOptions) {
-                form.options.emailNotificationEnabled || form.hiddenFields["emaill"] == "1"
-            } else {
-                hydrated.emailNotificationEnabled
-            },
-            optionsHydratedFromForm = true,
-            // #606 — owner-only member editor. Hydrate the working list from HFR's
-            // `newdest` CSV on the FIRST load only : a silent refetch after an expired
-            // hash_check (InvalidHashCheck) must not clobber a member the user added /
-            // removed in between — same `hydrateOptions` guard as the option toggles.
-            canManageRecipients = form.canManageRecipients,
-            // Re-hydrate from the freshly-parsed `newdest` on the first load AND on any
-            // silent refetch where the user has NOT edited the list : that way a
-            // concurrent membership change made elsewhere is picked up, and — since a
-            // non-dirty submit sends `recipientsOverride = null` — the original `newdest`
-            // is still forwarded verbatim. Only an in-progress edit (`recipientsDirty`)
-            // is preserved across the refetch.
-            recipients = if (hydrateOptions || !hydrated.recipientsDirty) {
-                RecipientCsv.parse(form.manageableRecipients)
-            } else {
-                hydrated.recipients
-            },
-        )
+    private suspend fun acceptLoadedForm(
+        materialized: MaterializedPrivateMessageReplyForm,
+        pending: PendingInlineQuoteRequest?,
+        opening: EditorSession,
+        favoriteStamp: SmileyPickerController.FavoriteFormStamp,
+    ) {
+        if (!submission.isInitialized || submission.session != opening) return
+        val form = materialized.form
+        if (form.isAnonymous) {
+            formLoadFailed()
+            return
+        }
+        loadedForm = form
+        smileyPicker.refreshFavorites(favoriteStamp)
+        loadedSubmitContext = materialized.submitContext
+        if (pending == null) applyFormHydration(form) else deliverQuote(form, pending, opening)
+    }
+
+    private suspend fun deliverQuote(form: ReplyForm, pending: PendingInlineQuoteRequest, opening: EditorSession) {
+        uploadJob?.join()
+        draftSession.awaitOfferDecision()
+        submission.flush(null)
+        if (!submission.isInitialized || submission.session != opening) return
+        if (deliveredRequest != pending) {
+            draftSession.insertQuote(form.initialContent)
+            deliveredRequest = pending
+            deliveredBody = form.initialContent
+        }
+        val committed = draftSession.commitQuote(pending, deliveredBody)
+        if (!submission.isInitialized || submission.session != opening) return
+        if (committed is EditorDraftStore.StoreWriteResult.Written) {
+            savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
+            applyFormHydration(form.copy(initialContent = ""))
+            updateState { it.copy(quotePending = false, quoteFetchFailures = 0) }
+        } else formLoadFailed()
     }
 
     private fun formLoadFailed() {
+        if (!submission.isInitialized) return
         loadedForm = null
         loadedSubmitContext = null
-        _state.update { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
-    }
-
-    fun onContentChanged(value: TextFieldValue) {
-        if (submission.blocksMutation) return
-        submission.disarm()
-        val textChanged = value.text != _state.value.draft.text
-        _state.update { it.withDraftPreview(value) }
-        if (textChanged) scheduleAutosave()
+        val failures = if (_state.value.quotePending) (_state.value.quoteFetchFailures + 1).coerceAtMost(2) else 0
+        savedStateHandle[QUOTE_FAILURES_KEY] = failures
+        updateState { it.copy(isLoadingForm = false, formAvailable = false, formError = true,
+            quoteFetchFailures = failures) }
     }
 
     fun onToolbarAction(action: BbcodeAction) {
-        if (submission.blocksMutation) return
-        submission.disarm()
-        _state.update { current ->
-            val outcome = applyBbcodeAction(
-                action = action,
-                text = current.draft.text,
-                selectionStart = current.draft.selection.start,
-                selectionEnd = current.draft.selection.end,
-            )
-            current.withDraftPreview(
-                TextFieldValue(
-                    text = outcome.text,
-                    selection = TextRange(outcome.selectionStart, outcome.selectionEnd),
-                ),
-            )
-        }
-        scheduleAutosave()
+        if (!acceptMutation(blockDuringUpload = true)) return
+        val before = bodyFieldState.text.toString()
+        chromeMemory.host.focus.clearToolSelection()
+        bodyFieldState.editBbcode { text, start, end -> applyBbcodeAction(action, text, start, end) }
+        if (mutatesBody(before)) draftSession.decideBody()
+        if (action == BbcodeAction.Image) draftSession.persistDraftNow() else draftSession.scheduleAutosave()
     }
 
     fun onSmileySelected(token: String) {
-        if (submission.blocksMutation) return
-        submission.disarm()
-        _state.update { current ->
-            val outcome = insertBbcodeToken(
-                token = token,
-                text = current.draft.text,
-                selectionStart = current.draft.selection.start,
-                selectionEnd = current.draft.selection.end,
-            )
-            current.withDraftPreview(
-                TextFieldValue(
-                    text = outcome.text,
-                    selection = TextRange(outcome.selectionStart, outcome.selectionEnd),
-                ),
-            )
-        }
+        if (!acceptMutation(blockDuringUpload = true)) return
+        val before = bodyFieldState.text.toString()
+        chromeMemory.host.focus.clearToolSelection()
+        bodyFieldState.editBbcode { text, start, end -> insertBbcodeToken(token, text, start, end) }
+        if (mutatesBody(before)) draftSession.decideBody()
         smileyPicker.dismiss(SmileyPickerCloseCause.INSERTION)
-        scheduleAutosave()
+        draftSession.scheduleAutosave()
     }
 
     fun onTogglePreview() {
-        _state.update { current ->
-            val nextVisible = !current.isPreviewVisible
-            current.copy(
-                isPreviewVisible = nextVisible,
-                preview = if (nextVisible) previewParser.parsePreview(current.draft.text) else current.preview,
-            )
+        updateState { current ->
+            current.copy(isPreviewVisible = !current.isPreviewVisible, preview = PostContent(emptyList()))
         }
     }
 
     fun onToggleSignature(enabled: Boolean) {
-        if (submission.blocksMutation) return
-        submission.disarm()
-        _state.update { it.copy(signatureEnabled = enabled) }
+        if (!acceptMutation()) return
+        updateState { it.copy(signatureEnabled = enabled) }
     }
 
     fun onToggleSmileyDisabled(disabled: Boolean) {
-        if (submission.blocksMutation) return
-        submission.disarm()
-        _state.update { it.copy(smileyDisabled = disabled) }
+        if (!acceptMutation()) return
+        updateState { it.copy(smileyDisabled = disabled) }
     }
 
     fun onToggleEmailNotification(enabled: Boolean) {
-        if (submission.blocksMutation) return
-        submission.disarm()
-        _state.update { it.copy(emailNotificationEnabled = enabled) }
+        if (!acceptMutation()) return
+        updateState { it.copy(emailNotificationEnabled = enabled) }
     }
 
     /**
@@ -522,11 +587,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      * existing member is refused (no-op). Ignored entirely when the user is not the owner.
      */
     fun onAddRecipient(pseudo: String) {
-        if (submission.blocksMutation || !_state.value.canManageRecipients) return
-        submission.disarm()
+        if (!_state.value.canManageRecipients || !acceptMutation()) return
         val trimmed = pseudo.trim()
         if (trimmed.isEmpty()) return
-        _state.update { current ->
+        updateState { current ->
             if (current.recipients.any { it == trimmed }) {
                 current
             } else {
@@ -541,11 +605,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      * the user is not the owner.
      */
     fun onRemoveRecipient(pseudo: String) {
-        if (submission.blocksMutation) return
-        submission.disarm()
+        if (!acceptMutation()) return
         if (!_state.value.canManageRecipients) return
         val target = pseudo.trim()
-        _state.update { current ->
+        updateState { current ->
             if (current.recipients.size <= 1 || current.recipients.none { it == target }) {
                 current
             } else {
@@ -557,11 +620,19 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         }
     }
 
-    fun onErrorDismissed() = submission.acknowledge(::scheduleAutosave)
+    /** ED-45/170: reached only by the host's explicit Masquer of the bound uncertain delivery, never by Back. */
+    fun onErrorDismissed() = submission.acknowledge(draftSession::scheduleAutosave)
+
+    /**
+     * ED-45: reached only by the host's explicit Masquer of « Brouillon non écrit », never by Back. Releases the
+     * deferred draft-save information without storage; the binding guards a real Ready/Armed state and lets a
+     * displayed uncertainty win.
+     */
+    fun onDraftWriteFailureDismissed() = submission.acknowledgeLocal()
 
     /** ED-164/166: callbacks carry the identity displayed by the current composition. */
     fun onSubmitConfirmed(token: ArmToken?) {
-        val snapshot = _state.value
+        val snapshot = _state.value.copy(bodyText = bodyFieldState.text.toString())
         val form = loadedForm ?: return
         if (!snapshot.canSubmit || closeRequested) return
         val permit = submission.confirm(token)
@@ -571,11 +642,12 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     fun onSubmitConfirmationDismissed() = submission.disarm()
 
     fun onSubmit(timeoutMillis: Long = 4_000L) {
-        val snapshot = _state.value
+        val snapshot = _state.value.copy(bodyText = bodyFieldState.text.toString())
         val form = loadedForm ?: return
-        if (!snapshot.canSubmit || closeRequested) return
+        if (!snapshot.canSubmit || closeRequested || submission.blocksMutation) return
         if (form.isAnonymous) {
-            _state.update { it.copy(submitError = PrivateMessageReplyError.LoginRequired) }
+            updateState { it.copy(submitError = null) }
+            updateState { it.copy(submitError = EditorErrors.loginRequired) }
         } else {
             val permit = submission.request(timeoutMillis, snapshot.canSubmit)
             if (permit is SubmissionRequest.Accepted) launchSubmission(permit, snapshot, form)
@@ -589,14 +661,16 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         form: ReplyForm,
     ) {
         val submitContext = checkNotNull(loadedSubmitContext)
-        submission.launch(permit, EditorDraftStore.Draft(body = snapshot.draft.text, isPrivate = true)) {
+        val draft = EditorDraftStore.Draft(body = snapshot.bodyText, isPrivate = true,
+            offerToResolve = draftSession.pendingOfferResolution())
+        submission.launch(permit, draft) {
             val options = ReplyFormOptions(
                 signatureEnabled = snapshot.signatureEnabled, smileyDisabled = snapshot.smileyDisabled,
                 emailNotificationEnabled = snapshot.emailNotificationEnabled,
             )
             val result = repository.submitReply(
                 context = submitContext, form = form,
-                bbcodeContent = snapshot.draft.text, options = options,
+                bbcodeContent = snapshot.bodyText, options = options,
                 recipientsOverride = if (snapshot.canManageRecipients && snapshot.recipientsDirty) {
                     RecipientCsv.join(snapshot.recipients)
                 } else { null },
@@ -607,7 +681,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     private fun submissionDelivery(
         result: ReplySubmitResult,
-    ): EditorDelivery<PrivateMessageReplyEffect, PrivateMessageReplyError> =
+    ): EditorDelivery<PrivateMessageReplyEffect, EditorError> =
         when (result) {
             is ReplySubmitResult.Success -> EditorDelivery(
                 effect = PrivateMessageReplyEffect.SubmitSucceeded(
@@ -616,6 +690,12 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             )
             is ReplySubmitResult.Failure -> {
                 EditorDelivery(
+                    outcome = if (result.reason == ReplyFailureReason.Unknown ||
+                        result.reason == ReplyFailureReason.TopicLocked) {
+                        EditorSendOutcome.UNCERTAIN
+                    } else {
+                        EditorSendOutcome.CERTAIN_FAILURE
+                    },
                     error = result.reason.toReplyError(),
                     afterSettled = if (result.reason == ReplyFailureReason.InvalidHashCheck) {
                         {
@@ -627,64 +707,35 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             }
         }
 
-    private fun ReplyFailureReason.toReplyError(): PrivateMessageReplyError = when (this) {
-        ReplyFailureReason.EmptyMessage -> PrivateMessageReplyError.Empty
-        ReplyFailureReason.InvalidHashCheck -> PrivateMessageReplyError.InvalidHashCheck
-        ReplyFailureReason.AntiFlood -> PrivateMessageReplyError.AntiFlood
-        ReplyFailureReason.LoginRequired -> PrivateMessageReplyError.LoginRequired
-        ReplyFailureReason.UnknownRecipient -> PrivateMessageReplyError.Refused
-        // TopicLocked has no private-message analogue, and Unknown is the unrecognised-response
-        // fallback: both map to the non-destructive "verify the conversation" banner.
-        ReplyFailureReason.TopicLocked -> PrivateMessageReplyError.Unexpected
-        ReplyFailureReason.Unknown -> PrivateMessageReplyError.Uncertain
-    }
+    private fun ReplyFailureReason.toReplyError(): EditorError = toEditorError(EditorErrorSurface.MessageReply)
 
-    private fun PrivateMessageReplyUiState.withDraftPreview(updated: TextFieldValue): PrivateMessageReplyUiState =
-        copy(
-            draft = updated,
-            preview = if (isPreviewVisible) previewParser.parsePreview(updated.text) else preview,
-            // #459 — a fresh text edit dismisses a stale upload banner — parity with PostEditorState.
-            uploadError = if (updated.text != draft.text) null else uploadError,
-        )
-
-    /**
-     * Applies a server prefill once without reconstructing it. A late form prefixes the untouched
-     * prefill to text already entered while loading; an explicit #405 restore may append after it.
-     */
-    private fun PrivateMessageReplyUiState.withFormInitialContent(form: ReplyForm): PrivateMessageReplyUiState {
-        if (draftHydratedFromForm) return this
-        val initial = form.initialContent
-        return if (initial.isBlank()) {
-            copy(draftHydratedFromForm = true)
-        } else {
-            val existing = draft.text
-            val combined = if (existing.isBlank()) {
-                initial
-            } else {
-                val separator = if (initial.endsWith('\n')) "\n" else "\n\n"
-                initial + separator + existing
-            }
-            val hydrated = withDraftPreview(
-                TextFieldValue(text = combined, selection = TextRange(combined.length)),
-            )
-            hydrated.copy(
-                    draftHydratedFromForm = true,
-                draftHydratedContent = combined.takeIf { existing.isBlank() },
-                restorableDraft = restorableDraft.takeIf { it != combined },
-            )
+    /** Consume the exact server quote once, even when a GET finishes during an upload. */
+    private fun applyFormHydration(form: ReplyForm) {
+        if (submission.blocksMutation) {
+            updateState { it.copy(isLoadingForm = false) }
+            return
         }
+        draftSession.hydrateBody(form.initialContent)
+        updateState { current -> current.withLoadedForm(form, submission.blocksMutation) }
+        draftSession.hideOffersEqualToField()
     }
 
-    /** #988/#1420 — records the picker boundary and surfaces a callback without images. */
+    /** #1573 — cancellation only records diagnostics; a successful empty callback retains #1128 feedback. */
     fun onImagePickerEvent(event: ImagePickerEvent) {
         if (submission.blocksMutation) return
         diagnostics.recordImagePickerEvent(event)
-        if (event is ImagePickerEvent.Result) {
-            val pickedImages = pickedImagesForUpload(event.contract, event.uris)
-            val showEmptyPickerBanner = pickedImages.isEmpty() && uploadJob?.isActive != true
-            onImagesPicked(pickedImages)
-            if (showEmptyPickerBanner) {
-                _state.update { it.copy(uploadError = UploadError.NoImageReceived) }
+        when (event) {
+            is ImagePickerEvent.Launched, is ImagePickerEvent.Cancelled -> Unit
+            is ImagePickerEvent.Unavailable -> {
+                updateState { it.copy(uploadError = EditorErrors.pickerAbsent) }
+            }
+            is ImagePickerEvent.Result -> {
+                val pickedImages = pickedImagesForUpload(event.contract, event.uris)
+                val showEmptyPickerBanner = pickedImages.isEmpty() && uploadJob?.isActive != true
+                onImagesPicked(event.uris)
+                if (showEmptyPickerBanner) {
+                    updateState { it.copy(uploadError = EditorErrors.noImageReceived) }
+                }
             }
         }
     }
@@ -693,7 +744,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      * #459 — pick→read→upload→insert for this MP composer, same proven contract as
      * `PostEditorViewModel.onImagesPicked` (multi-image #490): sequential batch, one `[img]` per
      * success in pick order (leading newline from the 2nd on), autosave after each insertion, stop
-     * at the first failure with the typed [UploadError] surfaced. A blank list, an anonymous
+     * at the first failure with the typed [EditorError] surfaced. A blank list, an anonymous
      * session or an upload already in flight are ignored.
      */
     private fun canStartUpload(userId: String?, targets: List<String>): Boolean =
@@ -702,15 +753,15 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     fun onImagesPicked(uris: List<String>) {
         diagnostics.recordImagesPicked(uris.size)
         val userId = activeUserId
-        val targets = uris.filter { it.isNotBlank() }
+        val received = uris.filter { it.isNotBlank() }
+        val targets = received.take(MAX_IMAGES_PER_UPLOAD)
         // One guard (ReturnCount): nothing in flight already, an authenticated owner, a non-empty pick.
-        if (!canStartUpload(userId, targets)) return
-        submission.disarm()
+        if (!canStartUpload(userId, targets) || !acceptMutation(blockDuringUpload = true)) return
         val multiple = targets.size > 1
-        _state.update {
+        updateState {
             it.copy(
                 isUploading = true,
-                uploadError = null,
+                uploadError = if (received.size > MAX_IMAGES_PER_UPLOAD) EditorErrors.imageLimit else null,
                 uploadProgress = if (multiple) UploadProgress(completed = 0, total = targets.size) else null,
             )
         }
@@ -736,22 +787,14 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 )
                 if (bbcode != null) {
                     insertImageBbcodeAtCaret(bbcode, leadingNewline = completed > 0)
-                    // Persist after EACH insert: a later image failing must not lose the images
-                    // already inserted into the draft (Codex review #490).
-                    scheduleAutosave()
                 }
                 completed += 1
                 if (multiple) {
-                    _state.update { it.copy(uploadProgress = UploadProgress(completed, targets.size)) }
+                    updateState { it.copy(uploadProgress = UploadProgress(completed, targets.size)) }
                 }
             }
-            _state.update { it.copy(isUploading = false, uploadError = null, uploadProgress = null) }
+            updateState { it.copy(isUploading = false, uploadProgress = null) }
         }
-    }
-
-    /** #459 — dismiss the upload-error banner. */
-    fun onUploadErrorDismissed() {
-        _state.update { it.copy(uploadError = null) }
     }
 
     /**
@@ -762,48 +805,29 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      */
     private fun insertImageBbcodeAtCaret(bbcode: String, leadingNewline: Boolean) {
         if (submission.blocksMutation) return
-        _state.update { current ->
-            val draft = current.draft
-            val selection = draft.selection
-            val caret = selection.start.coerceIn(0, draft.text.length)
-            val needsNewline = leadingNewline && caret > 0 && draft.text[caret - 1] != '\n'
+        chromeMemory.host.focus.clearToolSelection()
+        bodyFieldState.editBbcode { text, start, end ->
+            val caret = start.coerceIn(0, text.length)
+            val needsNewline = leadingNewline && caret > 0 && text[caret - 1] != '\n'
             val token = if (needsNewline) "\n" + bbcode else bbcode
-            val outcome = insertBbcodeToken(
-                token = token,
-                text = draft.text,
-                selectionStart = selection.start,
-                selectionEnd = selection.end,
-                surroundWithSpaces = false,
-            )
-            current.withDraftPreview(
-                TextFieldValue(
-                    text = outcome.text,
-                    selection = TextRange(outcome.selectionStart, outcome.selectionEnd),
-                ),
-            )
+            insertBbcodeToken(token, text, start, end, surroundWithSpaces = false)
         }
+        draftSession.decideBody()
+        draftSession.persistDraftNow()
     }
 
     private fun handleUploadFailure(error: Throwable) {
         if (error is CancellationException) {
-            _state.update { it.copy(isUploading = false, uploadProgress = null) }
+            updateState { it.copy(isUploading = false, uploadProgress = null) }
             throw error
         }
-        val mapped = when (error) {
-            is UploadException.TooLarge -> UploadError.TooLarge
-            is UploadException.UnsupportedType -> UploadError.UnsupportedType
-            is UploadException.Server -> UploadError.Server(code = error.code, providerId = error.providerId)
-            is UploadException.Malformed -> UploadError.Malformed(providerId = error.providerId)
-            is UploadException.Configuration -> UploadError.Configuration
-            is UploadException.Network -> UploadError.Network
-            else -> UploadError.Network
-        }
+        val mapped = EditorErrors.stopped(error.toEditorUploadError(), _state.value.uploadProgress)
         diagnostics.record(
             DiagnosticsLog.Level.WARN,
             LOG_TAG_UPLOAD,
             UploadFailureDiagnostics.describe(error, mapped.toString()),
         )
-        _state.update { it.copy(isUploading = false, uploadError = mapped, uploadProgress = null) }
+        updateState { it.copy(isUploading = false, uploadError = mapped, uploadProgress = null) }
     }
 
     /**
@@ -821,9 +845,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     }
 
     private companion object {
-        private const val DRAFT_RESTORE_OFFER_FINGERPRINT_KEY = "draft_restore_offer_fingerprint"
-
-
+        const val QUOTE_FAILURES_KEY = "mpReply.quoteFailures"
         // #459 — diagnostics tag of the upload failures (shared shape with the topic-side editors).
         private const val LOG_TAG_UPLOAD = "MpReplyVM"
     }
@@ -873,4 +895,70 @@ internal object RecipientCsv {
             .filter { it.isNotEmpty() }
 
     fun join(recipients: List<String>): String = recipients.joinToString(SEPARATOR)
+}
+
+/** Form metadata, options and recipients of a served reply form; the body is hydrated elsewhere. */
+private fun PrivateMessageReplyUiState.withLoadedForm(
+    form: ReplyForm,
+    blocksMutation: Boolean,
+): PrivateMessageReplyUiState {
+    // Body hydration is already applied outside this state update. A silent refetch
+    // refreshes only the form metadata, options and unchanged recipient list below.
+    if (blocksMutation) return copy(isLoadingForm = false)
+    val hydrated = this
+    // HFR's private "quick reply" form carries the per-post options as plain hidden
+    // inputs (e.g. `signature=1`), not checkboxes — so `ReplyForm.options` (read from
+    // `checked` attributes) is all-false here. Hydrate from the hidden fields too,
+    // OR'ing with the checkbox view, so the user keeps HFR's default (signature on).
+    //
+    // Hydrate ONLY on the first successful load: a silent refetch after an expired
+    // `hash_check` (InvalidHashCheck) must not reset a toggle the user changed in
+    // between — mirror the post editor's `optionsHydratedFromForm` guard.
+    val hydrateOptions = !hydrated.optionsHydratedFromForm
+    return hydrated.copy(
+        isLoadingForm = false,
+        formAvailable = true,
+        conversationTitle = form.sujet,
+        formError = false,
+        // InvalidForm here is a submission preparation failure, never a failed GET (ED-44).
+        // A GET clears neither submitError nor its event. Masquer retires the event; only an explicit Masquer of
+        // the bound uncertainty also acknowledges its attempt durably, which then clears submitError (ED-170),
+        // and an explicit Masquer of a failed attempt write clears it locally, without storage.
+        signatureEnabled = if (hydrateOptions) {
+            form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
+        } else {
+            hydrated.signatureEnabled
+        },
+        smileyDisabled = if (hydrateOptions) {
+            form.options.smileyDisabled || form.hiddenFields["smiley"] == "1"
+        } else {
+            hydrated.smileyDisabled
+        },
+        emailNotificationEnabled = if (hydrateOptions) {
+            form.options.emailNotificationEnabled || form.hiddenFields["emaill"] == "1"
+        } else {
+            hydrated.emailNotificationEnabled
+        },
+        optionsHydratedFromForm = true,
+        // #606 — owner-only member editor. Hydrate the working list from HFR's
+        // `newdest` CSV on the FIRST load only : a silent refetch after an expired
+        // hash_check (InvalidHashCheck) must not clobber a member the user added /
+        // removed in between — same `hydrateOptions` guard as the option toggles.
+        canManageRecipients = form.canManageRecipients,
+        // Re-hydrate from the freshly-parsed `newdest` on the first load AND on any
+        // silent refetch where the user has NOT edited the list : that way a
+        // concurrent membership change made elsewhere is picked up, and — since a
+        // non-dirty submit sends `recipientsOverride = null` — the original `newdest`
+        // is still forwarded verbatim. Only an in-progress edit (`recipientsDirty`)
+        // is preserved across the refetch.
+        recipients = if (hydrateOptions || !hydrated.recipientsDirty) {
+            RecipientCsv.parse(form.manageableRecipients)
+        } else {
+            hydrated.recipients
+        },
+    )
+}
+
+private fun pendingSelections(request: PendingInlineQuoteRequest): List<QuoteSelection> = request.quotes.map {
+    QuoteSelection(QuoteLocator(it.page, it.numreponse, it.ref), "", "", it.truncate)
 }

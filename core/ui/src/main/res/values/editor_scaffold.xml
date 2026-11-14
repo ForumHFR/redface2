@@ -1,0 +1,4 @@
+<resources>
+    <string name="editor_scaffold_message">Message</string>
+    <string name="editor_scaffold_placeholder">Saisissez votre message…</string>
+</resources>

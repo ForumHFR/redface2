@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
@@ -39,6 +40,10 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorPreviewDirection
+import fr.forumhfr.redface2.core.model.editor.EditorPreviewKey
+import fr.forumhfr.redface2.core.model.editor.EditorPreviewWidthClass
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
@@ -78,6 +83,24 @@ class DataStoreUserPreferencesRepository @Inject constructor(
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     @param:ApplicationScope private val externalScope: CoroutineScope,
 ) : UserPreferencesRepository {
+
+    override fun observeEditorPreviewPositions(): Flow<Map<EditorPreviewKey, Float>> =
+        dataStore.data.map { prefs ->
+            buildMap {
+                EditorPreviewDirection.entries.forEach { direction ->
+                    EditorPreviewWidthClass.entries.forEach { width ->
+                        val key = EditorPreviewKey(direction, width)
+                        prefs[floatPreferencesKey(key.storageKey)]?.takeIf { it.isFinite() && it > 0f }
+                            ?.let { put(key, it) }
+                    }
+                }
+            }
+        }.distinctUntilChanged().catch { emit(emptyMap()) }
+
+    override suspend fun setEditorPreviewPosition(key: EditorPreviewKey, sourceDp: Float) {
+        require(sourceDp.isFinite() && sourceDp > 0f)
+        persist { dataStore.edit { it[floatPreferencesKey(key.storageKey)] = sourceDp } }
+    }
 
     /**
      * Runs a preference write on [externalScope] (process-lifetime) instead of the caller's job, then
@@ -888,6 +911,16 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         }
     }
 
+    override fun observeEditorShortcut(): Flow<EditorShortcut> =
+        dataStore.data
+            .map { EditorShortcut.fromId(it[KEY_EDITOR_SHORTCUT]) }
+            .distinctUntilChanged()
+            .catch { emit(EditorShortcut.NONE) }
+
+    override suspend fun setEditorShortcut(shortcut: EditorShortcut) {
+        persist { dataStore.edit { it[KEY_EDITOR_SHORTCUT] = shortcut.id } }
+    }
+
     override fun observeEditorImageInsert(): Flow<EditorImageInsert> =
         dataStore.data
             // Default REDUCED (#459 PR-images follow-up): the classic HFR "vignette cliquable".
@@ -1473,6 +1506,7 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         val KEY_IMGUR_CLIENT_ID = stringPreferencesKey("imgur_client_id")
         // #459 PR-images follow-up — editor image insert mode (EditorImageInsert.name, defensively parsed).
         val KEY_EDITOR_IMAGE_INSERT = stringPreferencesKey("editor_image_insert")
+        val KEY_EDITOR_SHORTCUT = stringPreferencesKey("editor_shortcut")
 
         // #287 — reading display presets: density (DisplayDensity.name) + font scale
         // (FontScalePreference.name), both defensively parsed. No bootstrap mirror (cf. observers).

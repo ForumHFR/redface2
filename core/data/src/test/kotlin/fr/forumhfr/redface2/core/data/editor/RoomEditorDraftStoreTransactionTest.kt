@@ -72,8 +72,10 @@ class RoomEditorDraftStoreTransactionTest {
 
     @Test
     fun `begin commits full snapshot and durable identity together`() = runTest {
-        val token = begin()
+        val attemptId = "preallocated-attempt"
+        val token = (store.beginAttempt("alice", key, snapshot, 0, attemptId) as BeginAttemptResult.Started).token
         val entry = checkNotNull(store.loadEntry("alice", key))
+        assertEquals(attemptId, token.id)
         assertEquals(snapshot.copy(updatedAt = 1234), entry.draft)
         assertEquals(1L, entry.version)
         assertEquals(token, entry.attempt?.token)

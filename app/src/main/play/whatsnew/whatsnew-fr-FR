@@ -1,5 +1,6 @@
-Redface 2 v0.68.0 — bêta.
-- Signalement intégré : Réglages → Compte HFR ou menu compte, par MP HFR au projet.
-- Envoi : confirmations « Message publié » / « Message modifié » et bouton « Dernière page » ; doubles envois évités, envoi incertain signalé avec vérification demandée.
-- Citations : saut débloqué si le message manque sur la page.
-- TalkBack : Première/Dernière page annoncées une seule fois.
+Redface 2 v0.70.0 — bêta.
+- Éditeur refait : barre d'action en bas, formats, aperçu à côté du texte, feuille Options.
+- Brouillons sous ↺ : « Citer » insère tout de suite, le brouillon attend.
+- MP : modifier ses propres messages.
+- Envoi : erreurs plus claires, envoi incertain mieux délimité.
+- Visionneuse : GIF animés plus légers.

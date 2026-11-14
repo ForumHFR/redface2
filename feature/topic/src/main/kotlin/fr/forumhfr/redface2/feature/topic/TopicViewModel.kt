@@ -16,6 +16,10 @@ import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.awaitDetached
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.search.SearchRepository
@@ -42,7 +46,9 @@ import fr.forumhfr.redface2.core.model.write.PollVoteFailureReason
 import fr.forumhfr.redface2.core.model.write.PollVoteForm
 import fr.forumhfr.redface2.core.model.write.PollVoteResult
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
+import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -54,6 +60,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -109,6 +116,7 @@ class TopicViewModel @AssistedInject constructor(
     // #809 — plain Hilt dependency (the assisted Factory is unchanged): resolves + removes THIS
     // topic's drapeau for the top-bar long-press.
     private val flagRepository: FlagRepository,
+    private val draftStore: EditorDraftStore,
     // #1144/#779 — process-lifetime scope for the four HFR MUTATIONS this ViewModel owns (delete a
     // post, vote, remove the topic's drapeau, add a favourite). Since #1083 every HfrClient call is
     // cancellable, so those writes would be aborted mid-socket by a back press; [awaitDetached]
@@ -119,6 +127,54 @@ class TopicViewModel @AssistedInject constructor(
 
     private val _state = MutableStateFlow(TopicUiState.initial(request))
     val state: StateFlow<TopicUiState> = _state.asStateFlow()
+
+    private var preparingEditorQuotes = false
+
+    /**
+     * #1553: a sheet or full-editor quote gesture chooses its rendering before opening. Inline coordinates
+     * must be committed through the domain store first; only card previews travel in memory.
+     * Restoration never calls this entry point. Duplicate taps while preparing share one opening.
+     */
+    fun prepareEditorQuotes(quotes: List<QuoteSelection>, onPrepared: (List<QuoteSelection>) -> Unit) {
+        if (preparingEditorQuotes) return
+        preparingEditorQuotes = true
+        viewModelScope.launch {
+            try {
+                val cards = quotes.isEmpty() || userPreferencesRepository.observeQuoteCardsEnabled().first()
+                if (quotes.isEmpty() || cards) {
+                    onPrepared(quotes)
+                } else {
+                    val pending = PendingInlineQuoteRequest(request.cat, request.post, quotes.map {
+                        PendingInlineQuoteRequest.Quote(it.numreponse, it.locator.page, it.locator.ref, it.truncate)
+                    })
+                    val drafts = EditorDraftSession(draftStore, EditorDraftKey.reply(request.cat, request.post))
+                    drafts.load()
+                    val owner = drafts.owner
+                    var result = drafts.enqueueInlineQuoteRequest(pending)
+                    // A closing sheet may have flushed between load and enqueue. Retry once on a fresh row.
+                    if (result is EditorDraftStore.StoreWriteResult.Conflict) {
+                        drafts.load()
+                        result = if (drafts.owner == owner) drafts.enqueueInlineQuoteRequest(pending) else {
+                            EditorDraftStore.StoreWriteResult.OwnerChanged
+                        }
+                    }
+                    if (result is EditorDraftStore.StoreWriteResult.Written) {
+                        onPrepared(emptyList())
+                    } else {
+                        _effects.send(TopicEffect.QuotePreparationFailed)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: IllegalArgumentException) {
+                _effects.send(TopicEffect.QuotePreparationFailed)
+            } catch (_: IOException) {
+                _effects.send(TopicEffect.QuotePreparationFailed)
+            } finally {
+                preparingEditorQuotes = false
+            }
+        }
+    }
 
     internal val submitAcknowledgements = TopicAcknowledgements(savedStateHandle, viewModelScope)
 
@@ -306,6 +362,8 @@ class TopicViewModel @AssistedInject constructor(
      * - [PostOrBottom] → [TopicEffect.ScrollToPost] when the numreponse is on the page, else no
      *   scroll — terminal on the first Loaded either way (#974/#1243 : a submit that carried quotes
      *   resumes on the cited post when visible and otherwise preserves the reader's position) ;
+     * - [PostOrTop] → [TopicEffect.ScrollToPost] for a filtered citing-post return, or top only
+     *   once the badge's post is absent from a terminal representation ;
      * - [Anchor] → [TopicEffect.ScrollToAnchor] (revisit / #782 return / process restore) ;
      * - [Bottom] → [TopicEffect.ScrollToEndOfPage] (post-submit `#bas`, #412 `page - 1` step) ;
      * - [Top] → [TopicEffect.ScrollToTop] (default landing of a fresh page).
@@ -321,6 +379,7 @@ class TopicViewModel @AssistedInject constructor(
          */
         data class Post(val numreponse: Int, val lastRead: Boolean = false) : PendingLanding
         data class PostOrBottom(val numreponse: Int) : PendingLanding
+        data class PostOrTop(val numreponse: Int) : PendingLanding
         data class Anchor(val anchor: TopicScrollAnchor) : PendingLanding
         data object Bottom : PendingLanding
         data object Top : PendingLanding
@@ -333,10 +392,13 @@ class TopicViewModel @AssistedInject constructor(
         val overflowRedirectAllowed: Boolean,
         val submittedElsewhereNotificationAllowed: Boolean,
         val lastPageRedirectAllowed: Boolean = false,
-    )
+    ) {
+        fun needsTailRedirect(target: Int, totalPages: Int): Boolean =
+            if (lastPageRedirectAllowed) totalPages != target else totalPages > target
+    }
 
-    /** #782 — one frame of the quote-jump return stack : the departure page + tap-time anchor. */
-    private data class TopicJumpFrame(val page: Int, val anchor: TopicScrollAnchor?)
+    /** #782 — departure page + return landing captured before resolving the jump. */
+    private data class TopicJumpFrame(val page: Int, val landing: PendingLanding?)
 
     /**
      * Async-trace cookie for the `rf2.topic.first_content` section. The section starts when
@@ -545,7 +607,7 @@ class TopicViewModel @AssistedInject constructor(
             // to recover from a transient error.
             TopicIntent.Retry -> loadCurrentPage()
             is TopicIntent.OnCitedBadgeClick -> openCitingPosts(intent.post)
-            is TopicIntent.OnCitingPostClick -> openCitingPost(intent.post)
+            is TopicIntent.OnCitingPostClick -> openCitingPost(intent.post, intent.departureAnchor)
             TopicIntent.OnDismissCitingSheet -> dismissCitingPosts()
             is TopicIntent.DeletePost -> deletePost(intent.numreponse)
             is TopicIntent.RequestModerationAlert -> requestModerationAlert(intent.numreponse)
@@ -759,13 +821,22 @@ class TopicViewModel @AssistedInject constructor(
 
     /**
      * #783 — filtered rows expose `page=1&numreponse=…`; HFR's redirect is the source of truth for
-     * the real page. Once resolved, reuse [goToPost] unchanged so the #782 return chain and
+     * the real page. Once resolved, reuse [goToPost] so the #782 return chain and
      * [TopicEffect.ScrollToPost] landing remain identical to every other in-topic jump.
      */
-    private fun openCitingPost(post: Post) {
-        val loaded = _state.value.citingPostsSheet?.content as? CitingPostsSheetContent.Loaded
-            ?: return
-        if (loaded.posts.none { it.numreponse == post.numreponse }) return
+    private fun openCitingPost(post: Post, departureAnchor: TopicScrollAnchor?) {
+        val current = _state.value
+        val sheet = current.citingPostsSheet ?: return
+        val loaded = sheet.content as? CitingPostsSheetContent.Loaded
+        if (loaded == null || loaded.posts.none { it.numreponse == post.numreponse }) return
+        // Filtered coordinates cannot be replayed on a canonical page (same-page takeover or
+        // cross-page return). Keep the badge's post instead, before dismissal and the probe.
+        val pageAnchor = departureAnchor.takeUnless { current.search.showingFilteredResults }
+        val returnLanding = if (current.search.showingFilteredResults) {
+            PendingLanding.PostOrTop(sheet.numreponse)
+        } else {
+            pageAnchor?.let { PendingLanding.Anchor(it) }
+        }
         dismissCitingPosts()
         citingPostNavigationJob?.cancel()
         // #1188 — capture the page owner BEFORE the probe suspends. A page switch during the ≤3 s
@@ -790,7 +861,12 @@ class TopicViewModel @AssistedInject constructor(
             if (generation != ownerGeneration) return@launch
             // The unfiltered href rendered by quote_only carries page=1. A failed probe therefore
             // degrades to that same server-provided fallback, never to a guessed page.
-            goToPost(targetPage = resolvedPage ?: 1, numreponse = post.numreponse)
+            goToPost(
+                targetPage = resolvedPage ?: 1,
+                numreponse = post.numreponse,
+                departureAnchor = pageAnchor,
+                returnLanding = returnLanding,
+            )
         }
     }
 
@@ -1107,7 +1183,7 @@ class TopicViewModel @AssistedInject constructor(
                     // #877 — this is a LOCAL transformation of the page already on screen : it must
                     // carry the provenance over, or a re-filter landing between the provisional
                     // cache emission and the settled one would fake-settle the pill (gate finding).
-                    current.copy(mode = loadedMode(loaded.topic, provisional = loaded.provisional))
+                    current.copy(mode = relocalizedMode(loaded))
                 }
             }
             // This collector is independent of any load job, so an unhandled error here would tear
@@ -1136,7 +1212,7 @@ class TopicViewModel @AssistedInject constructor(
             staffByPseudo = staff
             _state.update { current ->
                 val loaded = current.mode as? TopicUiState.Mode.Loaded ?: return@update current
-                current.copy(mode = loadedMode(loaded.topic, provisional = loaded.provisional))
+                current.copy(mode = relocalizedMode(loaded))
             }
         }
     }
@@ -1483,6 +1559,9 @@ class TopicViewModel @AssistedInject constructor(
             grace?.cancel()
             if (!received && generation == ownerGeneration) {
                 terminalizeEmptyCompletion()
+                // Failure before any emission also completes through catch. A retained snapshot
+                // is now terminal for this owner, so a missing PostOrTop must release its landing.
+                settleRetainedPageLanding(generation)
             }
             if (settleRetainedPageOnCompletion) settleRetainedPageLanding(generation)
         }
@@ -1563,6 +1642,8 @@ class TopicViewModel @AssistedInject constructor(
         topic: Topic,
         provisional: Boolean = false,
         previousLoaded: TopicUiState.Mode.Loaded? = _state.value.mode as? TopicUiState.Mode.Loaded,
+        // #1437 — default false : every canonical producer replaces a search view by a topic page.
+        fromSearch: Boolean = false,
     ): TopicUiState.Mode.Loaded =
         TopicUiState.Mode.Loaded(
             topic = topic,
@@ -1576,7 +1657,15 @@ class TopicViewModel @AssistedInject constructor(
             pollVote = resyncPollVote(previousLoaded?.pollVote, topic.pollVoteForm),
             pollJustVoted = previousLoaded?.pollJustVoted == true &&
                 isSamePollPage(previousLoaded.topic, topic),
+            fromSearch = fromSearch,
         )
+
+    /**
+     * LOCAL rebuild of the page already on screen (blacklist / staff change): the content is the
+     * same, so both provenances — #877 provisional and #1437 search view — are carried over.
+     */
+    private fun relocalizedMode(loaded: TopicUiState.Mode.Loaded): TopicUiState.Mode.Loaded =
+        loadedMode(loaded.topic, provisional = loaded.provisional, fromSearch = loaded.fromSearch)
 
     /** #1296 — results change counters, not the identity of the page's single HFR poll. */
     private fun isSamePollPage(previous: Topic, current: Topic): Boolean {
@@ -1669,10 +1758,12 @@ class TopicViewModel @AssistedInject constructor(
 
     /**
      * #895/#1300 — dispatch the landing owed to the page on screen, once, for the owning
-     * generation. [terminal] comes from the CURRENT `TopicPageEmission`, never from a retained
-     * `Mode.Loaded`: an LRU snapshot is settled historically but remains provisional for this
-     * landing owner. A missing [PendingLanding.Post] therefore survives only an explicitly
-     * transient representation; the first terminal one resolves it without scrolling.
+     * generation. During a load, [terminal] comes from the CURRENT `TopicPageEmission`, never from
+     * a retained `Mode.Loaded`: an LRU snapshot is settled historically but remains provisional
+     * for this landing owner. An established same-page return may settle immediately when idle.
+     * A missing [PendingLanding.Post] or [PendingLanding.PostOrTop] therefore
+     * survives a transient representation; the first terminal one resolves it without scrolling
+     * or falls back to top, respectively.
      */
     private fun dispatchPendingLanding(topic: Topic, terminal: Boolean) {
         // Gate Sol PR1 (bloquant 2) — refuse a stale pair : a dispatch reached from an untagged
@@ -1698,11 +1789,24 @@ class TopicViewModel @AssistedInject constructor(
                 } else {
                     TopicEffect.LandingResolvedWithoutScroll(armed.page)
                 }
+            is PendingLanding.PostOrTop -> postOrTopLandingEffect(topic, landing, armed.page, terminal)
             is PendingLanding.Anchor -> TopicEffect.ScrollToAnchor(landing.anchor, armed.page)
             PendingLanding.Bottom -> TopicEffect.ScrollToEndOfPage(armed.page)
             PendingLanding.Top -> TopicEffect.ScrollToTop(armed.page)
         } ?: return
         deliverLanding(effect, armed)
+    }
+
+    private fun postOrTopLandingEffect(
+        topic: Topic,
+        landing: PendingLanding.PostOrTop,
+        page: Int,
+        terminal: Boolean,
+    ): TopicEffect? = when {
+        topic.posts.any { post -> post.numreponse == landing.numreponse } ->
+            TopicEffect.ScrollToPost(landing.numreponse)
+        terminal -> TopicEffect.ScrollToTop(page)
+        else -> null
     }
 
     /** Resolve the current owner's landing without moving the list (terminal miss/fallback). */
@@ -1861,9 +1965,17 @@ class TopicViewModel @AssistedInject constructor(
      * Missing posts in search results first reclaim the canonical snapshot under a new owner,
      * then share that same bounded retry and failure settlement instead of switching pages.
      */
-    fun goToPost(targetPage: Int, numreponse: Int, departureAnchor: TopicScrollAnchor? = null) {
+    fun goToPost(targetPage: Int, numreponse: Int, departureAnchor: TopicScrollAnchor? = null) =
+        goToPost(targetPage, numreponse, departureAnchor, departureAnchor?.let { PendingLanding.Anchor(it) })
+
+    private fun goToPost(
+        targetPage: Int,
+        numreponse: Int,
+        departureAnchor: TopicScrollAnchor?,
+        returnLanding: PendingLanding?,
+    ) {
         if (jumpStack.size >= JUMP_STACK_MAX) jumpStack.removeFirst()
-        jumpStack.addLast(TopicJumpFrame(request.page, departureAnchor))
+        jumpStack.addLast(TopicJumpFrame(request.page, returnLanding))
         syncJumpAvailability()
         if (targetPage == request.page) {
             departureAnchor?.let { reportPageAnchor(it) }
@@ -1921,22 +2033,21 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     /**
-     * #782 — unwind ONE quote jump : land back on the departure page at the tap-time anchor.
+     * #782 — unwind ONE quote jump : land back on the departure page at the captured position.
+     * Citing-post jumps from filtered results use the badge's post, or top if it is absent.
      * Returns `false` when the chain is empty — the caller (screen back handling) then lets the
      * system back leave the topic. A return is never a « page - 1 » reading step (no bottom).
      */
     fun returnFromJump(departureAnchor: TopicScrollAnchor? = null): Boolean {
         val frame = jumpStack.removeLastOrNull() ?: return false
         syncJumpAvailability()
-        val landing = frame.anchor?.let { PendingLanding.Anchor(it) }
+        val landing = frame.landing
         if (frame.page == request.page) {
             departureAnchor?.let { reportPageAnchor(it) }
-            armLanding(
-                landing
-                    ?: pageAnchors[frame.page]?.let { PendingLanding.Anchor(it) }
-                    ?: PendingLanding.Top,
-            )
-            dispatchLandingAgainstScreen()
+            // Same-page settles overwrite pageAnchors with the arrival, so only the frame's
+            // captured landing can restore the departure. Without it, use the explicit top fallback.
+            armLanding(landing ?: PendingLanding.Top)
+            dispatchLandingAgainstScreen(terminal = loadJob?.isActive != true)
         } else {
             internalSwitch(frame.page, departureAnchor, landing = landing)
         }
@@ -1987,10 +2098,25 @@ class TopicViewModel @AssistedInject constructor(
         jumpStack.clear()
         syncJumpAvailability()
         val acknowledgementId = submitAcknowledgements.accept(
-            _state.value.connectedPseudo?.let(::canonicalizePseudo).orEmpty(), operation,
+            _state.value.connectedPseudo?.let(::canonicalizePseudo).orEmpty(),
+            operation,
+            predictedLastPage = predictedSubmitLastPage(plan),
         )
         performSubmitRefresh(plan, TopicRefreshKind.PostSubmit, acknowledgementId)
     }
+
+    /**
+     * #1437 — the last-page offer is already certain at acceptance when the canonical pager known
+     * BEFORE the refresh ends beyond the submit target: such a submit never redirects, and a pager
+     * that shrank meanwhile (deletions) is resolved by the click's own redirect. The acknowledgement
+     * then carries the offer at once instead of gaining it after a slow refresh. The canonical
+     * pager is read, not the displayed topic: a transsearch page has its own, and the plan excludes
+     * submissions from its results from both prediction and terminal enrichment.
+     */
+    private fun predictedSubmitLastPage(plan: SubmitRefreshPlan): Int? =
+        _state.value.availablePages.lastOrNull()?.takeIf {
+            plan.submittedElsewhereNotificationAllowed && !plan.overflowRedirectAllowed && it > plan.initialTarget
+        }
 
     /** Resolve a possibly stale last-page offer with its own single redirect, only after the click. */
     fun openSubmittedPostPage(page: Int, departureAnchor: TopicScrollAnchor? = null) {
@@ -2017,13 +2143,19 @@ class TopicViewModel @AssistedInject constructor(
      * genuinely stable :
      * - the #226 overflow redirect is allowed only for a plain reply from the known tail. A quote
      *   submit never chases the new tail, because the user is resuming from the cited post ;
-     * - the last-page offer is decided after the refresh, when the refreshed
+     * - the last-page offer is predicted at acceptance when the known pager proves it
+     *   ([predictedSubmitLastPage]), otherwise decided after the refresh, when the refreshed
      *   [Topic.totalPages] is known and no redirect has already happened. This keeps stale-origin,
      *   unknown-count and quote-overflow submits on their source page while still offering an
      *   explicit jump to the end of the topic; totalPages does not locate the submitted post.
      */
     private fun submitRefreshPlan(target: Int, scrollTo: Int?, quotedNumreponse: Int?): SubmitRefreshPlan {
-        val loadedMode = _state.value.mode as? TopicUiState.Mode.Loaded
+        val current = _state.value
+        val loadedMode = current.mode as? TopicUiState.Mode.Loaded
+        // Capture before performSubmitRefresh takes ownership and replaces the page. The provenance
+        // is read from the DISPLAYED page, never from the search cursor / filtered flag: a later
+        // search without result resets both while the previous transsearch page stays on screen.
+        val fromSearchResults = loadedMode?.fromSearch == true
         val displayedTargetTopic = loadedMode?.topic?.takeIf { it.page == target }
         val terminalTargetTopic = displayedTargetTopic?.takeIf { !loadedMode.provisional }
         val targetWasKnownTail = terminalTargetTopic?.totalPages == target
@@ -2041,7 +2173,8 @@ class TopicViewModel @AssistedInject constructor(
                 else -> null
             },
             overflowRedirectAllowed = scrollTo == null && quotedNumreponse == null && targetWasKnownTail,
-            submittedElsewhereNotificationAllowed = scrollTo == null || quotedNumreponse != null,
+            submittedElsewhereNotificationAllowed = !fromSearchResults &&
+                (scrollTo == null || quotedNumreponse != null),
         )
     }
 
@@ -2108,10 +2241,12 @@ class TopicViewModel @AssistedInject constructor(
      * Dispatch the pending landing against the page already on screen (same-page / snapshot).
      * Synchronous since the r2 gate : [dispatchPendingLanding] no longer suspends, so there is no
      * untagged coroutine racing a newer navigation.
+     * [terminal] settles a return on an established page when no load is pending. Snapshot
+     * activations keep the default false because their new owner's load has yet to start.
      */
-    private fun dispatchLandingAgainstScreen() {
+    private fun dispatchLandingAgainstScreen(terminal: Boolean = false) {
         val loaded = _state.value.mode as? TopicUiState.Mode.Loaded ?: return
-        dispatchPendingLanding(loaded.topic, terminal = false)
+        dispatchPendingLanding(loaded.topic, terminal = terminal && !loaded.provisional)
     }
 
     /**
@@ -2146,7 +2281,7 @@ class TopicViewModel @AssistedInject constructor(
                 try {
                     val topic = topicRepository.refreshTopicPage(request.cat, request.post, target)
                     if (generation != ownerGeneration) return@launch
-                    val shouldRedirect = redirectAvailable && topic.totalPages > target
+                    val shouldRedirect = redirectAvailable && plan.needsTailRedirect(target, topic.totalPages)
                     _state.update {
                         it.copy(
                             mode = loadedMode(topic),
@@ -2172,6 +2307,7 @@ class TopicViewModel @AssistedInject constructor(
                         adoptSubmitTarget(target, plan.landing)
                         continue
                     }
+                    alignSubmittedPage(plan, topic)
                     recordSnapshot(topic)
                     dispatchPendingLanding(topic, terminal = true)
                     val offeredLastPage = topic.totalPages.takeIf {
@@ -2190,6 +2326,14 @@ class TopicViewModel @AssistedInject constructor(
                 }
                 return@launch
             }
+        }
+    }
+
+    /** HFR may normalize the page even after our single redirect: the response owns the cursor. */
+    private fun alignSubmittedPage(plan: SubmitRefreshPlan, topic: Topic) {
+        if (plan.lastPageRedirectAllowed && topic.page != request.page) {
+            updateCanonicalPage(topic.page)
+            armLanding(plan.landing)
         }
     }
 
@@ -3265,7 +3409,8 @@ class TopicViewModel @AssistedInject constructor(
     ) {
         _state.update {
             it.copy(
-                mode = loadedMode(topic),
+                // #1437 — the page itself carries its transsearch provenance.
+                mode = loadedMode(topic, fromSearch = true),
                 search = it.search.copy(
                     status = status,
                     canGoPreviousResult = canPrev,

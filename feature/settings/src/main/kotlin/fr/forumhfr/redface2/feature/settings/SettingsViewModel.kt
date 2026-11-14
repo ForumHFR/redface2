@@ -25,6 +25,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import javax.inject.Inject
@@ -309,6 +310,12 @@ class SettingsViewModel @Inject constructor(
             isLocked = { it.isUpdatingWritingSurfacePreset },
             apply = { state, value -> state.copy(writingSurfacePreset = value) },
         )
+        // A read fallback (NONE) only updates UI. Persistence is exclusively an explicit intent (M3).
+        observePreference(
+            flow = userPreferencesRepository.observeEditorShortcut(),
+            isLocked = { it.isUpdatingEditorShortcut },
+            apply = { state, value -> state.copy(editorShortcut = value) },
+        )
         // #1128 — keep open settings instances aligned after every persisted selector change.
         observePreference(
             flow = userPreferencesRepository.observeImagePickerMode(),
@@ -449,6 +456,7 @@ class SettingsViewModel @Inject constructor(
             is SettingsIntent.SetImgurClientId -> updateImgurClientId(intent.text)
             is SettingsIntent.SetEditorImageInsert -> updateEditorImageInsert(intent.mode)
             is SettingsIntent.SetWritingSurfacePreset -> updateWritingSurfacePreset(intent.preset)
+            is SettingsIntent.SetEditorShortcut -> updateEditorShortcut(intent.shortcut)
             is SettingsIntent.SetImagePickerMode -> updateImagePickerMode(intent.mode)
         }
     }
@@ -1114,6 +1122,26 @@ class SettingsViewModel @Inject constructor(
                         )
                     }
                 }
+        }
+    }
+
+    private fun updateEditorShortcut(desired: EditorShortcut) {
+        val snapshot = _state.value
+        if (!snapshot.canChangeEditorShortcut) return
+        val previous = snapshot.editorShortcut
+        _state.update {
+            it.copy(editorShortcut = desired, isUpdatingEditorShortcut = true, editorShortcutError = false)
+        }
+        viewModelScope.launch {
+            try {
+                userPreferencesRepository.setEditorShortcut(desired)
+                _state.update { it.copy(isUpdatingEditorShortcut = false) }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                _state.update { it.copy(editorShortcut = previous, isUpdatingEditorShortcut = false,
+                    editorShortcutError = true) }
+            }
         }
     }
 

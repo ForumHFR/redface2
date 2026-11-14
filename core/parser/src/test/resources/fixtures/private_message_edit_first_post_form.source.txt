@@ -1,0 +1,35 @@
+Provenance — private_message_edit_first_post_form.html (#1625, « Modifier » sur le 1er message d'un MP)
+
+FIXTURE RÉDUITE. Capture authentifiée live du 2026-11-14 (vers 00:19, heure de Paris), compte agent
+XaTelitte, même conversation 1:1 de test, même session et même régime que
+private_message_edit_form.html, dont elle est le témoin « premier message ». GET seul de l'URL servie
+par la toolbar du 1er message ; aucun login, aucun mot de passe saisi, AUCUN POST, formulaire jamais
+soumis.
+
+URL capturée (identifiants déjà fictifs), fragment #formulaire retiré :
+  /message.php?config=hfr.inc&cat=prive&post=3000003&numreponse=1980000301&page=1&p=1&subcat=0
+  &sondage=0&owntopic=0
+
+RÉDUCTION : identique à private_message_edit_form.html (form[name=hop] seul ; les quatre md_cryptlink
+du chrome — portail, /unlog.php?codehex, editprofil, online — décodés puis retirés avec le reste).
+
+CE QUE LA FIXTURE PROUVE (delta avec l'édition d'un message suivant, même conversation) :
+- même action /bdd.php?config=hfr.inc, method=post ;
+- AUCUN champ caché `subcat` (présent à 0 sur les autres messages) ;
+- `sujet` n'est plus caché : ligne « Sujet » avec input texte éditable (maxlength=70, accesskey=t),
+  insérée avant « Le ton de votre message » ;
+- parents vide ; numreponse = 1er message ;
+- libellé de la case delete : « Effacer l'intégralité du sujet » (contre « Effacer ce message ») ;
+- case signature COCHÉE ici (reflète le message édité) ;
+- contrairement à l'édition du 1er post d'un sujet (write_edit_first_post_form.html) : ni
+  sous-catégorie (select subcat), ni « Sujet à lire également » (toread1..5), ni sondage.
+
+SANITISATION : identique à private_message_edit_form.html — TestUser / 990002, post=3000003,
+numreponse=1980000301, « Sujet prive de test », hash_check -> TESTHASH, favori -> testsmiley. Corps :
+même texte neutre de même structure BBCode que le contenu cité de private_message_edit_form.html
+(le corps réel du 1er message était identique, octet pour octet, au contenu de cette citation),
+smiley perso réel (variante :2) -> [:testsmiley:2]. Vérification : énumération HTMLParser intégrale ; les entrées
+différant de private_message_edit_form.html ont été relues une à une. Le brut n'est PAS conservé dans
+le dépôt.
+
+NORMALISATION NON SÉMANTIQUE : espace de fin de ligne interne à `onsubmit` retiré (git diff --check).

@@ -197,7 +197,11 @@ class SmileyPickerController(
      */
     private var lastDismissed: SmileyPickerState.Open? = null
 
-    fun open() {
+    /**
+     * An already open sheet ignores [intent] and keeps its live search/opening intent.
+     * Today the modal sheet blocks the editor's opening controls, so users cannot reach this case.
+     */
+    fun open(intent: SmileyPickerOpenIntent) {
         val before = _state.value
         if (before is SmileyPickerState.Hidden) pickerDiagnostics.sheetOpened()
         if ((before as? SmileyPickerState.Open)?.detailSmiley != null) {
@@ -212,7 +216,13 @@ class SmileyPickerController(
                 // #824 — restore the last dismissed search (query + results) so reopening
                 // right after an insertion / accidental swipe-down never costs a retype.
                 val restored = withFavorites(lastDismissed ?: SmileyPickerState.Open())
-                restored.copy(initialTab = initialTab(restored))
+                restored.copy(
+                    initialTab = if (intent == SmileyPickerOpenIntent.SEARCH) {
+                        SmileyPickerTab.WIKI
+                    } else initialTab(restored),
+                    openingIntent = intent,
+                    restoredQuery = restored.query.takeIf { it.isNotEmpty() },
+                )
             }
         }
     }
@@ -499,7 +509,9 @@ class SmileyPickerController(
         if (_state.value !is SmileyPickerState.Open) return
         _state.update { current ->
             val open = current as? SmileyPickerState.Open ?: return@update current
-            open.copy(query = query)
+            // Previous results stay visible during the debounce; only the resume hint is
+            // tied to the untouched restored query (gate Fable r1, I-B).
+            open.copy(query = query, restoredQuery = open.restoredQuery.takeIf { query == open.query })
         }
         // Cancel in-flight searches so an older response can't overwrite a newer query.
         searchJob?.cancel()

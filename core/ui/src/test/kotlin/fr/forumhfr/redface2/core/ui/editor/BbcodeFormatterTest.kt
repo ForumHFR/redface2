@@ -5,6 +5,47 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class BbcodeFormatterTest {
+    @Test
+    fun `email wraps a reversed selection and keeps the address selected`() {
+        assertEquals(BbcodeFormatResult("a [email]a@b.c[/email] z", 9, 14),
+            applyBbcodeAction(BbcodeAction.Email, "a a@b.c z", 7, 2))
+    }
+
+    @Test
+    fun `email inserts empty tags at the caret like a link`() {
+        assertEquals(BbcodeFormatResult("a[email][/email]b", 8, 8),
+            applyBbcodeAction(BbcodeAction.Email, "ab", 1, 1))
+    }
+
+    @Test
+    fun `bullet inserts only an opening marker at the caret without adding a newline`() {
+        assertEquals(BbcodeFormatResult("a[*]b", 4, 4),
+            applyBbcodeAction(BbcodeAction.Bullet, "ab", 1, 1))
+        assertEquals(BbcodeFormatResult("a\n[*]b", 5, 5),
+            applyBbcodeAction(BbcodeAction.Bullet, "a\nb", 2, 2))
+    }
+
+    @Test
+    fun `bullet prefixes a selection without deleting it or adding a closing tag`() {
+        assertEquals(BbcodeFormatResult("a[*]nomz", 4, 7),
+            applyBbcodeAction(BbcodeAction.Bullet, "anomz", 4, 1))
+        assertEquals(BbcodeFormatResult("[*]nom", 3, 6),
+            applyBbcodeAction(BbcodeAction.Bullet, "nom", 99, -1))
+    }
+
+    @Test
+    fun `personal smiley inserts no spaces and keeps an empty caret inside the token`() {
+        assertEquals(BbcodeFormatResult("a[:]b", 3, 3),
+            applyBbcodeAction(BbcodeAction.PersonalSmiley, "ab", 1, 1))
+    }
+
+    @Test
+    fun `personal smiley normalizes reversed and out of bounds selections then collapses after token`() {
+        assertEquals(BbcodeFormatResult("a[:nom]z", 7, 7),
+            applyBbcodeAction(BbcodeAction.PersonalSmiley, "anomz", 4, 1))
+        assertEquals(BbcodeFormatResult("[:nom]", 6, 6),
+            applyBbcodeAction(BbcodeAction.PersonalSmiley, "nom", 99, -1))
+    }
 
     @Test
     fun `non-empty selection is wrapped and the new selection still wraps the content`() {

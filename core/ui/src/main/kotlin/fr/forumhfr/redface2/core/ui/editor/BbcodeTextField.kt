@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldDecorator
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
@@ -33,9 +35,17 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -72,11 +82,8 @@ internal fun createBbcodeTextFieldContext(context: Context): Context {
 }
 
 /**
- * Controlled Material 3 BBCode text field used by the four full-screen editors.
- *
- * The public API remains [TextFieldValue]-based so the existing ViewModels and toolbar actions own
- * the draft and its selection. Internally, the state-based [BasicTextField] owns IME composition,
- * caret following and selection-handle scrolling. The host must give the field a bounded height.
+ * Compatibility adapter for editors whose ViewModel still owns a [TextFieldValue].
+ * IME composition stays inside the field; migrated editors use the [TextFieldState] overload.
  */
 @Suppress("LongParameterList") // Compose component API: optional defaulted params are idiomatic.
 @Composable
@@ -92,6 +99,7 @@ fun BbcodeTextField(
     // #555 — true requests focus (and thus the IME) once on first composition. Opening an editor
     // pre-filled with a long post otherwise leaves the keyboard closed.
     autoFocus: Boolean = false,
+    showLabel: Boolean = true,
 ) {
     BbcodeTextField(
         value = value,
@@ -103,6 +111,7 @@ fun BbcodeTextField(
         autoFocus = autoFocus,
         scrollState = rememberScrollState(),
         onTextLayout = null,
+        showLabel = showLabel,
     )
 }
 
@@ -119,6 +128,7 @@ internal fun BbcodeTextField(
     autoFocus: Boolean = false,
     scrollState: ScrollState = rememberScrollState(),
     onTextLayout: (Density.(getResult: () -> TextLayoutResult?) -> Unit)?,
+    showLabel: Boolean = true,
 ) {
     val fieldState = rememberTextFieldState(
         initialText = value.text,
@@ -129,9 +139,73 @@ internal fun BbcodeTextField(
         value = value,
         onValueChange = onValueChange,
     )
+    BbcodeTextField(
+        state = fieldState,
+        label = label,
+        modifier = modifier,
+        placeholder = placeholder,
+        readOnly = readOnly,
+        autoFocus = autoFocus,
+        scrollState = scrollState,
+        onTextLayout = onTextLayout,
+        showLabel = showLabel,
+    )
+}
 
+/**
+ * Material 3 BBCode editor with a host-owned buffer, IME composition and selection.
+ * The host must give the field a bounded height. [inputTransformation] guards user edits
+ * synchronously; programmatic edits must be guarded by the owner before editing [state].
+ * Keep [onTextLayout] last so existing trailing lambdas always receive the text layout.
+ * [showLabel] removes both the visual label and its headroom when false, keeping [label] as the
+ * accessible name, with 8 dp vertical padding for the compact viewport. The default preserves the
+ * historical decoration of both public overloads.
+ * [showKeyboardOnFocus] lets a scaffold restore focus without opening a previously closed IME.
+ * False also prevents a programmatic focus request from starting an input session. To restore an
+ * open IME, switch it to true: BTF2 starts the session even if the field already regained focus.
+ * [onSemanticsClick] optionally overrides the field's accessibility click, preserving its action label.
+ * The override owns focus and IME restoration; null keeps the native field action.
+ * [revealCaretOnChange] follows programmatic edits outside BTF2's focused, editable caret tracking.
+ * The first measured content never reveals the caret. After an edit, viewport changes keep an
+ * already visible caret in view; scrolling away suspends that follow.
+ * [caretRevealResetKey] reads a snapshot-backed counter the host increments in the same snapshot as
+ * server hydration or draft restoration. It is observed alongside the buffer, before recomposition,
+ * so these changes establish a measured baseline without revealing or competing with restored scroll.
+ */
+@Suppress("LongParameterList") // Same chrome and viewport hooks for both editor APIs.
+@Composable
+fun BbcodeTextField(
+    state: TextFieldState,
+    label: String,
+    modifier: Modifier = Modifier,
+    inputTransformation: InputTransformation? = null,
+    placeholder: String? = null,
+    readOnly: Boolean = false,
+    autoFocus: Boolean = false,
+    scrollState: ScrollState = rememberScrollState(),
+    showLabel: Boolean = true,
+    showKeyboardOnFocus: Boolean = true,
+    onViewportMeasured: ((heightPx: Int) -> Unit)? = null,
+    onSemanticsClick: (() -> Boolean)? = null,
+    caretRevealResetKey: () -> Int = { 0 },
+    revealCaretOnChange: Boolean = false,
+    onMinimumHeightMeasured: ((minimumHeightPx: Int, fieldHeightPx: Int) -> Unit)? =
+        LocalEditorPreviewFieldMinimum.current,
+    onTextLayout: (Density.(getResult: () -> TextLayoutResult?) -> Unit)? = null,
+) {
     val fieldInteractions = remember { MutableInteractionSource() }
     val focusRequester = remember { FocusRequester() }
+    val measurements = rememberBbcodeFieldMeasurements(state, onMinimumHeightMeasured)
+    var focused by remember(state) { mutableStateOf(false) }
+    val currentReadOnly by rememberUpdatedState(readOnly)
+    val currentResetKey by rememberUpdatedState(caretRevealResetKey)
+    LaunchedEffect(state, scrollState, revealCaretOnChange) {
+        if (revealCaretOnChange) {
+            // Keep the measured baseline across edits. BTF2 owns focused, editable scrolling.
+            revealEditorCaret({ measurements.textLayout }, state, scrollState,
+                { currentResetKey() }, { !focused || currentReadOnly })
+        }
+    }
     LaunchedEffect(Unit) {
         if (autoFocus) focusRequester.requestFocus()
     }
@@ -139,7 +213,9 @@ internal fun BbcodeTextField(
     // #872 — reserve half the floating label's line height above the outlined box. The headroom
     // follows fontScale instead of clipping the label at the historical fixed 8 dp.
     val labelLineHeight = MaterialTheme.typography.bodySmall.lineHeight
-    val labelHeadroom = if (labelLineHeight.isSp) {
+    val labelHeadroom = if (!showLabel) {
+        0.dp
+    } else if (labelLineHeight.isSp) {
         with(LocalDensity.current) { (labelLineHeight / 2).toDp() }.coerceAtLeast(8.dp)
     } else {
         8.dp
@@ -150,15 +226,27 @@ internal fun BbcodeTextField(
     )
     val context = LocalContext.current
     val fieldContext = remember(context) { createBbcodeTextFieldContext(context) }
-    Box(modifier = modifier.fillMaxWidth()) {
+    // C8: the Box records the range before BTF2's detach-time collapse, the field restores it after.
+    val selectionCheckpoint = remember { SelectionDetachCheckpoint() }
+    Box(modifier = modifier.fillMaxWidth()
+        .onSizeChanged { measurements.fieldHeight = it.height }
+        .then(SelectionDetachElement(state, selectionCheckpoint, restore = false))) {
         CompositionLocalProvider(LocalContext provides fieldContext) {
             BasicTextField(
-                state = fieldState,
+                state = state,
+                inputTransformation = inputTransformation,
                 readOnly = readOnly,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(top = labelHeadroom)
-                    .focusRequester(focusRequester),
+                    .then(if (showLabel) Modifier else Modifier.semantics { contentDescription = label })
+                    .then(if (onSemanticsClick == null) Modifier else Modifier.semantics {
+                        // A null label lets the native/input-transformation label survive peer merging.
+                        onClick(action = onSemanticsClick)
+                    })
+                    .focusRequester(focusRequester).onFocusChanged { focused = it.isFocused }
+                    // Ahead of BasicTextField's decorator in this chain, so it detaches after the collapse.
+                    .then(SelectionDetachElement(state, selectionCheckpoint, restore = true)),
                 textStyle = LocalTextStyle.current.merge(
                     TextStyle(color = MaterialTheme.colorScheme.onSurface),
                 ),
@@ -167,20 +255,26 @@ internal fun BbcodeTextField(
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.Sentences,
                     imeAction = ImeAction.Default,
+                    showKeyboardOnFocus = showKeyboardOnFocus,
                 ),
                 lineLimits = lineLimits,
-                onTextLayout = onTextLayout,
+                onTextLayout = { getResult ->
+                    measurements.textLayout = getResult()
+                    onTextLayout?.invoke(this, getResult)
+                },
                 interactionSource = fieldInteractions,
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                decorator = OutlinedTextFieldDefaults.decorator(
-                    state = fieldState,
+                decorator = measuredEditorDecorator(OutlinedTextFieldDefaults.decorator(
+                    state = state,
                     enabled = true,
                     lineLimits = lineLimits,
                     outputTransformation = null,
                     interactionSource = fieldInteractions,
-                    label = { Text(label) },
+                    label = if (showLabel) ({ Text(label) }) else null,
                     placeholder = placeholder?.let { hint -> { Text(hint) } },
-                ),
+                    contentPadding = if (showLabel) OutlinedTextFieldDefaults.contentPaddingWithoutLabel()
+                        else OutlinedTextFieldDefaults.contentPaddingWithoutLabel(top = 8.dp, bottom = 8.dp),
+                ), onViewportMeasured, measurements),
                 scrollState = scrollState,
             )
         }
@@ -218,7 +312,10 @@ internal fun BbcodeTextFieldValueBridge(
             val textChanged = current.text != received.text
             fieldState.edit {
                 // A selection-only resync must not replace text or add a text undo entry.
-                if (textChanged) replace(0, length, received.text)
+                if (textChanged) {
+                    val change = minimalReplacement(current.text, received.text)
+                    replace(change.start, change.end, change.text)
+                }
                 selection = received.selection
             }
         }
@@ -251,3 +348,134 @@ private data class BbcodeTextSnapshot(
     val text: String,
     val selection: TextRange,
 )
+
+/**
+ * C8: when a focused field detaches (rotation, recreation, `key` switch), `FocusTargetNode.onDetach`
+ * clears focus and BTF2's decorator collapses an extended selection to its max, in a [TextFieldState]
+ * that outlives the field. `LayoutNode.detach` runs a parent's modifier detach before its children's,
+ * and each chain detaches tail to head. The recorder on the enclosing Box therefore runs before the
+ * collapse, and the restorer, ahead of the decorator in BasicTextField's chain, runs after it. Both
+ * happen in one synchronous detach pass, without any focus operation. Plain holder: never observed.
+ */
+private class SelectionDetachCheckpoint {
+    var recorded: BbcodeTextSnapshot? = null
+}
+
+private data class SelectionDetachElement(
+    val state: TextFieldState,
+    val checkpoint: SelectionDetachCheckpoint,
+    val restore: Boolean,
+) : ModifierNodeElement<SelectionDetachNode>() {
+    override fun create() = SelectionDetachNode(state, checkpoint, restore)
+
+    override fun update(node: SelectionDetachNode) {
+        node.state = state
+        node.checkpoint = checkpoint
+        node.restore = restore
+    }
+}
+
+private class SelectionDetachNode(
+    var state: TextFieldState,
+    var checkpoint: SelectionDetachCheckpoint,
+    var restore: Boolean,
+) : Modifier.Node() {
+    // A record only lives within one detach pass; a reattached recorder drops any leftover.
+    override fun onAttach() {
+        if (!restore) checkpoint.recorded = null
+    }
+
+    override fun onDetach() {
+        if (restore) {
+            restoreCollapsedRange()
+        } else {
+            // Always overwrite: a collapsed field leaves no stale record of an earlier pass behind.
+            checkpoint.recorded = BbcodeTextSnapshot(state.text.toString(), state.selection)
+                .takeUnless { it.selection.collapsed }
+        }
+    }
+
+    private fun restoreCollapsedRange() {
+        val recorded = checkpoint.recorded ?: return
+        checkpoint.recorded = null
+        val live = BbcodeTextSnapshot(state.text.toString(), state.selection)
+        // Undo only BTF2's bare collapse: same text, caret at the recorded max. Like EditorHeaderPanel,
+        // a selection-only programmatic edit adds no undo entry and bypasses the input transformation.
+        if (live == recorded.copy(selection = TextRange(recorded.selection.max))) {
+            // Selection-only focus repair keeps the tool capture valid for the unchanged buffer.
+            state.edit { selection = recorded.selection }
+        }
+    }
+}
+
+/** Measurement only: unlike ScrollState.viewportSize, this port is available before placement. */
+private fun measuredEditorDecorator(
+    delegate: TextFieldDecorator,
+    onMeasured: ((Int) -> Unit)?,
+    measurements: BbcodeFieldMeasurements,
+): TextFieldDecorator = TextFieldDecorator { inner ->
+    delegate.Decoration {
+        Layout(content = inner) { measurables, constraints ->
+            // The capacity excludes decoration even when a short text does not fill it.
+            measurements.textCapacity = constraints.maxHeight
+            val viewport = measurables.single().measure(constraints)
+            onMeasured?.invoke(viewport.height)
+            layout(viewport.width, viewport.height) { viewport.placeRelative(0, 0) }
+        }
+    }
+}
+
+private data class BbcodeCaretSnapshot(
+    val value: BbcodeTextSnapshot,
+    val caret: Rect,
+    val viewport: Int,
+    val resetKey: Int,
+) {
+    fun isVisible(scroll: Int): Boolean = caret.top >= scroll && caret.bottom <= scroll + viewport
+}
+
+/** ED-14: reveal edits, then follow viewport changes only while the caret was already visible. */
+private suspend fun revealEditorCaret(
+    getLayout: () -> TextLayoutResult?,
+    state: TextFieldState,
+    scroll: ScrollState,
+    resetKey: () -> Int,
+    canReveal: () -> Boolean,
+) {
+    var previous: BbcodeCaretSnapshot? = null
+    var followViewport = false
+    // Observe measurement without recomposing the field on every frame of an IME/panel animation.
+    snapshotFlow { measuredEditorCaret(getLayout(), state, scroll.viewportSize, resetKey()) }.collect { current ->
+        if (current == null) return@collect
+        val baseline = previous?.takeIf { it.resetKey == current.resetKey }
+        val edited = baseline != null && baseline.value != current.value
+        followViewport = baseline != null && (followViewport || edited)
+        // Use the old geometry and viewport, but the current offset so manual scrolling wins.
+        val shouldReveal = edited || baseline?.isVisible(scroll.value) == true
+        previous = current
+        if (followViewport && shouldReveal && canReveal()) scroll.revealCaret(current.caret, current.viewport)
+    }
+}
+
+private fun measuredEditorCaret(
+    layout: TextLayoutResult?,
+    state: TextFieldState,
+    viewport: Int,
+    resetKey: Int,
+): BbcodeCaretSnapshot? {
+    if (layout == null) return null
+    val value = BbcodeTextSnapshot(state.text.toString(), state.selection)
+    return if (layout.layoutInput.text.text == value.text && viewport > 0) {
+        val caret = layout.getCursorRect(value.selection.end.coerceIn(0, value.text.length))
+        BbcodeCaretSnapshot(value, caret, viewport, resetKey)
+    } else null
+}
+
+private suspend fun ScrollState.revealCaret(caret: Rect, viewport: Int) {
+    val target = when {
+        caret.bottom > value + viewport -> kotlin.math.ceil(caret.bottom).toInt() - viewport
+        caret.top < value -> caret.top.toInt()
+        else -> value
+    }.coerceIn(0, maxValue)
+    if (target != value) scrollTo(target)
+}

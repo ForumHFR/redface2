@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import android.app.Activity
+import android.content.ActivityNotFoundException
 import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
@@ -8,6 +10,20 @@ import org.junit.Test
 
 /** #1128 — selector routing and the shared selection ceiling need no Android runtime. */
 class EditorImagePickerTest {
+
+    @Test
+    fun `missing activity emits Unavailable for every launch contract without retry`() {
+        ImagePickerMode.entries.forEach { mode ->
+            val events = mutableListOf<ImagePickerEvent>()
+            var launches = 0
+            launchEditorImagePicker(mode, events::add) {
+                launches++
+                throw ActivityNotFoundException()
+            }
+            assertEquals(1, launches)
+            assertEquals(listOf(ImagePickerEvent.Unavailable(mode, imagePickerContractFor(mode))), events)
+        }
+    }
 
     @Test
     fun `PHOTO_PICKER keeps the photo picker request`() {
@@ -89,6 +105,7 @@ class EditorImagePickerTest {
 
         emitImagePickerResult(
             contract = ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+            resultCode = Activity.RESULT_OK,
             uris = emptyList<String>(),
             onEvent = events::add,
         )
@@ -111,6 +128,7 @@ class EditorImagePickerTest {
 
         emitImagePickerResult(
             contract = ImagePickerContract.OPEN_MULTIPLE_DOCUMENTS,
+            resultCode = Activity.RESULT_OK,
             uris = uris,
             onEvent = events::add,
         )

@@ -1,57 +1,60 @@
 <resources>
-    <string name="editor_post_reply_title">Répondre au sujet</string>
-    <string name="editor_post_edit_title">Modifier votre message</string>
+    <string name="editor_post_reply_title">Répondre</string>
+    <string name="editor_post_edit_title">Modifier</string>
     <string name="editor_topic_new_title">Nouveau sujet</string>
-    <string name="editor_topic_edit_first_post_title">Modifier le premier message</string>
-    <string name="editor_field_label">Contenu BBCode</string>
     <!-- #436 (#604 lot 3) : cartes de citation dans l'éditeur plein écran. -->
     <string name="editor_quotes_clear_all">Tout vider</string>
-    <string name="editor_quotes_clear_all_a11y">Retirer toutes les citations</string>
-    <string name="editor_field_placeholder">Saisissez votre message…</string>
-    <string name="editor_preview_show">Afficher l\'aperçu</string>
-    <string name="editor_preview_hide">Masquer l\'aperçu</string>
-    <string name="editor_submit">Envoyer</string>
-    <string name="editor_submit_disabled">L\'envoi HFR arrive avec les autres modes — éditeur local seulement pour l\'instant.</string>
-    <string name="editor_validation_empty">Message vide</string>
-    <string name="editor_error_dismiss">Masquer</string>
-    <string name="editor_error_empty">Message vide. HFR refuse les réponses sans contenu.</string>
-    <string name="editor_error_invalid_hash">Session HFR expirée pendant la saisie. Réessayez ; le formulaire est rechargé en arrière-plan.</string>
-    <string name="editor_error_anti_flood">Anti-flood HFR : pas plus de 3 réponses consécutives par tranche de 10 minutes. Réessayez plus tard.</string>
-    <string name="editor_error_topic_locked">Ce sujet a été fermé. Impossible de poster une réponse.</string>
-    <string name="editor_error_login_required">Vous devez être connecté pour répondre. Reconnectez-vous depuis l\'onglet Messages.</string>
-    <string name="editor_error_unknown">HFR a renvoyé une réponse inattendue. Réessayez ou actualisez l\'app.</string>
-    <string name="editor_error_network">Erreur réseau. Vérifiez votre connexion et réessayez.</string>
-    <string name="editor_error_session_expired">Votre session HFR a expiré. Reconnectez-vous.</string>
-    <string name="editor_error_missing_subcat">La page de sujet en cache ne contient pas la sous-catégorie HFR. Actualisez le sujet avant de répondre.</string>
     <string name="editor_options_title">Options du message</string>
     <string name="editor_option_signature">Activer votre signature</string>
     <string name="editor_option_smiley_disabled">Désactiver les smilies</string>
     <string name="editor_option_email_notification">Activer la notification par email du sujet</string>
     <string name="editor_msg_icon_label">Ton du message</string>
     <string name="editor_msg_icon_none">Aucun</string>
-    <string name="editor_msg_icon_none_description">Aucun ton</string>
-    <string name="editor_msg_icon_tone_description">Ton %1$d</string>
+    <string name="editor_msg_icon_arrow">Flèche</string>
+    <string name="editor_msg_icon_idea">Idée</string>
+    <string name="editor_msg_icon_warning">Attention</string>
+    <string name="editor_msg_icon_question">Question</string>
+    <string name="editor_msg_icon_cool">Cool</string>
+    <string name="editor_msg_icon_smile">Sourire</string>
+    <string name="editor_msg_icon_angry">En colère</string>
+    <string name="editor_msg_icon_sad">Triste</string>
+    <string name="editor_msg_icon_laugh">Rire</string>
+    <string name="editor_msg_icon_shocked">Choqué</string>
+    <string name="editor_msg_icon_wink">Clin d\'œil</string>
+    <string name="editor_msg_icon_thumbs_down">Pouce bas</string>
+    <string name="editor_msg_icon_thumbs_up">Pouce haut</string>
+    <string name="editor_msg_icon_surprised">Étonné</string>
+    <string name="editor_msg_icon_bored">Blasé</string>
     <string name="editor_topic_subject_label">Titre du sujet</string>
     <string name="editor_topic_subcat_picker_label">Sous-catégorie</string>
     <string name="editor_topic_subcat_picker_placeholder">Choisir une sous-catégorie</string>
     <string name="editor_topic_poll_readonly_note">Ce sujet contient un sondage. Son édition n\'est pas encore disponible dans cette version ; vos réponses utilisateurs et options de vote restent inchangées.</string>
     <string name="editor_new_topic_created">Sujet créé. Rafraîchis la liste si besoin pour le retrouver.</string>
-    <string name="editor_actions_options">Options</string>
-    <string name="editor_submit_confirm">Confirmer</string>
     <string name="editor_image_url_title">Insérer une image</string>
     <string name="editor_image_url_label">URL de l’image</string>
     <string name="editor_image_url_help">URL http:// ou https:// uniquement.</string>
     <string name="editor_image_url_error">Seules les URL http:// et https:// sont acceptées.</string>
     <string name="editor_image_url_insert">Insérer</string>
     <string name="editor_image_url_cancel">Annuler</string>
-    <!-- Label du bouton « Smileys » de la barre éditeur (le sheet vit dans :core:ui, #387). -->
-    <string name="editor_smiley_open">Smileys</string>
-    <!-- #405 — bannière de restauration de brouillon. -->
-    <string name="editor_draft_restore_message">Un brouillon non envoyé a été retrouvé pour ce message.</string>
-    <string name="editor_draft_restore">Restaurer</string>
-    <string name="editor_draft_discard">Ignorer</string>
     <!-- #459 PR2 / #474 — erreurs d\'upload d\'image (mappées depuis UploadException). Server et
          Malformed nomment l\'hébergeur (et le code HTTP pour Server) au lieu d\'un message vague. -->
     <!-- Upload multi-images — compteur de progression « n/N » affiché pendant l\'envoi du lot. -->
     <!-- Noms d\'hébergeurs d\'images affichés dans les messages d\'erreur (#474). -->
+    <string name="editor_legacy_quote_dropped">Une ancienne demande de citation n’a pas été conservée après la mise à jour. Votre brouillon reste disponible. Veuillez sélectionner à nouveau le message à citer.</string>
+    <string name="editor_chrome_legacy_quote_summary">Citation non reprise</string>
+    <string name="editor_quote_pending">Citation en attente</string>
+    <string name="editor_quote_already_delivered">Déjà citée</string>
+    <string name="editor_quote_panel_title">Citations</string>
+    <string name="editor_quotes_cleared">Toutes les citations ont été retirées</string>
+    <string name="editor_quote_panel_empty">Aucune citation</string>
+    <string name="editor_preview_title">Aperçu</string>
+    <plurals name="editor_quotes_remaining">
+        <item quantity="one">%1$d citation restante</item>
+        <item quantity="other">%1$d citations restantes</item>
+    </plurals>
+    <string name="editor_topic_add_title">Ajouter un titre</string>
+    <string name="editor_topic_header_title_only">Titre</string>
+    <string name="editor_topic_open_title">Modifier le titre</string>
+    <string name="editor_topic_poll_status">Sondage présent, consulter</string>
+    <string name="editor_topic_first_post_unsupported">L’envoi du premier message dans une catégorie sans sous-catégorie n’est pas disponible.</string>
 </resources>

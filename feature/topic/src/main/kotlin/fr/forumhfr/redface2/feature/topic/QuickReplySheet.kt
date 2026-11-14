@@ -30,9 +30,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -40,22 +42,30 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
-import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
+import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
-import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummaryKind
+import fr.forumhfr.redface2.core.ui.editor.EditorUnsavedCloseDialog
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsCallbacks
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
+import fr.forumhfr.redface2.core.ui.editor.bannerText
+import fr.forumhfr.redface2.core.ui.editor.hasSubmissionSummary
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /**
  * Vague 4 (#604) lot 1 — the quick-reply bottom sheet: a plain text field, Send, and a
@@ -64,6 +74,7 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
  * route ; the ViewModel is scoped to the topic's nav entry, so the field survives an
  * accidental dismiss, and the #405 draft row survives everything else.
  */
+@Suppress("LongParameterList") // Request, four outcome callbacks and the two opening seeds of the topic surface.
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 internal fun QuickReplySheet(
@@ -77,6 +88,9 @@ internal fun QuickReplySheet(
     // #604 lots 2-3 — the cards this opening pre-arms : one for « Citer », the whole basket
     // for « Citer N » under the full-screen threshold (empty from the reply FAB).
     initialQuotes: List<QuoteSelection> = emptyList(),
+    legacyQuoteRequestDropped: Boolean = false,
+    // ED-88 (#1616) — the inline citations of this opening are durable in the draft row.
+    onQuotesDelivered: () -> Unit = {},
 ) {
     val viewModel = hiltViewModel<QuickReplyViewModel, QuickReplyViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -90,17 +104,28 @@ internal fun QuickReplySheet(
     // modal's scrim, so a new launch can only happen after a dismiss nulled the previous one
     // (gate Codex, finding 2). Re-assigning the launch over an OPEN sheet would break delivery.
     var openingDelivered by rememberSaveable { mutableStateOf(false) }
+    val currentOnQuotesDelivered by rememberUpdatedState(onQuotesDelivered)
     LaunchedEffect(viewModel) {
         // Re-seed the field from the #405 row at EACH opening — the VM outlives the sheet and
         // its cached text can be stale after a full-screen edit of the same draft (gate #788).
         // The VM outlives the sheet (topic-scoped) : hand it the page of THIS opening (#1243 suite).
-        viewModel.onSheetAttached(request.page, initialQuotes, restored = openingDelivered)
+        viewModel.onSheetAttached(
+            request.page, initialQuotes, restored = openingDelivered,
+            legacyQuoteRequestDropped = legacyQuoteRequestDropped,
+        )
         openingDelivered = true
+        // Attachment advances the opening id only for a new sheet; both flows filter stale signals.
+        // Collect delivery before navigation: restoration retains its delivery before its close.
+        launch(start = CoroutineStart.UNDISPATCHED) {
+            viewModel.quotesDelivered.collect { currentOnQuotesDelivered() }
+        }
         viewModel.effects.collect { effect ->
             when (effect) {
                 is QuickReplyEffect.SubmitSucceeded ->
                     onSubmitted(effect.targetPage, effect.scrollTo, effect.quotedNumreponses)
                 is QuickReplyEffect.EscalateToFullEditor -> onEscalate(effect.quotes)
+                // ED-10 (#1450) — the ONLY place a plain close unmounts the sheet.
+                is QuickReplyEffect.CloseCommitted -> onDismiss()
             }
         }
     }
@@ -114,15 +139,20 @@ internal fun QuickReplySheet(
     // its effect collector must survive until SubmitSucceeded, without replay at the next opening.
     // `submitting` is read through
     // rememberUpdatedState because both guards below are remembered once.
-    val submitting = rememberUpdatedState(state.submission.blocksBodyMutation)
+    val submitting = rememberUpdatedState(state.submission.blocksBodyMutation || state.isDiscardingDraft)
+    val closing = rememberUpdatedState(state.isClosing)
     // #854 — no half-height stop : this is a TYPING surface (autofocused field, IME quasi
     // permanent), the M3 PartiallyExpanded state only ever appears when a short display makes
     // the content taller than half the screen — and then a back/swipe must dismiss in ONE step,
     // not park the sheet at mid-height (thibw : « 3× retour pour revenir au topic »).
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true,
-        confirmValueChange = { target -> target != SheetValue.Hidden || !submitting.value },
+        // M3 also calls show() on recreation: a pending close stays hidden until « Rester ».
+        confirmValueChange = { target ->
+            if (target == SheetValue.Hidden) !submitting.value else !closing.value
+        },
     )
+    val sheetScope = rememberCoroutineScope()
     val density = LocalDensity.current
     val screenHeightDp = LocalConfiguration.current.screenHeightDp.toFloat()
     val imeHeightDp = with(density) { WindowInsets.ime.getBottom(density).toDp().value }
@@ -140,12 +170,30 @@ internal fun QuickReplySheet(
     ModalBottomSheet(
         sheetState = sheetState,
         onDismissRequest = {
-            if (!submitting.value) {
-                viewModel.onDismissed()
-                onDismiss()
-            }
+            // ED-10 (#1450) — closing is a REQUEST. material3 calls this once the sheet has slid
+            // away ; it stays composed (hidden) while the ViewModel awaits the last draft write,
+            // and only CloseCommitted unmounts it. material3 also calls this after a vetoed back
+            // (settleToDismiss ignores the veto's outcome) : bring the sheet back rather than
+            // leave an invisible modal over the topic.
+            if (submitting.value) sheetScope.launch { sheetState.show() } else viewModel.onDismissed()
         },
     ) {
+        // These owners belong to the sheet's dialog window, not the topic behind it.
+        val focusManager = LocalFocusManager.current
+        val keyboardController = LocalSoftwareKeyboardController.current
+        LaunchedEffect(state.isClosing) {
+            if (state.isClosing) {
+                focusManager.clearFocus(force = true)
+                keyboardController?.hide()
+                sheetState.hide()
+            } else {
+                // M3 can also start show() after measuring its anchors. Either animation may
+                // cancel the other; observe the resulting expansion before focusing the field.
+                launch { sheetState.show() }
+                snapshotFlow { sheetState.currentValue }.first { it == SheetValue.Expanded }
+                focusRequester.requestFocus()
+            }
+        }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -190,7 +238,7 @@ internal fun QuickReplySheet(
                 OutlinedTextField(
                     value = state.text,
                     onValueChange = viewModel::onTextChanged,
-                    readOnly = state.submission.blocksBodyMutation,
+                    readOnly = state.submission.blocksBodyMutation || state.isDiscardingDraft || state.isClosing,
                     // #807 — same #237 contract as BbcodeTextField : Compose capitalises NOTHING by
                     // default, the IME needs the explicit autoCap hint (surface regression, v220).
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
@@ -201,22 +249,46 @@ internal fun QuickReplySheet(
                         .fillMaxWidth()
                         .focusRequester(focusRequester),
                 )
-                QuickReplyStatus(state)
+                QuickReplyStatus(
+                    state,
+                    QuickReplyQuoteCallbacks(
+                        onReload = viewModel::onQuoteReloadRequested,
+                        onIgnore = viewModel::onPendingQuoteIgnored,
+                        onResume = viewModel::onDormantQuoteResumed,
+                        onRestoreDraft = viewModel::onDraftRestoreRequested,
+                        onDiscardDraft = viewModel::onDraftDiscardRequested,
+                        onDismissLegacy = viewModel::onLegacyQuoteNoticeDismissed,
+                    ),
+                )
             }
             QuickReplyActions(state, onSubmit = { viewModel.onSubmitClicked(timeoutMillis) })
         }
     }
-    // The field grabs the focus once per sheet opening — the IME rises with the sheet.
-    LaunchedEffect(Unit) { focusRequester.requestFocus() }
     QuickReplyConfirmationDialog(
         visible = state.confirmVisible,
         onConfirm = { viewModel.onSubmitConfirmed(armToken) },
         onDismiss = viewModel::onSubmitConfirmDismissed,
     )
+    QuickReplyUnsavedCloseDialog(
+        visible = state.unsavedCloseVisible,
+        onStay = { viewModel.onUnsavedCloseDecided(leave = false) },
+        onLeave = { viewModel.onUnsavedCloseDecided(leave = true) },
+    )
+}
+
+/**
+ * ED-10 on the sheet (#1450, option A chosen by XaTriX on 13/11) : the editors' own
+ * « Brouillon non enregistré » dialog, shown over the topic while the refused sheet is hidden ;
+ * « Rester » brings the sheet back and saves again, « Quitter sans enregistrer » lets it go.
+ */
+@Composable
+internal fun QuickReplyUnsavedCloseDialog(visible: Boolean, onStay: () -> Unit, onLeave: () -> Unit) {
+    if (visible) EditorUnsavedCloseDialog(onStay = onStay, onLeave = onLeave)
 }
 
 @Composable
-private fun QuickReplyHeader(state: QuickReplyUiState, fullScreenLabel: String, onEscalate: () -> Unit) {
+internal fun QuickReplyHeader(state: QuickReplyUiState, fullScreenLabel: String, onEscalate: () -> Unit) {
+    val offerReason = stringResource(R.string.quick_reply_fullscreen_pending_draft)
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             text = stringResource(R.string.quick_reply_title),
@@ -228,16 +300,50 @@ private fun QuickReplyHeader(state: QuickReplyUiState, fullScreenLabel: String, 
             onClick = onEscalate,
             // Gate #788 — no escalation while a POST is in flight (submit vs navigation
             // race) ; #805 — nor while a [quotemsg] insert is being fetched.
-            enabled = !state.isSubmitting && !state.isPreparingQuotes,
-            modifier = Modifier.semantics { contentDescription = fullScreenLabel },
+            enabled = !state.isSubmitting && !state.isPreparingQuotes && !state.isDiscardingDraft &&
+                !state.quoteStorageUnavailable && state.restorableDraft == null,
+            modifier = Modifier.semantics {
+                contentDescription = fullScreenLabel
+                if (state.restorableDraft != null) stateDescription = offerReason
+            },
         ) {
             RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_open_in_new)
         }
     }
 }
 
+internal data class QuickReplyQuoteCallbacks(
+    val onReload: () -> Unit,
+    val onIgnore: () -> Unit,
+    val onResume: () -> Unit,
+    val onRestoreDraft: () -> Unit,
+    val onDiscardDraft: () -> Unit,
+    val onDismissLegacy: () -> Unit,
+)
+
+@Suppress("CyclomaticComplexMethod") // One flat `if` per independent status row of the sheet.
 @Composable
-private fun QuickReplyStatus(state: QuickReplyUiState) {
+internal fun QuickReplyStatus(state: QuickReplyUiState, callbacks: QuickReplyQuoteCallbacks) {
+    if (state.legacyQuoteRequestDropped) {
+        Text(stringResource(R.string.quick_reply_legacy_quote_dropped), style = MaterialTheme.typography.bodySmall)
+        TextButton(onClick = callbacks.onDismissLegacy) {
+            Text(stringResource(R.string.quick_reply_notice_dismiss))
+        }
+    }
+    if (state.restorableDraft != null) {
+        Text(stringResource(R.string.quick_reply_draft_found), style = MaterialTheme.typography.bodySmall)
+        Row {
+            TextButton(onClick = callbacks.onRestoreDraft, enabled = !state.isDiscardingDraft) {
+                Text(stringResource(R.string.quick_reply_draft_restore))
+            }
+            TextButton(onClick = callbacks.onDiscardDraft, enabled = !state.isDiscardingDraft) {
+                Text(stringResource(R.string.quick_reply_draft_ignore))
+            }
+        }
+    }
+    if (state.pendingQuotes.isNotEmpty() && !state.isPreparingQuotes) {
+        Text(stringResource(R.string.quick_reply_quote_pending), style = MaterialTheme.typography.bodySmall)
+    }
     // #805 cards OFF — the [quotemsg] fetch runs at opening : typing stays enabled (the
     // insert concatenates onto the live field), only send/escalate wait for it.
     if (state.isPreparingQuotes) {
@@ -254,6 +360,22 @@ private fun QuickReplyStatus(state: QuickReplyUiState) {
         }
     }
     state.submitError?.let { error -> QuickReplyErrorBanner(error) }
+    if (state.hasDormantQuote) {
+        TextButton(onClick = callbacks.onResume, enabled = !state.isPreparingQuotes) {
+            Text(stringResource(R.string.quick_reply_resume_quote))
+        }
+    }
+    val quoteNeedsReload = state.pendingQuotes.isNotEmpty() && state.restorableDraft == null && !state.hasDormantQuote
+    if (!state.isLoadingDraft && (state.quoteStorageUnavailable || quoteNeedsReload)) {
+        TextButton(onClick = callbacks.onReload, enabled = !state.isPreparingQuotes && !state.isDiscardingDraft) {
+            Text(stringResource(fr.forumhfr.redface2.core.ui.R.string.editor_action_reload))
+        }
+    }
+    if (state.canIgnorePendingQuote) {
+        TextButton(onClick = callbacks.onIgnore) {
+            Text(stringResource(fr.forumhfr.redface2.core.ui.R.string.editor_action_ignore_quote))
+        }
+    }
 }
 
 @Composable
@@ -294,37 +416,13 @@ private fun QuickReplyConfirmationDialog(visible: Boolean, onConfirm: () -> Unit
 
 /** The sheet's submission summary and verification detail, in the existing fields column. */
 @Composable
-internal fun QuickReplyErrorBanner(error: QuickReplySubmitError) {
-    val summary = when (error) {
-        QuickReplySubmitError.Uncertain -> EditorSubmissionSummaryKind.Uncertain
-        QuickReplySubmitError.DraftWriteFailed -> EditorSubmissionSummaryKind.DraftWriteFailed
-        else -> null
-    }
-    if (summary != null) EditorSubmissionSummary(summary)
-    if (error != QuickReplySubmitError.DraftWriteFailed) Text(
-        text = stringResource(error.messageRes()),
+internal fun QuickReplyErrorBanner(error: EditorError) {
+    if (error.hasSubmissionSummary) EditorSubmissionSummary(error)
+    Text(
+        text = error.bannerText(),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.error,
     )
-}
-
-/** The same wording as the full editor's error banner, module-local copies (feature/topic res). */
-internal fun QuickReplySubmitError.messageRes(): Int = when (this) {
-    QuickReplySubmitError.Uncertain -> R.string.quick_reply_error_uncertain
-    QuickReplySubmitError.DraftWriteFailed ->
-        fr.forumhfr.redface2.core.ui.R.string.editor_submission_draft_write_failed
-    QuickReplySubmitError.Network -> R.string.quick_reply_error_network
-    QuickReplySubmitError.SessionExpired -> R.string.quick_reply_error_session_expired
-    QuickReplySubmitError.QuoteFetchFailed -> R.string.quick_reply_error_quote_fetch
-    is QuickReplySubmitError.Hfr -> when (reason) {
-        ReplyFailureReason.EmptyMessage -> R.string.quick_reply_error_empty
-        ReplyFailureReason.InvalidHashCheck -> R.string.quick_reply_error_invalid_hash
-        ReplyFailureReason.AntiFlood -> R.string.quick_reply_error_anti_flood
-        ReplyFailureReason.TopicLocked -> R.string.quick_reply_error_topic_locked
-        ReplyFailureReason.LoginRequired -> R.string.quick_reply_error_login_required
-        ReplyFailureReason.Unknown -> R.string.quick_reply_error_unknown
-        ReplyFailureReason.UnknownRecipient -> R.string.quick_reply_error_unknown
-    }
 }
 
 // #604 lot 3 — QuoteCard / QuoteCardControls promoted to `:core:ui` (core.ui.editor.QuoteCards):

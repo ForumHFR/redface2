@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -69,8 +71,10 @@ internal fun MessageMenuSheet(
     multiQuoteSelected: Boolean = false,
     onToggleMultiQuote: (() -> Unit)? = null,
     onToggleBlockAuthor: (() -> Unit)? = null,
+    onEdit: (() -> Unit)? = null,
+    connectedPseudo: String? = null,
 ) {
-    val sheetState = rememberModalBottomSheetState()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     val plainText = remember(message.content) { postContentPlainText(message.content) }
@@ -82,8 +86,10 @@ internal fun MessageMenuSheet(
         sheetState = sheetState,
     ) {
         Column(
+            // #1417 (Astra, #1630): one detent, so a short window or a large font scrolls the menu.
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp)
                 .navigationBarsPadding(),
         ) {
@@ -139,6 +145,21 @@ internal fun MessageMenuSheet(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.messages_message_menu_copy_text))
+            }
+
+            if (onEdit != null && isPrivateMessageEditable(message, connectedPseudo)) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        hideThenDismiss(coroutineScope, sheetState) {
+                            onDismiss()
+                            onEdit()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.messages_message_menu_edit))
+                }
             }
 
             if (onToggleMultiQuote != null) {

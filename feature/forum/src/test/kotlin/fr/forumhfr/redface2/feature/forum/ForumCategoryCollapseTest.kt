@@ -28,12 +28,12 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
 import fr.forumhfr.redface2.core.model.TopicSummary
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -239,7 +239,7 @@ class ForumCategoryCollapseTest {
         )
         compose.onNodeWithText("Nouveau topic", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithContentDescription("Nouveau topic").assertIsDisplayed().assertHasClickAction()
-        compose.onRoot().captureRoboImage("build/outputs/roborazzi/forum_category_collapse_anchor.png")
+        compose.onRoot().captureRoboImage("src/test/screenshots/forum_category_collapse_anchor.png")
         compose.onNodeWithTag(FORUM_CATEGORY_LIST_TAG).performSemanticsAction(SemanticsActions.ScrollBy) {
             it(0f, 24f)
         }
@@ -253,7 +253,7 @@ class ForumCategoryCollapseTest {
     fun recordLargeFontCollapsed() {
         state = state.copy(menusCollapsed = true, stickyTopicsCollapsed = true, categoryName = LONG_TITLE)
         mount(fontScale = 2f)
-        compose.onRoot().captureRoboImage("build/outputs/roborazzi/forum_category_collapse_large_font.png")
+        compose.onRoot().captureRoboImage("src/test/screenshots/forum_category_collapse_large_font.png")
     }
 
     private fun mount(fontScale: Float = 1f) {

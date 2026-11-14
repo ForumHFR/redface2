@@ -22,3 +22,7 @@ core/parser/src/test/resources/fixtures/*_files/
 # Debug-only canonical key INTENTIONALLY committed (stable `adb install -r` across envs, BUILD-03).
 # Future-proof against a `*.keystore`/`*.jks` rule being added later.
 !config/signing/redface2-debug.keystore
+
+# Python bytecode from running scripts/tests locally (#1638 committed some by mistake).
+__pycache__/
+*.pyc

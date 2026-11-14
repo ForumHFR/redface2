@@ -40,3 +40,10 @@ dependencies {
     testImplementation(libs.okhttp.tls)
     testImplementation(testFixtures(project(":core:domain")))
 }
+
+// Tests read captures from :core:parser's fixtures by relative path (sharedParserFixture).
+tasks.withType<Test>().configureEach {
+    inputs.dir(rootProject.layout.projectDirectory.dir("core/parser/src/test/resources/fixtures"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("sharedParserFixtures")
+}

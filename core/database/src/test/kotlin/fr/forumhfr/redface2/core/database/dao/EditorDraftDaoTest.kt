@@ -4,6 +4,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import fr.forumhfr.redface2.core.database.RedfaceDatabase
 import fr.forumhfr.redface2.core.database.entities.EditorDraftEntity
+import fr.forumhfr.redface2.core.database.entities.EditorDraftOfferEntity
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -55,7 +56,7 @@ class EditorDraftDaoTest {
                 recipients = "bob",
                 updatedAt = 1_700_000_000_000L,
                 isPrivate = true,
-            ),
+            ).copy(pendingInlineQuoteRequest = "coordinates"),
         )
 
         val stored = dao.get("alice|mpnew")
@@ -64,6 +65,7 @@ class EditorDraftDaoTest {
         assertEquals("secret subject", stored.subject)
         assertEquals("bob", stored.recipients)
         assertEquals(true, stored.isPrivate)
+        assertEquals("coordinates", stored.pendingInlineQuoteRequest)
     }
 
     @Test
@@ -90,7 +92,8 @@ class EditorDraftDaoTest {
             val original = draft(
                 "alice|$state", "alice", body = "private body", subject = "private subject",
                 recipients = "recipient", isPrivate = true,
-            ).copy(contentVersion = 7, attemptId = "attempt", attemptVersion = 4, attemptState = state)
+            ).copy(contentVersion = 7, attemptId = "attempt", attemptVersion = 4, attemptState = state,
+                pendingInlineQuoteRequest = "coordinates")
             dao.upsert(original)
             val otherOwner = original.copy(draftKey = "bob|$state", ownerId = "bob")
             val publicDraft = original.copy(draftKey = "alice|public:$state", isPrivate = false)
@@ -99,21 +102,25 @@ class EditorDraftDaoTest {
 
             dao.deletePrivateForUser("alice")
 
-            assertEquals(original.copy(body = "", subject = null, recipients = null), dao.get(original.draftKey))
+            val erased = original.copy(body = "", subject = null, recipients = null, pendingInlineQuoteRequest = null)
+            assertEquals(erased, dao.get(original.draftKey))
             assertEquals(otherOwner, dao.get(otherOwner.draftKey))
             assertEquals(publicDraft, dao.get(publicDraft.draftKey))
             // The transaction remains safe and idempotent on a repeated auth emission.
             dao.deletePrivateForUser("alice")
-            assertEquals(original.copy(body = "", subject = null, recipients = null), dao.get(original.draftKey))
+            assertEquals(erased, dao.get(original.draftKey))
         }
     }
 
     @Test
     fun `deleteOlderThan is a strict less-than at the cutoff boundary`() = runTest {
         val cutoff = 1_700_000_000_000L
-        dao.upsert(draft("alice|old", ownerId = "alice", updatedAt = cutoff - 1))
-        dao.upsert(draft("alice|exact", ownerId = "alice", updatedAt = cutoff))
-        dao.upsert(draft("alice|fresh", ownerId = "alice", updatedAt = cutoff + 1))
+        dao.upsert(draft("alice|old", ownerId = "alice", updatedAt = cutoff - 1)
+            .copy(pendingInlineQuoteRequest = "coordinates"))
+        dao.upsert(draft("alice|exact", ownerId = "alice", updatedAt = cutoff)
+            .copy(pendingInlineQuoteRequest = "coordinates"))
+        dao.upsert(draft("alice|fresh", ownerId = "alice", updatedAt = cutoff + 1)
+            .copy(pendingInlineQuoteRequest = "coordinates"))
 
         dao.deleteOlderThan(cutoff)
 
@@ -121,9 +128,47 @@ class EditorDraftDaoTest {
         assertNull(dao.get("alice|old"))
         // … the row exactly at the cutoff is KEPT (strict `<`, no off-by-one) …
         assertNotNull(dao.get("alice|exact"))
+        assertEquals("coordinates", dao.get("alice|exact")?.pendingInlineQuoteRequest)
         // … and anything newer is obviously kept.
         assertNotNull(dao.get("alice|fresh"))
     }
+
+    @Test
+    fun `deleteOlderThan never ages out an unresolved send, public or private`() = runTest {
+        val day = 86_400_000L
+        val now = 1_700_000_000_000L
+        val stale = now - 31 * day
+        val states = listOf(null, "IN_PROGRESS", "UNCERTAIN", "PUBLISHED")
+        val rows = listOf(false, true).flatMap { isPrivate ->
+            states.map { state ->
+                draft("alice|${if (isPrivate) "mpreply" else "reply:23"}:${state ?: "ORDINARY"}", ownerId = "alice",
+                    body = "typed text", subject = "subject", recipients = "bob", updatedAt = stale,
+                    isPrivate = isPrivate,
+                ).copy(contentVersion = 7, attemptId = state?.let { "attempt-$it" }, attemptVersion = state?.let { 7L },
+                    attemptState = state, pendingInlineQuoteRequest = "coordinates", bodyProvenance = "provenance")
+            }
+        }
+        rows.forEach { dao.upsert(it) }
+        listOf(false, true).forEach { isPrivate ->
+            dao.insertOffer(offer("stale-$isPrivate", updatedAt = stale, isPrivate = isPrivate))
+            dao.insertOffer(offer("fresh-$isPrivate", updatedAt = now, isPrivate = isPrivate))
+        }
+
+        dao.deleteOlderThan(now - 30 * day)
+
+        rows.forEach { row ->
+            val expected = row.takeIf { it.attemptState == "IN_PROGRESS" || it.attemptState == "UNCERTAIN" }
+            // Whole-row equality: text, headers, attempt token/version/state, quote request and date.
+            assertEquals(row.draftKey, expected, dao.get(row.draftKey))
+        }
+        // Offers keep their own retention, attached or not to a surviving row.
+        assertEquals(listOf("fresh-false", "fresh-true"), dao.offers("alice", "ctx").map { it.offerId }.sorted())
+    }
+
+    private fun offer(offerId: String, updatedAt: Long, isPrivate: Boolean) = EditorDraftOfferEntity(
+        ownerId = "alice", contextKey = "ctx", offerId = offerId, sourceVersion = 1, body = "offered",
+        subject = null, recipients = null, updatedAt = updatedAt, isPrivate = isPrivate,
+    )
 
     @Test
     fun `deleteByKey removes a single row`() = runTest {

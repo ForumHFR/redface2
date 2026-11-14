@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -27,6 +28,75 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class SmileyPickerControllerTest {
 
+    @Test
+    fun `three typed characters stay Idle until debounce then start the search`() = runTest {
+        val result = CompletableDeferred<List<EditorSmiley>>()
+        var calls = 0
+        val controller = SmileyPickerController(this, { _, _ -> calls++; result.await() })
+        controller.open(SmileyPickerOpenIntent.SEARCH)
+        listOf("j", "ja", "jap").forEach(controller::onQueryChanged)
+        advanceTimeBy(SmileyPickerController.SEARCH_DEBOUNCE_MS - 1)
+        val open = controller.state.value as SmileyPickerState.Open
+        assertEquals("jap", open.query)
+        assertEquals(WikiSearchState.Idle, open.wiki)
+        assertEquals(0, calls)
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals(WikiSearchState.Loading, (controller.state.value as SmileyPickerState.Open).wiki)
+        assertEquals(1, calls)
+        result.complete(emptyList())
+        runCurrent()
+    }
+
+    @Test
+    fun `an edited restored query stays neutral even when its original text is retyped`() = runTest {
+        val controller = SmileyPickerController(this, { _, _ -> listOf(smiley) })
+        controller.open(SmileyPickerOpenIntent.SEARCH)
+        controller.onQueryChanged("jap")
+        advanceUntilIdle()
+        controller.dismiss()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
+        val restored = controller.state.value as SmileyPickerState.Open
+        assertEquals("jap", restored.restoredQuery)
+        controller.onQueryChanged("japo")
+        val edited = controller.state.value as SmileyPickerState.Open
+        assertNull(edited.restoredQuery)
+        // Restored results stay on screen during the debounce instead of flashing empty.
+        assertEquals(restored.wiki, edited.wiki)
+        controller.onQueryChanged("jap")
+        val open = controller.state.value as SmileyPickerState.Open
+        assertEquals(restored.wiki, open.wiki)
+        assertNull(open.restoredQuery)
+        controller.dismiss()
+    }
+
+    @Test
+    fun `search forces Wiki without a request and consultation restores results`() = runTest {
+        var calls = 0
+        val controller = SmileyPickerController(this, { _, _ -> calls++; listOf(smiley) })
+        controller.open(SmileyPickerOpenIntent.SEARCH)
+        var open = controller.state.value as SmileyPickerState.Open
+        assertEquals(SmileyPickerTab.WIKI, open.initialTab)
+        assertEquals(SmileyPickerOpenIntent.SEARCH, open.openingIntent)
+        advanceUntilIdle()
+        assertEquals(0, calls)
+        controller.onQueryChanged("jap")
+        advanceUntilIdle()
+        controller.dismiss()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
+        open = controller.state.value as SmileyPickerState.Open
+        assertEquals(SmileyPickerOpenIntent.CONSULTATION, open.openingIntent)
+        assertEquals("jap", open.query)
+        assertEquals(WikiSearchState.Results(listOf(smiley)), open.wiki)
+        controller.dismiss()
+        controller.open(SmileyPickerOpenIntent.SEARCH)
+        open = controller.state.value as SmileyPickerState.Open
+        assertEquals(SmileyPickerTab.WIKI, open.initialTab)
+        assertEquals(WikiSearchState.Results(listOf(smiley)), open.wiki)
+        advanceUntilIdle()
+        assertEquals(1, calls)
+    }
+
     private val smiley = EditorSmiley(
         token = "[:rofl]",
         imageUrl = "https://x/rofl.gif",
@@ -43,14 +113,14 @@ class SmileyPickerControllerTest {
             searchWiki = { _, _ -> error("Favorites must not trigger a search") },
             favoriteSources = SmileyPickerFavoriteSources(favoriteSmileys = { favorites }),
         )
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertEquals(favorites, (controller.state.value as SmileyPickerState.Open).favoriteSmileys)
     }
 
     @Test
     fun `empty form favorites leave no favorites section in the state`() = runTest {
         val controller = SmileyPickerController(this, { _, _ -> emptyList() })
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertTrue((controller.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
     }
 
@@ -64,7 +134,7 @@ class SmileyPickerControllerTest {
             searchWiki = { _, _ -> emptyList() },
             favoriteSources = SmileyPickerFavoriteSources(favoriteSmileys = { favorites }),
         )
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onQueryChanged("ab")
         favorites = listOf(
             EditorSmiley("[:fictif_b:3]", "https://example.invalid/b.gif", EditorSmileySource.HFR_FAVORITE),
@@ -77,7 +147,7 @@ class SmileyPickerControllerTest {
         favorites = emptyList()
         controller.refreshFavorites(controller.favoriteFormStamp())
         assertEquals(SmileyPickerState.Hidden, controller.state.value)
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertTrue((controller.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
         assertEquals("ab", (controller.state.value as SmileyPickerState.Open).query)
     }
@@ -86,9 +156,9 @@ class SmileyPickerControllerTest {
     fun `open is idempotent and dismiss resets to Hidden`() = runTest {
         val controller = SmileyPickerController(this, { _, _ -> emptyList() })
 
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onQueryChanged("ja")
-        controller.open() // must NOT reset the typed query
+        controller.open(SmileyPickerOpenIntent.CONSULTATION) // must NOT reset the typed query
 
         val open = controller.state.value as SmileyPickerState.Open
         assertEquals("ja", open.query)
@@ -102,7 +172,7 @@ class SmileyPickerControllerTest {
         var calls = 0
         val controller = SmileyPickerController(this, { _, _ -> calls++; emptyList() })
 
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onQueryChanged("ja")
         advanceUntilIdle()
 
@@ -118,7 +188,7 @@ class SmileyPickerControllerTest {
             listOf(smiley)
         })
 
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onQueryChanged("jap")
         advanceUntilIdle()
 
@@ -134,7 +204,7 @@ class SmileyPickerControllerTest {
             emptyList()
         })
 
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onQueryChanged("jap")
         advanceTimeBy(SmileyPickerController.SEARCH_DEBOUNCE_MS / 2)
         controller.onQueryChanged("japo")
@@ -152,7 +222,7 @@ class SmileyPickerControllerTest {
             onSearchFailed = { reported = it },
         )
 
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onQueryChanged("jap")
         advanceUntilIdle()
 
@@ -165,7 +235,7 @@ class SmileyPickerControllerTest {
     fun `a result arriving after dismiss is dropped`() = runTest {
         val controller = SmileyPickerController(this, { _, _ -> listOf(smiley) })
 
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onQueryChanged("jap")
         advanceTimeBy(SmileyPickerController.SEARCH_DEBOUNCE_MS / 2)
         controller.dismiss()
@@ -183,7 +253,7 @@ class SmileyPickerControllerTest {
         var calls = 0
         val controller = SmileyPickerController(this, { _, _ -> calls++; emptyList() })
 
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.dismiss()
         controller.onQueryChanged("jap") // late UI callback after the sheet closed
         advanceUntilIdle()
@@ -201,7 +271,7 @@ class SmileyPickerControllerTest {
             userId = { null },
         )
 
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onQueryChanged("jap")
         advanceUntilIdle()
 
@@ -215,18 +285,19 @@ class SmileyPickerControllerTest {
         var calls = 0
         val controller = SmileyPickerController(this, { _, _ -> calls++; listOf(smiley) })
 
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onQueryChanged("jap")
         advanceUntilIdle()
         assertEquals(1, calls)
 
         val diagnostics = (controller.state.value as SmileyPickerState.Open).diagnostics
         controller.dismiss() // insertion and swipe-down both land here
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
 
         assertEquals(
             "the dismissed search must come back verbatim — no refetch",
             SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Results(listOf(smiley)),
+                openingIntent = SmileyPickerOpenIntent.CONSULTATION, restoredQuery = "jap",
                 onDetailChange = controller::onDetailChanged,
                 onWikiKeywordsRetry = controller::retryWikiKeywords, diagnostics = diagnostics),
             controller.state.value,
@@ -240,7 +311,7 @@ class SmileyPickerControllerTest {
         val gate = CompletableDeferred<List<EditorSmiley>>()
         val controller = SmileyPickerController(this, { _, _ -> gate.await() })
 
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onQueryChanged("jap")
         // Cross the debounce so the state flips to Loading, with the fetch still hanging.
         advanceTimeBy(SmileyPickerController.SEARCH_DEBOUNCE_MS)
@@ -252,11 +323,12 @@ class SmileyPickerControllerTest {
 
         val diagnostics = (controller.state.value as SmileyPickerState.Open).diagnostics
         controller.dismiss() // cancels the hanging job
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
 
         // A restored Loading would spin forever (its job is dead) : it must normalise to Idle.
         assertEquals(
             SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Idle,
+                openingIntent = SmileyPickerOpenIntent.CONSULTATION, restoredQuery = "jap",
                 onDetailChange = controller::onDetailChanged,
                 onWikiKeywordsRetry = controller::retryWikiKeywords, diagnostics = diagnostics),
             controller.state.value,
@@ -267,7 +339,7 @@ class SmileyPickerControllerTest {
     fun `a dismiss on Error reopens on Idle — no stale failure banner`() = runTest {
         val controller = SmileyPickerController(this, { _, _ -> throw IOException("offline") })
 
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onQueryChanged("jap")
         advanceUntilIdle()
         assertEquals(
@@ -277,10 +349,11 @@ class SmileyPickerControllerTest {
 
         val diagnostics = (controller.state.value as SmileyPickerState.Open).diagnostics
         controller.dismiss()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
 
         assertEquals(
             SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Idle,
+                openingIntent = SmileyPickerOpenIntent.CONSULTATION, restoredQuery = "jap",
                 onDetailChange = controller::onDetailChanged,
                 onWikiKeywordsRetry = controller::retryWikiKeywords, diagnostics = diagnostics),
             controller.state.value,
@@ -292,15 +365,16 @@ class SmileyPickerControllerTest {
         var calls = 0
         val controller = SmileyPickerController(this, { _, _ -> calls++; emptyList() })
 
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onQueryChanged("ja") // below MIN_WIKI_QUERY_LENGTH → Idle, no search
         val diagnostics = (controller.state.value as SmileyPickerState.Open).diagnostics
         controller.dismiss()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         advanceUntilIdle()
 
         assertEquals(
             SmileyPickerState.Open(query = "ja", wiki = WikiSearchState.Idle,
+                openingIntent = SmileyPickerOpenIntent.CONSULTATION, restoredQuery = "ja",
                 onDetailChange = controller::onDetailChanged,
                 onWikiKeywordsRetry = controller::retryWikiKeywords, diagnostics = diagnostics),
             controller.state.value,
@@ -312,14 +386,15 @@ class SmileyPickerControllerTest {
     fun `open while already Open never clobbers the live search with the snapshot`() = runTest {
         val controller = SmileyPickerController(this, { _, _ -> listOf(smiley) })
 
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onQueryChanged("jap")
         advanceUntilIdle()
         controller.dismiss() // snapshot = ("jap", Results)
 
-        controller.open() // restores the snapshot…
+        controller.open(SmileyPickerOpenIntent.CONSULTATION) // restores the snapshot…
         controller.onQueryChanged("sm") // …then the user starts a different search
-        controller.open() // a redundant open (e.g. re-tapped trigger) must be a no-op
+        // A redundant open (e.g. re-tapped trigger) must be a no-op.
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
 
         assertEquals(
             "the idempotent open must keep the live query, not resurrect the snapshot",

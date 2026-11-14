@@ -10,11 +10,14 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSessionResources
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
+import fr.forumhfr.redface2.core.domain.editor.EditorWriteOwner
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
 import fr.forumhfr.redface2.core.domain.editor.SubmissionErrorProbe
 import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
@@ -31,11 +34,14 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.toEditorError
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -79,14 +85,194 @@ class QuickReplyViewModelTest {
     }
 
     @Test
+    fun `expired hash with failed prefetch fetches a new form before the next POST`() = runTest {
+        val base = FakeQuickReplyRepository(results = mutableListOf(
+            ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck),
+        ))
+        var fetches = 0
+        var submittedHash: String? = null
+        val repository = object : ReplyRepository by base {
+            override suspend fun fetchReplyForm(context: ReplyContext): ReplyForm {
+                fetches++
+                if (fetches == 2) throw IOException("refresh offline")
+                return base.fetchReplyForm(context).copy(hashCheck = "hash-$fetches")
+            }
+
+            override suspend fun submitReply(
+                context: ReplyContext, form: ReplyForm, bbcodeContent: String, options: ReplyFormOptions,
+            ): ReplySubmitResult {
+                submittedHash = form.hashCheck
+                return base.submitReply(context, form, bbcodeContent, options)
+            }
+        }
+        val vm = quickReplyViewModel(replyRepository = repository)
+        vm.openForTest()
+        advanceUntilIdle()
+        vm.onTextChanged(TextFieldValue("body"))
+        vm.onSubmitClicked()
+        advanceUntilIdle()
+        assertEquals(EditorErrors.invalidHashCheck, vm.state.value.submitError)
+        assertEquals(2, fetches)
+        assertEquals(1, base.submitCalls)
+        assertEquals("hash-1", submittedHash)
+        vm.onSubmitClicked()
+        advanceUntilIdle()
+        assertEquals(3, fetches)
+        assertEquals(2, base.submitCalls)
+        assertEquals("hash-3", submittedHash)
+    }
+
+    @Test
+    fun `ED132 quote alone with empty prefill stays blocked through close and reopen (#1033)`() = runTest {
+        val repository = FakeQuickReplyRepository(quotePrefills = mapOf(101 to ""))
+        val vm = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
+        vm.openForTest(listOf(preview(101, "alice")))
+        advanceUntilIdle()
+        vm.onSubmitClicked()
+        assertEquals("", vm.state.value.text.text)
+        assertEquals(EditorErrors.quoteFetchFailed(inline = true, quickReply = true), vm.state.value.submitError)
+        assertFalse(vm.state.value.canSubmit)
+        vm.onDismissed()
+        advanceUntilIdle()
+        vm.openForTest()
+        advanceUntilIdle()
+        assertEquals(listOf(101), vm.state.value.pendingQuotes.map { it.numreponse })
+        assertFalse(vm.state.value.canSubmit)
+        assertEquals(0, repository.submitCalls)
+    }
+
+    @Test
+    fun `ED132 a pending request revokes the previous arm even after its quote arrives`() = runTest {
+        val repository = FakeQuickReplyRepository()
+        val vm = quickReplyViewModel(
+            replyRepository = repository, quoteCardsEnabled = false, confirmBeforePosting = true,
+        )
+        vm.openForTest()
+        vm.onTextChanged(TextFieldValue("body"))
+        vm.onSubmitClicked()
+        val token = (vm.state.value.submission as EditorSubmissionState.Armed).token
+        vm.openForTest(listOf(preview(101, "alice")))
+        advanceTimeBy(401)
+        runCurrent()
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertFalse(vm.state.value.confirmVisible)
+        vm.onSubmitConfirmed(token)
+        runCurrent()
+        assertEquals(0, repository.submitCalls)
+    }
+
+    @Test
+    fun `ED131 sheet error survives typing and selection`() = runTest {
+        val repository = FakeQuickReplyRepository(
+            results = mutableListOf(ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)),
+        )
+        val vm = quickReplyViewModel(replyRepository = repository)
+        vm.openForTest()
+        vm.onTextChanged(TextFieldValue("body"))
+        vm.onSubmitClicked()
+        advanceUntilIdle()
+        vm.onTextChanged(TextFieldValue("changed"))
+        assertEquals(EditorErrors.empty, vm.state.value.submitError)
+        vm.onTextChanged(TextFieldValue("changed", TextRange(1, 3)))
+        assertEquals(EditorErrors.empty, vm.state.value.submitError)
+    }
+
+    @Test
+    fun `ED132 escalation carries no inline coordinates and reopening reads the pending row`() = runTest {
+        val repository = FakeQuickReplyRepository(quotePrefills = mapOf(202 to ""))
+        val vm = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
+        val quotes = listOf(preview(202, "bob"), preview(101, "alice"))
+        vm.openForTest(quotes)
+        advanceUntilIdle()
+        vm.onTextChanged(TextFieldValue("body"))
+        vm.onSubmitClicked()
+        vm.onSubmitConfirmed(null)
+        assertFalse(vm.state.value.canSubmit)
+        assertEquals(0, repository.submitCalls)
+        vm.onEscalateRequested()
+        advanceUntilIdle()
+        val effect = vm.effects.first() as QuickReplyEffect.EscalateToFullEditor
+        assertTrue(effect.quotes.isEmpty())
+        assertEquals(EditorErrors.quoteFetchFailed(inline = true, quickReply = true), vm.state.value.submitError)
+        vm.onDismissed()
+        advanceUntilIdle()
+        vm.openForTest()
+        advanceUntilIdle()
+        assertEquals(listOf(202, 101), vm.state.value.pendingQuotes.map { it.numreponse })
+        assertEquals("body", vm.state.value.text.text)
+        assertEquals(0, repository.submitCalls)
+    }
+
+    @Test
+    fun `ED132 close and recite retries all pending quotes once and retains typing`() = runTest {
+        var fail = true
+        val base = FakeQuickReplyRepository()
+        val repository = object : ReplyRepository by base {
+            override suspend fun fetchReplyForm(context: ReplyContext): ReplyForm {
+                if (context.isQuote && fail) throw IOException("offline")
+                return base.fetchReplyForm(context)
+            }
+        }
+        val store = FakeQuickReplyDraftStore()
+        val vm = quickReplyViewModel(replyRepository = repository, draftStore = store, quoteCardsEnabled = false)
+        val quotes = listOf(preview(202, "bob"), preview(101, "alice"))
+        vm.openForTest(quotes)
+        advanceUntilIdle()
+        vm.onTextChanged(TextFieldValue("body"))
+        vm.onDismissed()
+        advanceUntilIdle()
+        assertEquals(listOf(202, 101), vm.state.value.pendingQuotes.map { it.numreponse })
+        fail = false
+        vm.openForTest(listOf(preview(101, "alice")))
+        advanceUntilIdle()
+        val body = vm.state.value.text.text
+        assertEquals(1, Regex("quotemsg=202").findAll(body).count())
+        assertEquals(1, Regex("quotemsg=101").findAll(body).count())
+        assertTrue(body.startsWith("body"))
+        assertTrue(body.indexOf("202") < body.indexOf("101"))
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertEquals(0, base.submitCalls)
+    }
+
+    @Test
     fun `opening the sheet seeds the field from the draft row`() = runTest {
         val store = FakeQuickReplyDraftStore(initialBody = "brouillon en cours")
         val viewModel = quickReplyViewModel(draftStore = store)
 
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         advanceUntilIdle()
 
         assertEquals("brouillon en cours", viewModel.state.value.text.text)
+    }
+
+    @Test
+    fun `auto-resumed C never becomes D after autosave or an uncertain send`() = runTest {
+        val store = FakeQuickReplyDraftStore(initialBody = "live composition")
+        val repository = FakeQuickReplyRepository().apply { submitException = IOException("response lost") }
+        val first = quickReplyViewModel(replyRepository = repository, draftStore = store)
+        first.onSheetOpened()
+        runCurrent()
+        first.onTextChanged(TextFieldValue("edited live composition"))
+        advanceTimeBy(AUTOSAVE_DEBOUNCE_PLUS_MS)
+        runCurrent()
+        assertTrue(store.loadOffers("xaat", EditorDraftKey.reply(23, 35421)).isEmpty())
+        first.onSubmitClicked()
+        runCurrent()
+        val attempt = store.entries.values.single().attempt
+        assertEquals(EditorDraftStore.AttemptStatus.UNCERTAIN, attempt?.status)
+        first.viewModelScope.cancel()
+
+        val recreated = quickReplyViewModel(replyRepository = repository, draftStore = store)
+        recreated.onSheetOpened()
+        runCurrent()
+        assertEquals("edited live composition", recreated.state.value.text.text)
+        assertEquals(EditorErrors.uncertain, recreated.state.value.submitError)
+        assertNull(recreated.state.value.restorableDraft)
+        assertTrue(recreated.state.value.canSubmit)
+        assertEquals(attempt, store.entries.values.single().attempt)
+        assertTrue(store.loadOffers("xaat", EditorDraftKey.reply(23, 35421)).isEmpty())
+        assertEquals(1, repository.submitCalls)
+        recreated.viewModelScope.cancel()
     }
 
     @Test
@@ -95,13 +281,13 @@ class QuickReplyViewModelTest {
         // shared #405 row → back → reopen. The row must win over the VM's cached text.
         val store = FakeQuickReplyDraftStore()
         val viewModel = quickReplyViewModel(draftStore = store)
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         viewModel.onTextChanged(TextFieldValue("version sheet"))
         viewModel.onEscalateRequested()
         advanceUntilIdle()
 
         store.storedBody = "version plein écran"
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         advanceUntilIdle()
 
         assertEquals("version plein écran", viewModel.state.value.text.text)
@@ -114,7 +300,7 @@ class QuickReplyViewModelTest {
         // opening must re-snapshot the owner : bob gets HIS row, never alice's private draft.
         val store = FakeQuickReplyDraftStore(initialBody = "brouillon privé d'alice", initialOwner = "alice")
         val viewModel = quickReplyViewModel(draftStore = store)
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         advanceUntilIdle()
         assertEquals("brouillon privé d'alice", viewModel.state.value.text.text)
         viewModel.onDismissed()
@@ -122,7 +308,7 @@ class QuickReplyViewModelTest {
 
         store.activeOwner = "bob"
         store.storedBody = "brouillon de bob"
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         advanceUntilIdle()
 
         assertEquals(
@@ -139,7 +325,7 @@ class QuickReplyViewModelTest {
         // snapshot is gated to hold the load in flight).
         val store = FakeQuickReplyDraftStore(initialBody = "brouillon privé d'alice", initialOwner = "alice")
         val viewModel = quickReplyViewModel(draftStore = store)
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         advanceUntilIdle()
         viewModel.onDismissed()
         advanceUntilIdle()
@@ -151,7 +337,7 @@ class QuickReplyViewModelTest {
 
         viewModel.state.test {
             assertEquals("brouillon privé d'alice", awaitItem().text.text) // pre-reopen baseline
-            viewModel.onSheetOpened()
+            viewModel.openForTest()
             // The masking state must land BEFORE the (still-gated) load completes.
             assertEquals("bob must never see alice's text mid-load", "", awaitItem().text.text)
             ownerGate.complete(Unit)
@@ -170,13 +356,13 @@ class QuickReplyViewModelTest {
         val ownerGate = CompletableDeferred<Unit>()
         store.ownerGate = ownerGate
         val viewModel = quickReplyViewModel(draftStore = store)
-        viewModel.onSheetOpened() // session 1 : owner snapshot still pending
+        viewModel.openForTest() // session 1 : owner snapshot still pending
         viewModel.onTextChanged(TextFieldValue("texte d'alice"))
         viewModel.onDismissed() // flush scheduled, awaiting session 1's owner
         advanceUntilIdle()
 
         store.activeOwner = "bob"
-        viewModel.onSheetOpened() // seals session 1 before its owner ever resolved
+        viewModel.openForTest() // seals session 1 before its owner ever resolved
         ownerGate.complete(Unit) // the late resolution must not resurrect session 1's flush
         advanceUntilIdle()
 
@@ -229,13 +415,13 @@ class QuickReplyViewModelTest {
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
         advanceUntilIdle() // init prefetch for the assisted request page (3).
 
-        viewModel.onSheetOpened(currentPage = 3)
+        viewModel.openForTest(currentPage = 3)
         viewModel.onTextChanged(TextFieldValue("premier"))
         viewModel.onSubmitClicked()
         advanceUntilIdle()
         assertEquals(QuickReplyEffect.SubmitSucceeded(targetPage = 3, scrollTo = 301), viewModel.effects.first())
 
-        viewModel.onSheetOpened(currentPage = 5, initialQuotes = listOf(preview(202, "bob")))
+        viewModel.openForTest(currentPage = 5, initialQuotes = listOf(preview(202, "bob")))
         advanceUntilIdle()
         assertEquals("[quotemsg=202]corps[/quotemsg]\n", viewModel.state.value.text.text)
         viewModel.onTextChanged(TextFieldValue(viewModel.state.value.text.text + "\nsecond"))
@@ -265,7 +451,7 @@ class QuickReplyViewModelTest {
         advanceUntilIdle()
 
         assertEquals(
-            QuickReplySubmitError.Hfr(ReplyFailureReason.AntiFlood),
+            ReplyFailureReason.AntiFlood.toEditorError(),
             viewModel.state.value.submitError,
         )
         assertEquals("flood", viewModel.state.value.text.text)
@@ -285,7 +471,7 @@ class QuickReplyViewModelTest {
         advanceUntilIdle()
 
         assertEquals(
-            QuickReplySubmitError.Hfr(ReplyFailureReason.InvalidHashCheck),
+            ReplyFailureReason.InvalidHashCheck.toEditorError(),
             viewModel.state.value.submitError,
         )
         // 1 prefetch at open + 1 silent refetch after the expired hash.
@@ -315,7 +501,7 @@ class QuickReplyViewModelTest {
             viewModel.onEscalateRequested()
             runCurrent()
             expectNoEvents()
-            assertEquals(QuickReplySubmitError.DraftWriteFailed, viewModel.state.value.submitError)
+            assertEquals(EditorErrors.draftSaveFailed, viewModel.state.value.submitError)
         }
     }
 
@@ -328,11 +514,11 @@ class QuickReplyViewModelTest {
         viewModel.onSubmitClicked()
         runCurrent()
         val attempt = store.entries.values.single().attempt?.token
-        assertEquals(QuickReplySubmitError.Uncertain, viewModel.state.value.submitError)
+        assertEquals(EditorErrors.uncertain, viewModel.state.value.submitError)
         viewModel.onTextChanged(viewModel.state.value.text.copy(selection = TextRange(0)))
-        assertEquals(QuickReplySubmitError.Uncertain, viewModel.state.value.submitError)
+        assertEquals(EditorErrors.uncertain, viewModel.state.value.submitError)
         viewModel.onTextChanged(TextFieldValue("edited uncertainty"))
-        assertEquals(QuickReplySubmitError.Uncertain, viewModel.state.value.submitError)
+        assertEquals(EditorErrors.uncertain, viewModel.state.value.submitError)
         viewModel.effects.test {
             viewModel.onEscalateRequested()
             assertEquals(QuickReplyEffect.EscalateToFullEditor(emptyList()), awaitItem())
@@ -354,6 +540,189 @@ class QuickReplyViewModelTest {
         advanceUntilIdle()
 
         assertEquals("frappe interrompue", store.storedBody)
+    }
+
+    @Test
+    fun `dismiss commits the close only after the awaited final save - ED10`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val store = FakeQuickReplyDraftStore().apply { saveReturnGate = gate }
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.openForTest()
+        runCurrent()
+        viewModel.onTextChanged(TextFieldValue("dernière frappe"))
+        viewModel.effects.test {
+            viewModel.onDismissed()
+            runCurrent()
+            expectNoEvents() // The sheet stays mounted while the write is in flight.
+            assertTrue(viewModel.state.value.isClosing)
+            assertFalse(viewModel.state.value.canSubmit)
+            viewModel.onTextChanged(TextFieldValue("input from the hidden IME"))
+            assertEquals("dernière frappe", viewModel.state.value.text.text)
+            viewModel.onSheetAttached(1, emptyList(), restored = true)
+            assertTrue(viewModel.state.value.isClosing)
+            gate.complete(Unit)
+            assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
+        }
+        assertEquals("dernière frappe", store.storedBody)
+        assertFalse(viewModel.state.value.unsavedCloseVisible)
+    }
+
+    @Test
+    fun `a refused final save keeps the sheet mounted and asks - ED10`() = runTest {
+        val store = FakeQuickReplyDraftStore().apply { saveFailure = IOException("disk full") }
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onTextChanged(TextFieldValue("texte non enregistré"))
+        viewModel.effects.test {
+            viewModel.onDismissed()
+            advanceUntilIdle()
+            expectNoEvents() // Never a silent unmount over an unsaved field.
+        }
+        assertTrue(viewModel.state.value.unsavedCloseVisible)
+        assertTrue(viewModel.state.value.isClosing)
+        assertEquals("texte non enregistré", viewModel.state.value.text.text)
+        assertNull(store.storedBody)
+    }
+
+    @Test
+    fun `staying after a refused save keeps the field and a later dismiss retries - ED10`() = runTest {
+        val store = FakeQuickReplyDraftStore().apply { saveFailure = IOException("disk full") }
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onTextChanged(TextFieldValue("texte à garder"))
+        viewModel.effects.test {
+            viewModel.onDismissed()
+            advanceUntilIdle()
+            viewModel.onUnsavedCloseDecided(leave = false)
+            advanceUntilIdle()
+            expectNoEvents()
+            assertFalse(viewModel.state.value.unsavedCloseVisible)
+            assertFalse(viewModel.state.value.isClosing)
+            assertEquals("texte à garder", viewModel.state.value.text.text)
+
+            store.saveFailure = null
+            viewModel.onDismissed() // The latch was released: this close saves again.
+            assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
+        }
+        assertEquals("texte à garder", store.storedBody)
+    }
+
+    @Test
+    fun `staying after a refused save relaunches the autosave without a keystroke - ED10 QR3`() = runTest {
+        val store = FakeQuickReplyDraftStore().apply { saveFailure = IOException("disk full") }
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onTextChanged(TextFieldValue("texte à garder"))
+        viewModel.onDismissed()
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.unsavedCloseVisible)
+        assertNull(store.storedBody)
+
+        store.saveFailure = null
+        viewModel.onUnsavedCloseDecided(leave = false)
+        advanceUntilIdle() // No keystroke : staying alone schedules a new save.
+        assertEquals("texte à garder", store.storedBody)
+        assertFalse(viewModel.state.value.unsavedCloseVisible)
+    }
+
+    @Test
+    fun `leaving after a refused save commits the close once without a write - ED10`() = runTest {
+        val store = FakeQuickReplyDraftStore().apply { saveFailure = IOException("disk full") }
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onTextChanged(TextFieldValue("texte abandonné"))
+        viewModel.effects.test {
+            viewModel.onDismissed()
+            advanceUntilIdle()
+            viewModel.onUnsavedCloseDecided(leave = true)
+            assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
+            viewModel.onUnsavedCloseDecided(leave = true) // A second tap on the fading dialog.
+            viewModel.onDismissed()
+            advanceUntilIdle()
+            expectNoEvents()
+        }
+        assertFalse(viewModel.state.value.unsavedCloseVisible)
+        assertNull(store.storedBody)
+        assertTrue(store.savedBodies.isEmpty())
+    }
+
+    @Test
+    fun `a refused save over content the row already holds closes without asking - ED10`() = runTest {
+        val store = FakeQuickReplyDraftStore(initialBody = "déjà enregistré")
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.openForTest()
+        advanceUntilIdle()
+        store.saveFailure = IOException("disk full")
+        viewModel.effects.test {
+            viewModel.onDismissed()
+            assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
+        }
+        assertFalse(viewModel.state.value.unsavedCloseVisible)
+        assertEquals("déjà enregistré", store.storedBody)
+    }
+
+    @Test
+    fun `a final save that loses a conflict asks instead of closing - ED10`() = runTest {
+        val store = FakeQuickReplyDraftStore(initialBody = "A")
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.openForTest()
+        advanceUntilIdle()
+        // Another writer replaces the row behind this opening (M9 of #1553: a new request, an editor).
+        val elsewhere = EditorDraftSession(store, EditorDraftKey.reply(23, 35421))
+        elsewhere.load()
+        val written = elsewhere.save(EditorDraftStore.Draft(body = "écrit ailleurs"))
+        assertTrue(written is EditorDraftStore.StoreWriteResult.Written)
+        val readsBeforeClose = store.loadCalls
+        viewModel.onTextChanged(TextFieldValue("A et la suite"))
+        viewModel.effects.test {
+            viewModel.onDismissed()
+            advanceUntilIdle()
+            expectNoEvents()
+        }
+        assertTrue(viewModel.state.value.unsavedCloseVisible)
+        assertEquals("écrit ailleurs", store.storedBody)
+        assertEquals("a save conflict must not silently reload the session", readsBeforeClose, store.loadCalls)
+    }
+
+    @Test
+    fun `a dismiss superseded by a reopening never closes the new sheet - ED10`() = runTest {
+        // Unreachable behind the modal scrim, pinned anyway: the VM outlives the sheet, and a
+        // stale CloseCommitted buffered in the channel would unmount the NEXT opening.
+        val gate = CompletableDeferred<Unit>()
+        val store = FakeQuickReplyDraftStore()
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onTextChanged(TextFieldValue("fermeture en vol"))
+        store.saveReturnGate = gate
+        viewModel.effects.test {
+            viewModel.onDismissed()
+            runCurrent()
+            viewModel.onSheetOpened(currentPage = 3)
+            gate.complete(Unit)
+            advanceUntilIdle()
+            expectNoEvents()
+        }
+        assertFalse(viewModel.state.value.unsavedCloseVisible)
+    }
+
+    @Test
+    fun `staying resumes the quote fetch that the close request cancelled - ED10`() = runTest {
+        val repository = GatedQuoteFormRepository()
+        val store = FakeQuickReplyDraftStore()
+        val viewModel = quickReplyViewModel(
+            replyRepository = repository, draftStore = store, quoteCardsEnabled = false,
+        )
+        viewModel.openForTest(listOf(preview(101, "alice")))
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.isPreparingQuotes)
+        viewModel.onTextChanged(TextFieldValue("tapé pendant le chargement"))
+        store.saveFailure = IOException("disk full")
+
+        viewModel.onDismissed()
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.unsavedCloseVisible)
+        assertFalse(viewModel.state.value.isPreparingQuotes)
+
+        viewModel.onUnsavedCloseDecided(leave = false)
+        runCurrent()
+        assertTrue("the durable request is fetched again", viewModel.state.value.isPreparingQuotes)
+        assertEquals(listOf(101), viewModel.state.value.pendingQuotes.map { it.numreponse })
+        assertEquals("tapé pendant le chargement", viewModel.state.value.text.text)
     }
 
     @Test
@@ -494,7 +863,7 @@ class QuickReplyViewModelTest {
     @Test
     fun `onSheetOpened pre-arms several cards in citation order`() = runTest {
         val viewModel = quickReplyViewModel()
-        viewModel.onSheetOpened(listOf(preview(202, "bob"), preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(202, "bob"), preview(101, "alice")))
         advanceUntilIdle()
 
         assertEquals(listOf(202, 101), viewModel.state.value.quotes.map { it.numreponse })
@@ -507,7 +876,7 @@ class QuickReplyViewModelTest {
         // safe in the hoisted basket (#868/#869 : it now survives until an actual send).
         val viewModel = quickReplyViewModel()
         viewModel.onQuoteAdded(preview(303, "carol"))
-        viewModel.onSheetOpened(listOf(preview(101, "alice"), preview(202, "bob")))
+        viewModel.openForTest(listOf(preview(101, "alice"), preview(202, "bob")))
         advanceUntilIdle()
 
         assertEquals(listOf(101, 202), viewModel.state.value.quotes.map { it.numreponse })
@@ -520,7 +889,7 @@ class QuickReplyViewModelTest {
         viewModel.onQuoteAdded(preview(303, "carol"))
         // A plain « Répondre » reopening delivers nothing : the previous session's cards must not
         // resurrect, while the #405 draft text is untouched (its row stays the source of truth).
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         advanceUntilIdle()
 
         assertTrue("stale cards must not survive a fresh opening", viewModel.state.value.quotes.isEmpty())
@@ -538,7 +907,7 @@ class QuickReplyViewModelTest {
             draftStore = draftStore,
             quoteCardsEnabled = false,
         )
-        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(101, "alice")))
         advanceUntilIdle()
 
         val state = viewModel.state.value
@@ -559,7 +928,7 @@ class QuickReplyViewModelTest {
         val repository = FakeQuickReplyRepository(quotePrefills = mapOf(101 to prefill))
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
 
-        viewModel.onSheetOpened(listOf(preview(101, "alice", truncate = true)))
+        viewModel.openForTest(listOf(preview(101, "alice", truncate = true)))
         advanceUntilIdle()
 
         assertEquals(truncateQuote(prefill) + "\n", viewModel.state.value.text.text)
@@ -570,7 +939,7 @@ class QuickReplyViewModelTest {
     fun `inline mode merges a small basket in citation order`() = runTest {
         val repository = FakeQuickReplyRepository()
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
-        viewModel.onSheetOpened(listOf(preview(202, "bob"), preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(202, "bob"), preview(101, "alice")))
         advanceUntilIdle()
 
         assertEquals(
@@ -586,7 +955,7 @@ class QuickReplyViewModelTest {
         // replacement recomputed from the row : keystrokes landed mid-fetch must survive.
         val repository = GatedQuoteFormRepository()
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
-        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(101, "alice")))
         advanceUntilIdle()
         assertTrue(viewModel.state.value.isPreparingQuotes)
 
@@ -612,13 +981,107 @@ class QuickReplyViewModelTest {
             draftStore = FakeQuickReplyDraftStore(initialBody = "acquis"),
             quoteCardsEnabled = false,
         )
-        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(101, "alice")))
         advanceUntilIdle()
 
         val state = viewModel.state.value
         assertEquals("acquis", state.text.text)
-        assertEquals(QuickReplySubmitError.QuoteFetchFailed, state.submitError)
+        assertEquals(EditorErrors.quoteFetchFailed(inline = true, quickReply = true), state.submitError)
         assertFalse(state.isPreparingQuotes)
+    }
+
+    @Test
+    fun `blank quote preparation is certain with no POST in card mode`() = runTest {
+        val repository = FakeQuickReplyRepository(quotePrefills = mapOf(101 to ""))
+        val store = FakeQuickReplyDraftStore()
+        val viewModel = quickReplyViewModel(replyRepository = repository, draftStore = store)
+        viewModel.openForTest(listOf(preview(101, "alice")))
+        viewModel.onTextChanged(TextFieldValue("body"))
+
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+
+        assertEquals(0, repository.submitCalls)
+        assertEquals(EditorErrors.quoteFetchFailed(inline = false), viewModel.state.value.submitError)
+        assertEquals("body", viewModel.state.value.text.text)
+        assertEquals(listOf(101), viewModel.state.value.quotes.map { it.numreponse })
+        assertEquals(null, store.entries.values.single().attempt)
+        assertTrue(viewModel.state.value.canSubmit)
+        viewModel.onQuoteRemoved(101)
+        assertTrue(viewModel.state.value.canSubmit)
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+        assertEquals(1, repository.submitCalls)
+        assertEquals(listOf("body"), repository.submittedBodies)
+    }
+
+    @Test
+    fun `unreadable quote form is certain with no POST in card mode`() = runTest {
+        val repository = FakeQuickReplyRepository().apply {
+            quoteFormFailure = IllegalStateException("Reply form not found")
+        }
+        val store = FakeQuickReplyDraftStore()
+        val viewModel = quickReplyViewModel(replyRepository = repository, draftStore = store)
+        viewModel.openForTest(listOf(preview(101, "alice")))
+        viewModel.onTextChanged(TextFieldValue("body"))
+
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+
+        assertEquals(0, repository.submitCalls)
+        assertEquals(EditorErrors.quoteFetchFailed(inline = false), viewModel.state.value.submitError)
+        assertEquals("body", viewModel.state.value.text.text)
+        assertEquals(null, store.entries.values.single().attempt)
+    }
+
+    @Test
+    fun `quote GET failures are certain and keep their existing cause text`() = runTest {
+        val failures = listOf(
+            IOException("quote GET failed"),
+            fr.forumhfr.redface2.core.domain.error.HfrServerException(503, "quote GET"),
+            fr.forumhfr.redface2.core.domain.auth.SessionExpiredException("quote GET"),
+        )
+        for (failure in failures) {
+            val repository = FakeQuickReplyRepository().apply { quoteFormFailure = failure }
+            val store = FakeQuickReplyDraftStore()
+            val viewModel = quickReplyViewModel(replyRepository = repository, draftStore = store)
+            viewModel.openForTest(listOf(preview(101, "alice")))
+            viewModel.onTextChanged(TextFieldValue("body"))
+            viewModel.onSubmitClicked()
+            advanceUntilIdle()
+
+            val expected = if (failure is fr.forumhfr.redface2.core.domain.auth.SessionExpiredException) {
+                EditorErrors.sessionExpired
+            } else {
+                EditorErrors.quoteFetchFailed(inline = false)
+            }
+            assertEquals(expected, viewModel.state.value.submitError)
+            assertEquals(0, repository.submitCalls)
+            assertEquals(null, store.entries.values.single().attempt)
+            assertEquals("body", viewModel.state.value.text.text)
+        }
+    }
+
+    @Test
+    fun `blank or unreadable inline quote preparation is caught without a POST`() = runTest {
+        for (unreadable in listOf(false, true)) {
+            val repository = FakeQuickReplyRepository(quotePrefills = mapOf(101 to "")).apply {
+                if (unreadable) quoteFormFailure = IllegalStateException("Reply form not found")
+            }
+            val viewModel = quickReplyViewModel(
+                replyRepository = repository, quoteCardsEnabled = false,
+                draftStore = FakeQuickReplyDraftStore(initialBody = "body"),
+            )
+
+            viewModel.openForTest(listOf(preview(101, "alice")))
+            advanceUntilIdle()
+
+            assertEquals(0, repository.submitCalls)
+            assertEquals(EditorErrors.quoteFetchFailed(inline = true, quickReply = true),
+                viewModel.state.value.submitError)
+            assertFalse(viewModel.state.value.isPreparingQuotes)
+            assertEquals("body", viewModel.state.value.text.text)
+        }
     }
 
     @Test
@@ -627,7 +1090,7 @@ class QuickReplyViewModelTest {
         // its BBCode into the next one.
         val repository = GatedQuoteFormRepository()
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
-        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(101, "alice")))
         advanceUntilIdle()
         assertTrue(viewModel.state.value.isPreparingQuotes)
 
@@ -643,7 +1106,7 @@ class QuickReplyViewModelTest {
     fun `escalation is inert while the quote insert is in flight`() = runTest {
         val repository = GatedQuoteFormRepository()
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
-        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(101, "alice")))
         advanceUntilIdle()
         assertTrue(viewModel.state.value.isPreparingQuotes)
 
@@ -668,7 +1131,7 @@ class QuickReplyViewModelTest {
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
         viewModel.onQuoteAdded(preview(101, "alice"))
 
-        viewModel.onSheetOpened(listOf(preview(202, "bob")))
+        viewModel.openForTest(listOf(preview(202, "bob")))
         advanceUntilIdle()
 
         val state = viewModel.state.value
@@ -683,7 +1146,7 @@ class QuickReplyViewModelTest {
     fun `inline mode submits through the plain path with the field content`() = runTest {
         val repository = FakeQuickReplyRepository()
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
-        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(101, "alice")))
         advanceUntilIdle()
         viewModel.onTextChanged(TextFieldValue("[quotemsg=101]corps[/quotemsg]\n\nmon ajout"))
 
@@ -704,7 +1167,7 @@ class QuickReplyViewModelTest {
             results = mutableListOf(ReplySubmitResult.Success(refreshUrl = null, targetPage = 9, numreponse = 101)),
         )
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
-        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(101, "alice")))
         advanceUntilIdle()
         assertTrue("inline mode arms no card", viewModel.state.value.quotes.isEmpty())
         viewModel.onTextChanged(
@@ -724,7 +1187,7 @@ class QuickReplyViewModelTest {
     fun `a new explicit opening after terminal success permits one new send`() = runTest {
         val repository = FakeQuickReplyRepository()
         val viewModel = quickReplyViewModel(replyRepository = repository)
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         viewModel.onTextChanged(TextFieldValue("first"))
         viewModel.onSubmitClicked()
         advanceUntilIdle()
@@ -733,7 +1196,7 @@ class QuickReplyViewModelTest {
         viewModel.onSubmitClicked()
         assertEquals(1, repository.submitCalls)
 
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         viewModel.onTextChanged(TextFieldValue("second"))
         viewModel.onSubmitClicked()
         advanceUntilIdle()
@@ -824,6 +1287,7 @@ class QuickReplyViewModelTest {
         }
         val arms = mutableMapOf<Long, ArmToken>()
         return object : EditorSubmissionAdapter {
+            override val supportsIndependentDraftOffers = true
             override val unsupportedMutations = mapOf(
                 SubmissionBodyMutation.SMILEY to "la feuille n'a pas de picker smiley",
                 SubmissionBodyMutation.FORMAT to "la feuille n'a pas de barre de formatage",
@@ -837,7 +1301,7 @@ class QuickReplyViewModelTest {
             override val draftSaves get() = store.saveCount
             override val draftWrites get() = store.writes
             override val successEffects get() = effects.count { it is QuickReplyEffect.SubmitSucceeded }
-            override val closeEffects: Int = 0 // onDismissed n'émet pas d'effet de navigation.
+            override val closeEffects get() = effects.count { it is QuickReplyEffect.CloseCommitted }
 
             override fun editBody(body: String) = viewModel.onTextChanged(TextFieldValue(body))
             override fun clickSubmit() = viewModel.onSubmitClicked()
@@ -848,6 +1312,9 @@ class QuickReplyViewModelTest {
             override fun dismissConfirmation() = viewModel.onSubmitConfirmDismissed()
             override fun close() = viewModel.onDismissed()
             override fun completePost() { postGate.complete(Unit) }
+            override fun resolveOfferedDraft(restoring: Boolean) {
+                if (restoring) viewModel.onDraftRestoreRequested() else viewModel.onDraftDiscardRequested()
+            }
             override fun dispose() = viewModel.viewModelScope.cancel()
             override fun startUpload(): Unit = error("cas explicitement désactivé")
             override fun completeUpload(): Unit = error("cas explicitement désactivé")
@@ -858,11 +1325,17 @@ class QuickReplyViewModelTest {
                 token?.let { arms[it.id] = it }
                 SubmissionProbe(
                     it.text.text, it.canSubmit, it.isSubmitting, false, it.confirmVisible,
+                    restoreOffered = it.restorableDraft != null,
+                    offeredBody = it.restorableDraft,
                     armId = token?.id,
                     blocksClose = it.isSubmitting,
                     error = when (it.submitError) {
-                        QuickReplySubmitError.Uncertain -> SubmissionErrorProbe.UNCERTAIN
-                        QuickReplySubmitError.DraftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
+                        EditorErrors.network -> SubmissionErrorProbe.NETWORK
+                        EditorErrors.sessionExpired -> SubmissionErrorProbe.SESSION_EXPIRED
+                        EditorErrors.uncertain -> SubmissionErrorProbe.UNCERTAIN
+                        EditorErrors.draftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
+                        EditorErrors.invalidForm, EditorErrors.quoteFetchFailed(inline = false) ->
+                            SubmissionErrorProbe.PREPARATION_FAILED
                         else -> null
                     },
                 )
@@ -876,6 +1349,29 @@ class QuickReplyViewModelTest {
                 }
             }
         }
+    }
+
+    private val openings = mutableMapOf<QuickReplyViewModel, Pair<EditorDraftStore, Boolean>>()
+
+    /** Mimic TopicViewModel's gesture preparation; the sheet receives cards only. */
+    private suspend fun QuickReplyViewModel.openForTest(initialQuotes: List<QuoteSelection> = emptyList()) =
+        openForTest(currentPage = 3, initialQuotes = initialQuotes)
+
+    private suspend fun QuickReplyViewModel.openForTest(
+        currentPage: Int, initialQuotes: List<QuoteSelection> = emptyList(),
+    ) {
+        val (store, cards) = openings.getValue(this)
+        if (!cards && initialQuotes.isNotEmpty()) {
+            val drafts = EditorDraftSession(store, EditorDraftKey.reply(23, 35421))
+            drafts.load()
+            val pending = PendingInlineQuoteRequest(23, 35421, initialQuotes.map {
+                PendingInlineQuoteRequest.Quote(it.numreponse, it.locator.page, it.locator.ref, it.truncate)
+            })
+            assertTrue(drafts.enqueueInlineQuoteRequest(pending) is EditorDraftStore.StoreWriteResult.Written)
+        }
+        onSheetOpened(currentPage, if (cards) initialQuotes else emptyList())
+        // These pre-existing tests continue the offered body; explicit decisions have dedicated tests.
+        if (state.value.restorableDraft != null) onDraftRestoreRequested()
     }
 
     private fun quickReplyViewModel(
@@ -899,7 +1395,7 @@ class QuickReplyViewModelTest {
             quickReplyAuthRepository(),
             DiagnosticsClock { mainDispatcher.scheduler.currentTime * 1_000_000L }, DiagnosticsLog(),
         ),
-    )
+    ).also { openings[it] = draftStore to quoteCardsEnabled }
 
     private companion object {
         /** Just past QuickReplyViewModel's 750 ms debounce. */
@@ -984,6 +1480,7 @@ private class FakeQuickReplyRepository(
     var submitGate: CompletableDeferred<Unit>? = null
     var submitScenario: EditorSubmissionScenario? = null
     var submitException: IOException? = null
+    var quoteFormFailure: Exception? = null
     val submittedBodies = mutableListOf<String>()
     val submittedPages = mutableListOf<Int>()
     val fetchedPages = mutableListOf<Int>()
@@ -993,6 +1490,7 @@ private class FakeQuickReplyRepository(
         fetchCalls++
         fetchedPages += context.page
         fetchedQuotedNumreponses += context.quotedNumreponse
+        if (context.isQuote) quoteFormFailure?.let { throw it }
         val prefill = context.quotedNumreponse
             ?.let { quotePrefills[it] ?: "[quotemsg=$it]corps[/quotemsg]" }
             .orEmpty()
@@ -1011,9 +1509,11 @@ private class FakeQuickReplyRepository(
         bbcodeContent: String,
         options: ReplyFormOptions,
     ): ReplySubmitResult {
+        submitScenario?.prepare()
         submitCalls++
         submittedBodies += bbcodeContent
         submittedPages += context.page
+        if (submitScenario == null) currentCoroutineContext()[EditorWriteOwner]?.markEmissionPossible()
         submitGate?.let { gate -> submitScenario?.awaitPost(gate) ?: gate.await() }
         submitException?.let { throw it }
         return results.removeFirstOrNull() ?: ReplySubmitResult.Success(refreshUrl = null, targetPage = null)

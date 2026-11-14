@@ -1,15 +1,16 @@
 package fr.forumhfr.redface2.feature.messages
 
-import androidx.compose.ui.text.input.TextFieldValue
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftOffer
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
-import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 /**
- * MVI state of the private-message reply editor (#301). Mirrors the post editor's shape (draft +
+ * MVI state of the private-message reply editor (#301). Mirrors the post editor's shape (body +
  * parsed preview AST + the three HFR per-post option toggles) but is scoped to a private
  * conversation, so it carries no `cat`/`subcat`/quote fields.
  *
@@ -18,20 +19,35 @@ import fr.forumhfr.redface2.core.ui.editor.UploadProgress
  * into a state snapshot.
  */
 data class PrivateMessageReplyUiState(
+    /** Owner-bound draft read finishes before a recreated field can accept input. */
+    val isInitializing: Boolean = false,
     /** True while the initial `bddpost.php` form GET is in flight (and during a silent refetch). */
     val isLoadingForm: Boolean = true,
     /** True once a non-anonymous form has been parsed; gates submission. */
     val formAvailable: Boolean = false,
+    /** Private app-bar context from ReplyForm.sujet only; never saved in navigation or a Bundle. */
+    val conversationTitle: String = "",
     /** True when the form GET failed (network / session / parse / anonymous) → show retry. */
     val formError: Boolean = false,
-    val draft: TextFieldValue = TextFieldValue(),
+    /** ED-132 — a durable quote request (Q) is still owed to this reply; Send stays off until it lands. */
+    val quotePending: Boolean = false,
+    /** The served quote is being written to the draft row; Restore waits for that write (ED-89). */
+    val quoteCommitPending: Boolean = false,
+    /** Q exists but cannot be decoded: only "ignore the quote" can release the reply. */
+    val unreadableQuoteRequest: Boolean = false,
+    /** Consecutive failed form reloads with Q pending, capped at 2: the second one offers Ignore. */
+    val quoteFetchFailures: Int = 0,
+    /** Draft storage is not restored or was invalidated: Q's presence is unknown, Send stays off. */
+    val quoteStorageUnavailable: Boolean = false,
+    /** Text-only mirror; selection and undo history stay in the ViewModel. */
+    val bodyText: String = "",
     /**
-     * True after the first successful form load has consumed `ReplyForm.initialContent`. It prevents
-     * a retry or InvalidHashCheck refetch from duplicating the server-provided quote around edits.
+     * The body is known from a session/attempt or the first successful form load. A resumed body,
+     * including a blank edit, prevents a GET from duplicating the server-provided inline quote.
      */
     val draftHydratedFromForm: Boolean = false,
-    /** Exact untouched server quote prefill, distinct from later user edits (#1415). */
-    val draftHydratedContent: String? = null,
+    /** Ordinary form hydration only; a delivered Q is never a replaceable restore seed. */
+    val draftHydratedContent: String = "",
     val isPreviewVisible: Boolean = false,
     val preview: PostContent = PostContent(blocks = emptyList()),
     val signatureEnabled: Boolean = false,
@@ -45,7 +61,7 @@ data class PrivateMessageReplyUiState(
     val optionsHydratedFromForm: Boolean = false,
     val submission: EditorSubmissionState = EditorSubmissionState.Ready,
     val isSubmitting: Boolean = false,
-    val submitError: PrivateMessageReplyError? = null,
+    val submitError: EditorError? = null,
     /**
      * #312 — `true` while the « Confirmation avant publication » dialog is shown. Only raised when
      * the preference is active/unknown AND the submit already passed every validation gate (mirrors
@@ -55,10 +71,17 @@ data class PrivateMessageReplyUiState(
     val showSubmitConfirmation: Boolean = false,
     /**
      * #405 — body of a previously-cached private-reply draft for this thread, surfaced on init when
-     * a non-empty draft was found. Non-null means « propose a restore » : « Restaurer » pre-fills
-     * the editor, « Ignorer » clears the cached content. Never silently applied nor lost.
+     * a non-empty draft was found outside a matching session. « Restaurer » pre-fills the editor,
+     * « Ignorer » clears the cached content. A matching ED-81 checkpoint resumes silently instead.
      */
     val restorableDraft: String? = null,
+    val draftOffers: List<DraftOffer> = emptyList(),
+    /** A Restore/Ignore write locks every offer until its result, including a failed result. */
+    val draftOfferDecisionPending: Boolean = false,
+    /** After a failed Restore, settle that merged offer before deciding a different one (ED-121). */
+    val draftOfferToResolveId: String? = null,
+    /** ED-10/85: a close could not save the field; the dialog asks before anything is abandoned. */
+    val showUnsavedCloseDialog: Boolean = false,
     /**
      * #606 — true only when the loaded form is the OWNER's DT/MultiMP (HFR served the `newdest`
      * field). Gates the member editor in the UI ; a simple participant / one-to-one MP keeps it
@@ -81,41 +104,29 @@ data class PrivateMessageReplyUiState(
     val recipientsDirty: Boolean = false,
     /**
      * #459 — `true` while an image upload (single or batch) is in flight: toolbar spinner + body
-     * field locked (`readOnly`) so the caret cannot move between two programmatic `[img]` insertions.
+     * field locked (`readOnly`) against user body mutations; programmatic `[img]` insertion remains allowed.
      */
     val isUploading: Boolean = false,
     /** #459 — typed upload failure surfaced as a dismissible banner (shared `:core:ui` taxonomy). */
-    val uploadError: UploadError? = null,
+    val uploadError: EditorError? = null,
     /** #459 — « n/N » batch counter (null for a single image). */
     val uploadProgress: UploadProgress? = null,
     /** #1128 — observed continuously so the next image pick uses the current preference. */
     val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
+    val editorShortcut: EditorShortcut = EditorShortcut.NONE,
 ) {
+    val draftDecisionsEnabled: Boolean get() = !draftOfferDecisionPending && !quoteCommitPending
+
+    fun canDecideDraftOffer(id: String? = draftOffers.firstOrNull()?.id): Boolean =
+        draftDecisionsEnabled && (draftOfferToResolveId == null || draftOfferToResolveId == id)
+
+    val hasDormantQuote: Boolean get() = quotePending && submission is EditorSubmissionState.Uncertain
+    val canIgnorePendingQuote: Boolean
+        get() = (unreadableQuoteRequest || quoteRecoveryAllowed) && !isLoadingForm
+    private val quoteRecoveryAllowed: Boolean get() = hasDormantQuote || quotePending && quoteFetchFailures >= 2
     val armToken: ArmToken? get() = (submission as? EditorSubmissionState.Armed)?.token
 
     val canSubmit: Boolean
-        get() = formAvailable && !isLoadingForm && !isSubmitting && !isUploading &&
-            !submission.blocksBodyMutation && draft.text.isNotBlank()
-}
-
-/**
- * Submit-phase errors surfaced as a banner over the editor (the draft is always preserved). HFR
- * reuses the same `bddpost.php` failure sentences for private messages as for topics, so the
- * recognised reasons map 1:1 — except [Unexpected], which is the non-destructive fallback for an
- * unrecognised response: the private-message POST success sentence is not pinned by a live fixture
- * (a real send to a third party was intentionally avoided), so the UI invites the user to verify the
- * conversation rather than claiming a hard failure.
- */
-sealed interface PrivateMessageReplyError {
-    data object Empty : PrivateMessageReplyError
-    data object UnknownRecipient : PrivateMessageReplyError
-    data object Refused : PrivateMessageReplyError
-    data object InvalidHashCheck : PrivateMessageReplyError
-    data object AntiFlood : PrivateMessageReplyError
-    data object LoginRequired : PrivateMessageReplyError
-    data object Network : PrivateMessageReplyError
-    data object SessionExpired : PrivateMessageReplyError
-    data object Uncertain : PrivateMessageReplyError
-    data object DraftWriteFailed : PrivateMessageReplyError
-    data object Unexpected : PrivateMessageReplyError
+        get() = !isInitializing && formAvailable && !isLoadingForm && !isSubmitting && !isUploading &&
+            !submission.blocksBodyMutation && bodyText.isNotBlank() && !quotePending && !quoteStorageUnavailable
 }

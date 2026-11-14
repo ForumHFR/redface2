@@ -224,7 +224,10 @@ private val BbcodeAction.labelResId: Int
         BbcodeAction.Fixed -> R.string.bbcode_action_fixed
         BbcodeAction.Spoiler -> R.string.bbcode_action_spoiler
         BbcodeAction.Url -> R.string.bbcode_action_url
+        BbcodeAction.Email -> R.string.bbcode_action_email
+        BbcodeAction.Bullet -> R.string.bbcode_action_bullet
         BbcodeAction.Image -> R.string.bbcode_action_image
+        BbcodeAction.PersonalSmiley -> R.string.editor_shortcut_personal_smiley
         // Color is rendered via [ColorChip], never the [ActionChip] path —
         // fail-fast rather than silently return a label, so a future refactor
         // that routes a Color through ActionChip surfaces the contract break

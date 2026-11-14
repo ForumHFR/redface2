@@ -7,8 +7,6 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -95,7 +93,6 @@ import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.model.AuthState
-import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.model.write.QuoteScope
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
@@ -115,6 +112,7 @@ import fr.forumhfr.redface2.core.ui.viewer.ImageViewerScreen
 import fr.forumhfr.redface2.core.ui.viewer.SystemBarsOwnerEffect
 import fr.forumhfr.redface2.feature.auth.LoginScreen
 import fr.forumhfr.redface2.feature.editor.PostEditorMode
+import fr.forumhfr.redface2.feature.editor.PostEditorTarget
 import fr.forumhfr.redface2.feature.editor.PostEditorRequest
 import fr.forumhfr.redface2.feature.editor.TopicFormRequest
 import fr.forumhfr.redface2.feature.editor.PostEditorScreen
@@ -211,6 +209,17 @@ data class PrivateMessageThreadRoute(
     val submitSignal: Long? = null,
 ) : RedfaceNavKey
 
+/** Private edit restoration carries coordinates only, never a body, subject or token. */
+@Serializable
+data class PrivateMessageEditRoute(
+    val threadId: Int,
+    val page: Int,
+    val numreponse: Int,
+) : RedfaceNavKey {
+    init { require(threadId > 0 && page > 0 && numreponse > 0) }
+    override fun toString(): String = "PrivateMessageEditRoute([redacted])"
+}
+
 @Serializable
 data class PrivateMessageReplyRoute(
     val threadId: Int,
@@ -223,10 +232,16 @@ data class PrivateMessageReplyRoute(
      * no custom NavType.
      */
     val openRecipientManager: Boolean = false,
-    /** #1074 — cited message id; null together with [quoteRef] for a simple reply. */
+    /**
+     * #1074 — legacy quote coordinates, kept so an older serialised back stack still decodes. Since
+     * #1450 (ED-132 v0.7.8) they are never written nor read: the quote request is durable in the
+     * owner's draft row, enqueued before this route is pushed.
+     */
     val quotedNumreponse: Int? = null,
-    /** #1074 — server-provided 1-based rank in the source page; never guessed or omitted. */
+    /** Legacy, see [quotedNumreponse]; present together with it or not at all. */
     val quoteRef: Int? = null,
+    /** #868-#870, ED-88 — true for a « Citer N » launch: its durable quote delivery empties the basket. */
+    val consumesQuoteBasket: Boolean = false,
 ) : RedfaceNavKey {
     init {
         require((quotedNumreponse == null) == (quoteRef == null)) {
@@ -255,9 +270,21 @@ data class PrivateMessageComposeRoute(
  * window bottom (and to avoid dropping the draft on a tab switch). Extracted from `RedfaceApp` to
  * keep its cyclomatic complexity in check.
  */
-private fun NavKey?.hidesNavigationSuite(): Boolean =
-    this is PostEditorRoute || this is TopicFormRoute || this is PrivateMessageReplyRoute ||
-        this is PrivateMessageComposeRoute || this is ImageViewerRoute || this is ReportContentRoute
+internal fun NavKey?.hidesNavigationSuite(): Boolean =
+    isEditorRoute() || this is ImageViewerRoute || this is ReportContentRoute
+
+private fun NavKey?.isEditorRoute(): Boolean = when (this) {
+    is PostEditorRoute, is TopicFormRoute, is PrivateMessageReplyRoute,
+    is PrivateMessageEditRoute, is PrivateMessageComposeRoute -> true
+    else -> false
+}
+
+/** Settings above a live editor keep tab switching unavailable even when another route covers them. */
+internal fun List<NavKey>.hidesNavigationSuite(): Boolean {
+    val editorIndex = indexOfFirst { it.isEditorRoute() }
+    val settingsCoverEditor = editorIndex >= 0 && indexOfLast { it is SettingsCategoryRoute } > editorIndex
+    return lastOrNull().hidesNavigationSuite() || settingsCoverEditor
+}
 
 /**
  * #494 — type de barre de navigation à passer au [NavigationSuiteScaffoldLayout]. Sur téléphone l'adaptatif
@@ -1272,7 +1299,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
         // it by the nav bar height (the bar floated mid-screen with a gap). Hiding the navigation for editor
         // routes makes the editor full-screen: its submit bar then sits at the window bottom and the IME
         // inset lands exactly on the keyboard. Bonus UX: no tab switching mid-compose (would drop the draft).
-        val topRoute = backStacks.getValue(currentDestination).lastOrNull()
+        val activeBackStack = backStacks.getValue(currentDestination)
+        val topRoute = activeBackStack.lastOrNull()
         // #518 follow-up — only a topic screen reports scroll facts; clear them whenever the active top
         // route is something else (other tab, editor, profile…) so a stale « at bottom » never keeps the
         // nav bar revealed off-topic. Returning to a topic re-emits its current facts on first frame. The
@@ -1289,7 +1317,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
             darkTheme = darkTheme,
         )
         val adaptiveType = NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
-        val navLayoutType = resolveNavLayoutType(topRoute.hidesNavigationSuite(), adaptiveType)
+        val navLayoutType = resolveNavLayoutType(activeBackStack.hidesNavigationSuite(), adaptiveType)
         // #529 — consume the bottom nav-bar inset for the content only under a bottom-bar layout
         // (see navSuiteContentInsetModifier). Read in composable scope, branch lives in the helper.
         val contentInsetModifier = navSuiteContentInsetModifier(navLayoutType, WindowInsets.navigationBars)
@@ -1492,8 +1520,10 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                             privateMessageSubmitNavState = PrivateMessageSubmitNavState(
                                 account = authenticatedCanonicalPseudo,
                                 pending = privateMessagePendingSubmit,
-                                onPublish = { threadId, page ->
-                                    authenticatedCanonicalPseudo?.let { account ->
+                                onPublish = { threadId, page, operation, submittingAccount ->
+                                    authenticatedCanonicalPseudo?.takeIf {
+                                        it.isNotBlank() && it == submittingAccount
+                                    }?.let { account ->
                                         // A retained nav-entry ViewModel survives activity recreation,
                                         // while this plain remember counter does not. Seed from wall time
                                         // so the first post-recreation event cannot reuse the last small
@@ -1508,6 +1538,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                                             result = PrivateMessageSubmitResult(
                                                 eventId = privateMessageSubmitEventId,
                                                 page = page,
+                                                account = account,
+                                                operation = operation,
                                             ),
                                         )
                                     }
@@ -1556,6 +1588,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                                     multiQuoteBasket = multiQuoteBasket.withoutSelections(scope, numreponses)
                                 },
                                 onClear = { multiQuoteBasket = null },
+                                onConsume = { scope -> multiQuoteBasket = multiQuoteBasket.consumedBy(scope) },
                                 pendingEditorQuotes = pendingEditorQuotes,
                                 onEditorQuotesHandoff = { pendingEditorQuotes = it },
                             ),
@@ -1985,7 +2018,7 @@ internal fun isPrivateMessageThreadEntryFor(below: Any?, threadId: Int): Boolean
 private data class PrivateMessageSubmitNavState(
     val account: String?,
     val pending: PrivateMessagePendingSubmit?,
-    val onPublish: (threadId: Int, page: Int) -> Unit,
+    val onPublish: (threadId: Int, page: Int, operation: PostSubmitOperation, account: String?) -> Unit,
     val onConsumed: (eventId: Long) -> Unit,
 )
 
@@ -1994,21 +2027,25 @@ private data class PrivateMessageSubmitNavState(
  * hoisted-state bundles ([TopicScrollNavState], `TopicTitleNavState`).
  *
  * #604 lot 3 — also carries the editor quote HANDOFF : [pendingEditorQuotes] is set (via
- * [onEditorQuotesHandoff]) right before a topic or MP editor is pushed with citations (« Citer N »
- * or a sheet escalation), read once by that editor entry into its assisted request, then cleared
- * (null). Never serialised into the route — the selections are transient by decision.
+ * [onEditorQuotesHandoff]) right before a topic editor is pushed with citations (« Citer N » or a
+ * sheet escalation), read once by that editor entry into its assisted request, then cleared (null).
+ * Never serialised into the route — the selections are transient by decision. The MP reply no
+ * longer uses it (#1450): its request is durable and its route only carries `consumesQuoteBasket`.
  *
  * #868/#869/#870 — the handoff also says whether the editor session CONSUMED the hoisted basket
  * ([EditorQuotesHandoff.consumesBasket]): only a « Citer N » launch (or a sheet escalation of one)
  * does. The basket is no longer cleared at editor OPEN — it survives a back/cancel so the
- * selection re-arms the « Citer N » FAB — and is cleared on SUBMIT SUCCESS of a basket-consuming
- * session only (a « Citer » simple / plain reply never empties a selection it never shipped).
+ * selection re-arms the « Citer N » FAB. ED-88 (#1616) — a basket-consuming session empties it as
+ * soon as its citations are DURABLE in the draft (sealed C/Q transaction), and at the latest on its
+ * SUBMIT SUCCESS ; a failed or dormant delivery leaves it armed (a « Citer » simple / plain reply
+ * never empties a selection it never shipped).
  */
 private data class MultiQuoteNavState(
     val basket: MultiQuoteBasket?,
     val onToggle: (scope: QuoteScope, selection: QuoteSelection) -> Unit,
     val onRemove: (scope: QuoteScope, numreponses: Set<Int>) -> Unit,
     val onClear: () -> Unit,
+    val onConsume: (scope: QuoteScope) -> Unit,
     val pendingEditorQuotes: EditorQuotesHandoff? = null,
     val onEditorQuotesHandoff: (EditorQuotesHandoff?) -> Unit = {},
 )
@@ -2118,8 +2155,6 @@ internal data class MultiQuoteBasket(
     val scope: QuoteScope,
     val selections: List<QuoteSelection>,
 ) {
-    val numreponses: List<Int> get() = selections.map { it.numreponse }
-
     fun matches(scope: QuoteScope): Boolean = this.scope == scope
 }
 
@@ -2140,6 +2175,19 @@ internal fun MultiQuoteBasket?.toggled(scope: QuoteScope, selection: QuoteSelect
     }
     return if (next.isEmpty()) null else current.copy(selections = next)
 }
+
+/**
+ * ED-88 (#1616) — true when this basket was shipped by the writing session of [scope] : that session
+ * was opened by « Citer N » or escalated from one ([consumesBasket], decided by the open path), and
+ * the basket is still that target's. The caller empties it on the durable delivery of the citations
+ * and, as a safety net, on the successful submit. A basket re-armed elsewhere is never touched.
+ */
+internal fun MultiQuoteBasket?.isConsumedBy(scope: QuoteScope?, consumesBasket: Boolean): Boolean =
+    consumesBasket && scope != null && this?.matches(scope) == true
+
+/** Apply a possibly buffered delivery to the basket at collection time, scoped to its sender. */
+internal fun MultiQuoteBasket?.consumedBy(scope: QuoteScope): MultiQuoteBasket? =
+    takeUnless { it.isConsumedBy(scope, consumesBasket = true) }
 
 /** Removes selected ids from one exact scope; a different active basket is left untouched. */
 internal fun MultiQuoteBasket?.withoutSelections(
@@ -2507,6 +2555,7 @@ private fun RedfaceNavHost(
             }
             entry<PrivateMessageComposeRoute> { route ->
                 PrivateMessageComposeScreen(
+                    onOpenEditorSettings = { openEditorSettings(backStack) },
                     initialRecipient = route.prefilledRecipient,
                     onSubmitSucceeded = {
                         // Pop the composer, then bump the sent signal so the MP list refreshes —
@@ -2551,16 +2600,17 @@ private fun RedfaceNavHost(
                     onSubmitResultConsumed = { result ->
                         privateMessageSubmitNavState.onConsumed(result.eventId)
                     },
+                    onEdit = { threadId, page, numreponse ->
+                        backStack.add(PrivateMessageEditRoute(threadId, page, numreponse))
+                    },
                     onReply = { threadId, page ->
                         backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page))
                     },
-                    onQuote = { threadId, page, quote ->
+                    onQuote = { threadId, page, _ ->
                         backStack.add(
                             PrivateMessageReplyRoute(
                                 threadId = threadId,
                                 page = page,
-                                quotedNumreponse = quote.numreponse,
-                                quoteRef = quote.ref,
                             ),
                         )
                     },
@@ -2572,20 +2622,8 @@ private fun RedfaceNavHost(
                         multiQuoteNavState.onToggle(privateMessageQuoteScope, selection)
                     },
                     onMultiQuote = { threadId, page ->
-                        val selections = multiQuoteNavState.basket
-                            ?.takeIf { it.matches(privateMessageQuoteScope) }
-                            ?.selections
-                            .orEmpty()
-                        if (selections.isNotEmpty()) {
-                            multiQuoteNavState.onEditorQuotesHandoff(
-                                EditorQuotesHandoff(
-                                    scope = privateMessageQuoteScope,
-                                    quotes = selections,
-                                    consumesBasket = true,
-                                ),
-                            )
-                            backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page))
-                        }
+                        backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page,
+                            consumesQuoteBasket = true))
                     },
                     onClearMultiQuote = multiQuoteNavState.onClear,
                     onRemoveMultiQuotes = { numreponses ->
@@ -2609,24 +2647,38 @@ private fun RedfaceNavHost(
                     topBarActions = accountMenu,
                 )
             }
+            entry<PrivateMessageEditRoute> { route ->
+                val submitAccount = rememberSubmitAccount(privateMessageSubmitNavState.account)
+                PostEditorScreen(
+                    request = PostEditorRequest(
+                        mode = PostEditorMode.Edit,
+                        target = PostEditorTarget.PrivateMessage(route.threadId),
+                        cat = null, topicId = null, subcat = null,
+                        page = route.page, numreponse = route.numreponse,
+                    ),
+                    onOpenEditorSettings = { openEditorSettings(backStack) },
+                    onClose = { if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) },
+                    onSubmitSucceeded = { _, _, _, _ ->
+                        val below = backStack.getOrNull(backStack.lastIndex - 1)
+                        if (isPrivateMessageThreadEntryFor(below, route.threadId)) {
+                            // Edit the originating page in place, regardless of HFR's redirect page.
+                            privateMessageSubmitNavState.onPublish(
+                                route.threadId, route.page, PostSubmitOperation.Edit, submitAccount,
+                            )
+                        }
+                        if (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
+                    },
+                )
+            }
             entry<PrivateMessageReplyRoute> { route ->
+                val submitAccount = rememberSubmitAccount(privateMessageSubmitNavState.account)
                 val privateMessageQuoteScope = QuoteScope.PrivateMessage(route.threadId)
-                val editorQuotesHandoff = remember(route) {
-                    multiQuoteNavState.pendingEditorQuotes.forScope(privateMessageQuoteScope)
-                }
-                LaunchedEffect(Unit) { multiQuoteNavState.onEditorQuotesHandoff(null) }
                 PrivateMessageReplyScreen(
+                    onOpenEditorSettings = { openEditorSettings(backStack) },
                     request = PrivateMessageReplyRequest(
                         threadId = route.threadId,
                         page = route.page,
                         openRecipientManager = route.openRecipientManager,
-                        quote = route.quotedNumreponse?.let { numreponse ->
-                            PrivateMessageQuote(
-                                numreponse = numreponse,
-                                ref = requireNotNull(route.quoteRef),
-                            )
-                        },
-                        initialQuotes = editorQuotesHandoff?.quotes.orEmpty(),
                     ),
                     onSubmitSucceeded = { threadId, page ->
                         // #1040 lot 6 — arm the opaque result BEFORE popping, and only when the
@@ -2634,16 +2686,28 @@ private fun RedfaceNavHost(
                         // retains its ViewModel/anchor map and force-refetches exactly once.
                         val below = backStack.getOrNull(backStack.lastIndex - 1)
                         if (isPrivateMessageThreadEntryFor(below, threadId)) {
-                            privateMessageSubmitNavState.onPublish(threadId, page)
+                            privateMessageSubmitNavState.onPublish(
+                                threadId, page, PostSubmitOperation.Publish, submitAccount,
+                            )
                         }
-                        if (editorQuotesHandoff?.consumesBasket == true &&
-                            multiQuoteNavState.basket?.matches(privateMessageQuoteScope) == true
+                        // ED-88 — safety net : the durable delivery below normally emptied it.
+                        if (multiQuoteNavState.basket
+                                .isConsumedBy(privateMessageQuoteScope, route.consumesQuoteBasket)
                         ) {
                             multiQuoteNavState.onClear()
                         }
                         // One guarded pop only: the conversation route/key and its ViewModel stay.
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    // ED-88 (#1616) — « Citer N » emptied its basket once the citations are durable
+                    // in the reply draft ; a failed or dormant delivery never signals.
+                    onQuotesDelivered = {
+                        if (multiQuoteNavState.basket
+                                .isConsumedBy(privateMessageQuoteScope, route.consumesQuoteBasket)
+                        ) {
+                            multiQuoteNavState.onClear()
                         }
                     },
                     // #803 pattern (state-hygiene audit 2026-07-05) — invoked only on
@@ -2946,6 +3010,7 @@ private fun RedfaceNavHost(
                     onReply = { subcat, page, quotes ->
                         // #868-#870 — « Citer » simple / #823 long-press / plain reply : these
                         // quotes never came from the basket, a submit must not empty it.
+                        // Inline launches carry no coordinates: TopicViewModel awaited their Room write.
                         multiQuoteNavState.onEditorQuotesHandoff(
                             quotes.takeIf { it.isNotEmpty() }?.let {
                                 EditorQuotesHandoff(
@@ -2968,8 +3033,11 @@ private fun RedfaceNavHost(
                     },
                     // #843/#790 — the quick-reply sheet's ESCALATION only: the sheet just persisted
                     // the shared #405 row, so the editor auto-applies it (resumeSharedDraft = true,
-                    // silent append — same composition act) WITHOUT surfacing the restore banner.
+                    // same composition act). The sheet requires a decision on its restore offer
+                    // before escalation, so the shared row contains the decided body.
                     onEscalateToFullEditor = { subcat, page, quotes, consumesBasket ->
+                        // #1553: pending inline coordinates stay in the shared durable row. This
+                        // handoff contains cards only, even after a failed quote GET in the sheet.
                         // #868-#870 — the escalated editor inherits the sheet session's basket
                         // consumption : a « Citer N » sheet escalated to full screen still empties
                         // the basket on ITS successful submit, and only then. The handoff is built
@@ -2997,7 +3065,7 @@ private fun RedfaceNavHost(
                     // #291 / #604 lot 3 — selection of THIS topic's basket as full previews
                     // (another topic's selection must never leak into the menu checkmarks or
                     // the « Citer N » FAB) ; under the full-screen threshold the screen pre-arms
-                    // the sheet's cards from them and consumes the basket via onClearMultiQuote.
+                    // the sheet's cards from them and consumes only that target's current basket.
                     multiQuoteSelections = multiQuoteNavState.basket
                         ?.takeIf { it.matches(topicQuoteScope) }
                         ?.selections
@@ -3008,6 +3076,9 @@ private fun RedfaceNavHost(
                     // #436 — « Tout vider » : a long press on the « Citer N » FAB empties the
                     // whole hoisted basket (same reset path as the post-editor launch / logout).
                     onClearMultiQuote = multiQuoteNavState.onClear,
+                    onQuickReplyBasketConsumed = { cat, topicId ->
+                        multiQuoteNavState.onConsume(QuoteScope.Topic(cat, topicId))
+                    },
                     // #465/#1170 — the topic's saved manual poll choice (null = follow the
                     // automatic poll policy), and the callback recording a tap on the card. Hoisted to
                     // :app so it survives leaving and reopening the topic (pre-#895 étape 4:
@@ -3018,41 +3089,36 @@ private fun RedfaceNavHost(
                     onPollExpansionChanged = { expanded ->
                         topicPollNavState.onExpansionChanged(route.cat, route.post, expanded)
                     },
-                    onMultiQuote = { subcat, page ->
+                    onMultiQuote = { subcat, page, selection ->
                         // #291 / #604 lot 3 — quote flavour of reply : the basket's previews are
                         // handed to the editor (cards, mockup P3) through the in-memory handoff.
-                        // #868/#869 — the basket is NO LONGER cleared on launch : backing out of
-                        // the editor keeps the selection armed (« Citer N » survives a cancel) ;
-                        // the clear moved to the SUBMIT SUCCESS of this basket-consuming session
-                        // (consumesBasket = true below). « Tout vider » (#436) stays the manual
+                        // #868/#869 — the basket is NOT cleared on launch : the selection stays
+                        // armed until this basket-consuming session (consumesBasket = true below)
+                        // proves it took it — the durable delivery of its citations (ED-88, #1616),
+                        // its SUBMIT SUCCESS at the latest. « Tout vider » (#436) stays the manual
                         // reset.
                         // #843 — « Citer N » (3+) is a COLD full-editor open, not a sheet escalation:
                         // resumeSharedDraft = false, so an existing text draft is offered via the
                         // restore banner (cards are independent of it), instead of the silent append
                         // the escalation flag used to force here (pre-#843 Codex fork 4).
-                        val selection = multiQuoteNavState.basket
-                            ?.takeIf { it.matches(topicQuoteScope) }
-                            ?.selections
-                            .orEmpty()
-                        if (selection.isNotEmpty()) {
-                            multiQuoteNavState.onEditorQuotesHandoff(
-                                EditorQuotesHandoff(
-                                    scope = topicQuoteScope,
-                                    quotes = selection,
-                                    consumesBasket = true,
-                                ),
-                            )
-                            backStack.add(
-                                PostEditorRoute(
-                                    mode = PostEditorMode.Reply,
-                                    cat = route.cat,
-                                    topicId = route.post,
-                                    page = page,
-                                    subcat = subcat,
-                                    resumeSharedDraft = false,
-                                ),
-                            )
-                        }
+                        // Inline coordinates are already durable; selection contains only transient cards.
+                        multiQuoteNavState.onEditorQuotesHandoff(
+                            EditorQuotesHandoff(
+                                scope = topicQuoteScope,
+                                quotes = selection,
+                                consumesBasket = true,
+                            ),
+                        )
+                        backStack.add(
+                            PostEditorRoute(
+                                mode = PostEditorMode.Reply,
+                                cat = route.cat,
+                                topicId = route.post,
+                                page = page,
+                                subcat = subcat,
+                                resumeSharedDraft = false,
+                            ),
+                        )
                     },
                     onEdit = { subcat, page, numreponse ->
                         // Phase 2D (#147) — `PostEditorMode.Edit` triggers the
@@ -3125,6 +3191,7 @@ private fun RedfaceNavHost(
                 }
                 LaunchedEffect(Unit) { multiQuoteNavState.onEditorQuotesHandoff(null) }
                 PostEditorScreen(
+                    onOpenEditorSettings = { openEditorSettings(backStack) },
                     request = PostEditorRequest(
                         mode = route.mode,
                         cat = route.cat,
@@ -3178,15 +3245,16 @@ private fun RedfaceNavHost(
                             )
                             SubmitHandoff.None -> Unit
                         }
-                        // #868/#869 — the selection's intent is consumed by the SUCCESSFUL submit
-                        // of a basket-consuming session (« Citer N » / its escalation), and only
-                        // then : a failure, a back or a « Citer » simple never empty the basket.
+                        // #868/#869 — safety net of ED-88 : the SUCCESSFUL submit of a
+                        // basket-consuming session (« Citer N » / its escalation) empties whatever
+                        // the durable delivery below left armed (cards) ; a failure, a back or a
+                        // « Citer » simple never empty the basket.
                         // Guarded on the basket still being THIS topic's (gate Sol r1) : the one
                         // basket is keyed (cat, post), so if it was re-armed on another topic
                         // while this editor lived, the submit must not wipe that newer selection.
-                        if (editorQuotesHandoff?.consumesBasket == true &&
-                            editorQuoteScope != null &&
-                            multiQuoteNavState.basket?.matches(editorQuoteScope) == true
+                        if (multiQuoteNavState.basket.isConsumedBy(
+                                editorQuoteScope, editorQuotesHandoff?.consumesBasket == true,
+                            )
                         ) {
                             multiQuoteNavState.onClear()
                         }
@@ -3196,11 +3264,23 @@ private fun RedfaceNavHost(
                             backStack.removeAt(backStack.lastIndex)
                         }
                     },
+                    // ED-88 (#1616) — the basket is emptied as soon as its citations are durable
+                    // in the draft (sealed C/Q transaction), same guards as the submit above. A
+                    // failed or dormant delivery never signals : the basket stays armed.
+                    onQuotesDelivered = {
+                        if (multiQuoteNavState.basket.isConsumedBy(
+                                editorQuoteScope, editorQuotesHandoff?.consumesBasket == true,
+                            )
+                        ) {
+                            multiQuoteNavState.onClear()
+                        }
+                    },
                 )
             }
             entry<TopicFormRoute> { route ->
                 val submitAccount = rememberSubmitAccount(topicSubmitNavState.account)
                 TopicFormScreen(
+                    onOpenEditorSettings = { openEditorSettings(backStack) },
                     request = TopicFormRequest(
                         mode = route.mode,
                         cat = route.cat,

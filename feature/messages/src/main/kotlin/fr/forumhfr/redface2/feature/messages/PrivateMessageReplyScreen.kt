@@ -1,60 +1,70 @@
 package fr.forumhfr.redface2.feature.messages
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.forumhfr.redface2.core.domain.editor.ArmToken
-import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
-import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
-import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
-import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
-import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
-import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
-import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
+import fr.forumhfr.redface2.core.ui.R as UiR
+import fr.forumhfr.redface2.core.ui.editor.LocalEditorPreviewState
+import fr.forumhfr.redface2.core.ui.editor.EditorDraftOfferDecisionState
+import fr.forumhfr.redface2.core.ui.editor.EditorDraftOfferList
+import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
+import fr.forumhfr.redface2.core.ui.editor.EditorBackState
+import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
+import fr.forumhfr.redface2.core.ui.editor.EditorTooltipHost
+import fr.forumhfr.redface2.core.ui.editor.EditorUnsavedCloseDialog
+import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
+import fr.forumhfr.redface2.core.ui.editor.LocalEditorTooltipHost
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
-import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
-import fr.forumhfr.redface2.core.ui.editor.bannerText
-import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerOpenIntent
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
-import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
+import fr.forumhfr.redface2.core.ui.editor.rememberEditorWindowMetrics
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 
 /**
- * Reply editor for a private-message conversation (#301). Reuses the shared `:core:ui` BBCode
- * toolbar / text field / preview and a send button pinned above the IME (same window-insets pattern
- * as the post editor, which requires `windowSoftInputMode=adjustNothing`). Submission goes through
+ * Reply editor for a private-message conversation, hosted by the shared editor chrome.
+ * Submission goes through
  * [PrivateMessageReplyViewModel]; a successful send raises [PrivateMessageReplyEffect.SubmitSucceeded]
  * which the navigation host turns into a back navigation + a forced conversation reload.
  */
+@Suppress("LongParameterList") // Navigation callbacks, including the editor-settings exit.
 @Composable
 fun PrivateMessageReplyScreen(
     request: PrivateMessageReplyRequest,
@@ -64,291 +74,207 @@ fun PrivateMessageReplyScreen(
     // through PrivateMessageReplyViewModel.onCloseRequested first.
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    viewModel: PrivateMessageReplyViewModel = hiltViewModel<
+        PrivateMessageReplyViewModel, PrivateMessageReplyViewModel.Factory
+    >(creationCallback = { factory -> factory.create(request) }),
+    onOpenEditorSettings: () -> Unit = {},
+    // ED-88 (#1616) — the inline citations of this reply are durable in its draft row.
+    onQuotesDelivered: () -> Unit = {},
 ) {
-    val viewModel = hiltViewModel<PrivateMessageReplyViewModel, PrivateMessageReplyViewModel.Factory>(
-        creationCallback = { factory -> factory.create(request) },
-    )
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val currentOnQuotesDelivered by rememberUpdatedState(onQuotesDelivered)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> viewModel.onStarted()
+                Lifecycle.Event.ON_STOP -> viewModel.onStopped()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val bodyScroll = viewModel.bodyScrollState
+    val measuredViewport = bodyScroll.maxValue to bodyScroll.viewportSize
+    LaunchedEffect(viewModel, state.isInitializing, measuredViewport) {
+        if (state.isInitializing || measuredViewport.first == Int.MAX_VALUE) return@LaunchedEffect
+        withFrameNanos { }
+        withFrameNanos { }
+        if (measuredViewport == (bodyScroll.maxValue to bodyScroll.viewportSize)) viewModel.restoreBodyScroll()
+    }
+    val currentOnBack by rememberUpdatedState(onBack)
+    val currentOnSuccess by rememberUpdatedState(onSubmitSucceeded)
     LaunchedEffect(viewModel) {
+        // Delivery collection starts before navigation, including when both survived recreation.
+        launch(start = CoroutineStart.UNDISPATCHED) {
+            viewModel.quotesDelivered.collect { currentOnQuotesDelivered() }
+        }
         viewModel.effects.collect { effect ->
             when (effect) {
                 is PrivateMessageReplyEffect.SubmitSucceeded ->
-                    onSubmitSucceeded(effect.threadId, effect.page)
+                    currentOnSuccess(effect.threadId, effect.page)
                 // #803 pattern — the pop happens only AFTER the ViewModel flushed the draft.
-                PrivateMessageReplyEffect.CloseCommitted -> onBack()
+                PrivateMessageReplyEffect.CloseCommitted -> currentOnBack()
             }
         }
     }
-    // #803 pattern (state-hygiene audit 2026-07-05) — every close path (system back below, header
-    // arrow via onCloseRequested in the content wiring) routes through the ViewModel so the
-    // pending autosave debounce is flushed BEFORE the pop (trading the predictive-back preview
-    // for never losing the last < 750 ms of typing — same trade-off as PostEditorScreen).
-    BackHandler { viewModel.onCloseRequested() }
-    PrivateMessageReplyContent(
-        state = state,
-        // #618 — auto-open the recipient-manager sheet when entered from the Participants sheet.
-        autoOpenRecipientManager = request.openRecipientManager,
-        onBack = viewModel::onCloseRequested,
-        onContentChanged = viewModel::onContentChanged,
-        onToolbarAction = viewModel::onToolbarAction,
-        onTogglePreview = viewModel::onTogglePreview,
-        onToggleSignature = viewModel::onToggleSignature,
-        onToggleSmileyDisabled = viewModel::onToggleSmileyDisabled,
-        onToggleEmailNotification = viewModel::onToggleEmailNotification,
-        onErrorDismissed = viewModel::onErrorDismissed,
-        onSubmit = viewModel::onSubmit,
-        onSubmitConfirmed = viewModel::onSubmitConfirmed,
-        onSubmitConfirmationDismissed = viewModel::onSubmitConfirmationDismissed,
-        onRetryFormLoad = viewModel::retryFormLoad,
-        onDraftRestore = viewModel::onDraftRestoreRequested,
-        onDraftDiscard = viewModel::onDraftDiscardRequested,
-        onImagePickerEvent = viewModel::onImagePickerEvent,
-        onUploadErrorDismissed = viewModel::onUploadErrorDismissed,
-        onAddRecipient = viewModel::onAddRecipient,
-        onRemoveRecipient = viewModel::onRemoveRecipient,
-        smileyPicker = viewModel.smileyPicker,
-        onSmileySelected = viewModel::onSmileySelected,
-        modifier = modifier,
-    )
+    // Above every branch of the content, including the load failure that replaces the editor.
+    if (state.showUnsavedCloseDialog) {
+        EditorUnsavedCloseDialog(
+            onStay = { viewModel.onUnsavedCloseDecided(leave = false) },
+            onLeave = { viewModel.onUnsavedCloseDecided(leave = true) },
+        )
+    }
+    CompositionLocalProvider(LocalEditorPreviewState provides viewModel.previewLayout) {
+        PrivateMessageReplyContent(
+            state, request.openRecipientManager, viewModel.bodyFieldState, viewModel.bodyInputTransformation,
+            remember(viewModel) { viewModel.chromeActions() }, viewModel.smileyPicker, modifier,
+            viewModel.bodyScrollState,
+            viewModel.editorEvents, viewModel.chromeMemory,
+            bodyCaretRevealResetKey = remember(viewModel) { { viewModel.bodyCaretRevealResetKey } },
+            onOpenEditorSettings = {
+                // Capture the live draft even if Nav3 removes this composition before delivering ON_STOP.
+                viewModel.onStopped()
+                onOpenEditorSettings()
+            },
+        )
+    }
 }
 
 @Composable
-@Suppress("LongParameterList") // One callback per editor action — each is wired to a distinct VM method.
-private fun PrivateMessageReplyContent(
+@Suppress("LongParameterList") // Live field, VM-owned chrome and business ports match the post host.
+internal fun PrivateMessageReplyContent(
     state: PrivateMessageReplyUiState,
     autoOpenRecipientManager: Boolean,
-    onBack: () -> Unit,
-    onContentChanged: (TextFieldValue) -> Unit,
-    onToolbarAction: (BbcodeAction) -> Unit,
-    onTogglePreview: () -> Unit,
-    onToggleSignature: (Boolean) -> Unit,
-    onToggleSmileyDisabled: (Boolean) -> Unit,
-    onToggleEmailNotification: (Boolean) -> Unit,
-    onErrorDismissed: () -> Unit,
-    onSubmit: (Long) -> Unit,
-    onSubmitConfirmed: (ArmToken?) -> Unit,
-    onSubmitConfirmationDismissed: () -> Unit,
-    onRetryFormLoad: () -> Unit,
-    onDraftRestore: () -> Unit,
-    onDraftDiscard: () -> Unit,
-    // #459 — image upload wiring (photo picker launcher lives in the body composable).
-    onImagePickerEvent: (ImagePickerEvent) -> Unit,
-    onUploadErrorDismissed: () -> Unit,
-    onAddRecipient: (String) -> Unit,
-    onRemoveRecipient: (String) -> Unit,
+    bodyFieldState: TextFieldState,
+    bodyInputTransformation: InputTransformation,
+    actions: PrivateMessageReplyChromeActions,
     smileyPicker: SmileyPickerController,
-    onSmileySelected: (String) -> Unit,
     modifier: Modifier = Modifier,
+    bodyScrollState: ScrollState = rememberScrollState(),
+    chromeEvents: PrivateMessageReplyEvents = remember { PrivateMessageReplyEvents() },
+    chromeMemory: PrivateMessageReplyChromeMemory = remember { PrivateMessageReplyChromeMemory() },
+    windowMetrics: EditorWindowMetrics? = null,
+    bodyCaretRevealResetKey: () -> Int = { 0 },
+    onOpenEditorSettings: () -> Unit = {},
 ) {
-    var optionsSheetOpen by remember { mutableStateOf(false) }
-    // #618 — the « Gérer les destinataires » bottom sheet (Bug 1: the member editor no longer stacks
-    // inline above the composer). Opened by the compact summary button below, or auto-opened on entry
-    // from the conversation's Participants sheet.
-    var recipientManagerOpen by remember { mutableStateOf(false) }
-    // One-shot auto-open (Codex framing): fire once the form has loaded AND the owner-only editor is
-    // available, never before (canManageRecipients arrives after the async form GET). `autoOpened`
-    // survives recomposition / config changes so the sheet is never re-opened after the user closes it.
-    var autoOpened by rememberSaveable { mutableStateOf(false) }
-    LaunchedEffect(autoOpenRecipientManager, state.canManageRecipients) {
-        if (autoOpenRecipientManager && state.canManageRecipients && !autoOpened) {
-            autoOpened = true
-            recipientManagerOpen = true
-        }
+    val source = rememberUpdatedState(state)
+    // Register the launcher before loading/errors and outside every transient surface, like the post.
+    val adapter = remember { arrayOfNulls<PrivateMessageReplyChromeAdapter>(1) }
+    val launchPicker = rememberEditorImagePicker(state.imagePickerMode,
+        onCancelled = { adapter[0]?.pickerCancelled() }, onEvent = { adapter[0]?.picker(it) })
+    val launch = rememberUpdatedState(launchPicker)
+    val host = remember(bodyFieldState, chromeEvents, chromeMemory, smileyPicker, actions) {
+        PrivateMessageReplyChromeAdapter({ source.value }, bodyFieldState, chromeEvents,
+            actions, { launch.value() }, { smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION) }, chromeMemory,
+            openSmileySearch = { smileyPicker.open(SmileyPickerOpenIntent.SEARCH) })
     }
-    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-        Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-            MessageEditorHeader(title = stringResource(R.string.messages_reply_title), onBack = onBack)
-            when {
-                state.formError -> MessageFormErrorState(onRetry = onRetryFormLoad)
-                state.isLoadingForm && !state.formAvailable -> MessageFormLoadingState()
-                else -> {
-                    ReplyEditorBody(
-                        state = state,
-                        onContentChanged = onContentChanged,
-                        onToolbarAction = onToolbarAction,
-                        onTogglePreview = onTogglePreview,
-                        onErrorDismissed = onErrorDismissed,
-                        onDraftRestore = onDraftRestore,
-                        onDraftDiscard = onDraftDiscard,
-                        onImagePickerEvent = onImagePickerEvent,
-                        onUploadErrorDismissed = onUploadErrorDismissed,
-                        onManageRecipients = { recipientManagerOpen = true },
-                        modifier = Modifier.weight(1f),
-                    )
-                    MessageSubmitBar(
-                        canSubmit = state.canSubmit,
-                        isSubmitting = state.isSubmitting,
-                        confirmArmed = state.showSubmitConfirmation,
-                        armToken = state.armToken,
-                        onSubmit = onSubmit,
-                        onConfirmSubmit = { onSubmitConfirmed(state.armToken) },
-                        onDisarmConfirm = onSubmitConfirmationDismissed,
-                        onOpenOptions = { optionsSheetOpen = true },
-                        onOpenSmileys = smileyPicker::open,
-                    )
-                }
-            }
+    adapter[0] = host
+    // Preserve the old one-shot entry latch even while a form error replaces the entire editor.
+    // An open manager lives in VM memory only; process recreation must never reopen that sheet.
+    var recipientEntryHandled by rememberSaveable { mutableStateOf(false) }
+    val managerOpen = host.surface == PrivateMessageReplyChromeSurface.Recipients
+    SideEffect { if (managerOpen) recipientEntryHandled = true }
+    val activity = LocalActivity.current
+    val window = windowMetrics ?: activity?.let { rememberEditorWindowMetrics(it).value }
+    when {
+        state.isInitializing || window == null -> Surface(modifier.fillMaxSize()) {
+            Box(contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         }
-        // HFR per-message option toggles, moved behind the bar's « Options » trigger —
-        // same surface as the post editor / topic form (shared EditorOptionsSheet).
-        if (optionsSheetOpen) {
-            EditorOptionsSheet(onDismiss = { optionsSheetOpen = false }) {
-                MessageEditorOptions(
-                    signatureEnabled = state.signatureEnabled,
-                    smileyDisabled = state.smileyDisabled,
-                    emailNotificationEnabled = state.emailNotificationEnabled,
-                    enabled = !state.submission.blocksBodyMutation && !state.isLoadingForm,
-                    onSignatureChanged = onToggleSignature,
-                    onSmileyDisabledChanged = onToggleSmileyDisabled,
-                    onEmailNotificationChanged = onToggleEmailNotification,
-                )
-            }
-        }
-        // #618 — recipient manager bottom sheet (Bug 1: was an inline editor stacked above the body).
-        // Owner-only; the compact summary button can only arm it when canManageRecipients is true.
-        if (recipientManagerOpen && state.canManageRecipients) {
-            RecipientManagerSheet(
-                recipients = state.recipients,
-                enabled = !state.submission.blocksBodyMutation,
-                onAddRecipient = onAddRecipient,
-                onRemoveRecipient = onRemoveRecipient,
-                onDismiss = { recipientManagerOpen = false },
-            )
-        }
-        // #387 — smiley picker sheet (Standard + Wiki), same component as the post editors.
-        val pickerState by smileyPicker.state.collectAsStateWithLifecycle()
-        (pickerState as? SmileyPickerState.Open)?.let { open ->
-            SmileyPickerSheet(
-                state = open,
-                onDismiss = smileyPicker::dismiss,
-                onQueryChange = smileyPicker::onQueryChanged,
-                onSmileyClicked = onSmileySelected,
-            )
+        state.formError -> ReplyFormFailure(host, smileyPicker, modifier)
+        else -> CompositionLocalProvider(LocalEditorTooltipHost provides remember { EditorTooltipHost() }) {
+            PrivateMessageReplyChrome(host, bodyFieldState, bodyInputTransformation, bodyScrollState,
+                smileyPicker, autoOpenRecipientManager && !recipientEntryHandled, window, modifier,
+                bodyCaretRevealResetKey, autoFocusBody = !autoOpenRecipientManager,
+                onOpenEditorSettings = onOpenEditorSettings)
         }
     }
 }
 
 @Composable
-@Suppress("LongParameterList") // Editor body mirrors the post editor surface; each callback is distinct.
-internal fun ReplyEditorBody(
-    state: PrivateMessageReplyUiState,
-    onContentChanged: (TextFieldValue) -> Unit,
-    onToolbarAction: (BbcodeAction) -> Unit,
-    onTogglePreview: () -> Unit,
-    onErrorDismissed: () -> Unit,
-    onDraftRestore: () -> Unit,
-    onDraftDiscard: () -> Unit,
-    onImagePickerEvent: (ImagePickerEvent) -> Unit,
-    onUploadErrorDismissed: () -> Unit,
-    onManageRecipients: () -> Unit,
-    modifier: Modifier = Modifier,
+@Suppress("LongParameterList") // Same scaffold assembly as the post, without its quote cards/header.
+private fun PrivateMessageReplyChrome(
+    host: PrivateMessageReplyChromeAdapter,
+    body: TextFieldState,
+    transformation: InputTransformation,
+    scroll: ScrollState,
+    smileys: SmileyPickerController,
+    autoOpenRecipients: Boolean,
+    window: EditorWindowMetrics,
+    modifier: Modifier,
+    bodyCaretRevealResetKey: () -> Int,
+    autoFocusBody: Boolean,
+    onOpenEditorSettings: () -> Unit,
 ) {
-    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode, onImagePickerEvent)
-    // #447/#1406 — all variable-height chrome shares one bounded scroller above the BTF2 field.
-    // The field is the final weighted child and therefore keeps a real internal viewport.
-    BoxWithConstraints(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-    ) {
-        val controlsMaxHeight = editorControlsMaxHeight(
-            available = maxHeight,
-            fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
-        )
-        val controlsScroll = rememberScrollState()
-        val hasAlert = state.restorableDraft != null ||
-            state.submitError != null || state.uploadError != null
-        LaunchedEffect(state.restorableDraft != null, state.submitError, state.uploadError) {
-            if (hasAlert) controlsScroll.animateScrollTo(0)
+    val tooltips = requireNotNull(LocalEditorTooltipHost.current)
+    val back = {
+        host.back(EditorBackState(tooltipOpen = tooltips.isVisible)) {
+            if (it == EditorBackAction.CloseTooltip) tooltips.dismiss()
         }
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Column(
-                modifier = Modifier
-                    .heightIn(max = controlsMaxHeight)
-                    .verticalScroll(controlsScroll),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+    }
+    val focus = remember { FocusRequester() }
+    EditorScaffold(body, window, host.title(), host.state.context, host.chrome(),
+        host.barActions, host.submitState, host.submitActions, host.imageActions, host::closeRequested,
+        modifier = modifier, bodyFocusRequester = focus, bodyScrollState = scroll,
+        // The route's manager entry owns initial focus, including while its owner form is loading.
+        // Keep this independent of the one-shot latch, which changes as soon as the manager opens.
+        inputTransformation = transformation, autoFocus = autoFocusBody, surfaceFocus = host.focusMemory,
+        bodyFocusRestoreAllowed = host.surface == null && host.detail == null,
+        bodyCaretRevealResetKey = bodyCaretRevealResetKey,
+        onSystemBack = back,
+        fieldArea = { field -> PrivateMessageReplyChromePreview(host, body, focus, field) },
+        overlay = { restore, content ->
+            PrivateMessageReplyChromeSurfaces(host, body, smileys, autoOpenRecipients, restore, content,
+                onOpenEditorSettings)
+            // Last activity handler: the host resolves every ED-85 level, including bar focus return.
+            BackHandler(onBack = back)
+        })
+}
+
+/**
+ * ED-130/132: the form or quote GET failure replaces the editor, so this screen carries the offers
+ * in line (ED-40: date, excerpt, decisions per version) and the quote remedies: « Recharger » (GET
+ * only), « Ignorer la citation » after two failures, and the dormant-quote decision.
+ */
+@Composable
+private fun ReplyFormFailure(
+    host: PrivateMessageReplyChromeAdapter,
+    smileys: SmileyPickerController,
+    modifier: Modifier,
+) {
+    val state = host.state
+    // The retry returns to the bare editor; the ↺ status still offers the draft (gate R1b R3, minor 3).
+    LaunchedEffect(host) { host.closeLayersForFormFailure { smileys.dismiss() } }
+    BackHandler { host.closeRequested() }
+    val offered = state.source.restorableDraft != null
+    // Several offers may outgrow the window: they scroll with the remedies. Without an offer the
+    // error keeps its centered layout.
+    val scroll = if (offered) Modifier.verticalScroll(rememberScrollState()) else Modifier
+    Surface(modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().then(scroll)) {
+            MessageEditorHeader(host.title(), host::closeRequested)
+            if (offered) Surface(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest, tonalElevation = 2.dp,
             ) {
-                if (state.restorableDraft != null) {
-                    MessageDraftRestoreBanner(onRestore = onDraftRestore, onDiscard = onDraftDiscard)
-                }
-
-                state.submitError?.let { error ->
-                    MessageSubmissionError(error, composing = false)
-                    TextButton(onClick = onErrorDismissed) {
-                        Text(text = stringResource(R.string.messages_reply_error_dismiss))
+                val offers = state.source.draftOffers
+                if (offers.isEmpty()) {
+                    MessageDraftRestoreChoice(host::restoreDraft, host::discardDraft, state.restoreEnabled,
+                        Modifier.padding(start = 8.dp, top = 8.dp, end = 8.dp))
+                } else Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.messages_draft_restore_message),
+                        style = MaterialTheme.typography.bodyMedium)
+                    EditorDraftOfferList(offers, host::restoreOffer, host::discardOffer) { id ->
+                        val enabled = state.source.canDecideDraftOffer(id)
+                        EditorDraftOfferDecisionState(state.restoreEnabled && enabled, state.discardEnabled && enabled)
                     }
                 }
-
-                // #459 — dismissible upload-error banner (shared :core:ui wording).
-                state.uploadError?.let { error ->
-                    Text(
-                        text = error.bannerText(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    TextButton(onClick = onUploadErrorDismissed) {
-                        Text(text = stringResource(R.string.messages_reply_error_dismiss))
-                    }
-                }
-
-                // #618 (Bug 1) — owner-only compact summary; the dedicated sheet keeps large DTs
-                // from crowding the composer. Hidden for a participant or one-to-one MP.
-                if (state.canManageRecipients) {
-                    MessageRecipientsSummary(
-                        count = state.recipients.size,
-                        onManage = onManageRecipients,
-                    )
-                    HorizontalDivider()
-                }
-
-                BbcodeToolbar(
-                    onAction = onToolbarAction,
-                    // #459 — upload wiring, same affordance as the topic-side editors.
-                    onImageUploadRequested = launchImagePicker,
-                    uploading = state.isUploading,
-                )
-                // #459 — « n/N » batch counter while a multi-image upload is in flight.
-                state.uploadProgress?.let { progress ->
-                    UploadProgressLabel(progress)
-                }
-
-                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                    TextButton(onClick = onTogglePreview) {
-                        Text(
-                            text = stringResource(
-                                if (state.isPreviewVisible) {
-                                    R.string.messages_reply_preview_hide
-                                } else {
-                                    R.string.messages_reply_preview_show
-                                },
-                            ),
-                        )
-                    }
-                }
-
-                if (state.isPreviewVisible) {
-                    HorizontalDivider()
-                    BbcodePreview(
-                        content = state.preview,
-                        modifier = Modifier.fillMaxWidth(),
-                        mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
-                    )
-                }
-
             }
-
-            BbcodeTextField(
-                value = state.draft,
-                onValueChange = onContentChanged,
-                label = stringResource(R.string.messages_reply_field_label),
-                placeholder = stringResource(R.string.messages_reply_field_placeholder),
-                modifier = Modifier.weight(1f),
-                // #459 — lock editing during a batch (caret must not move between two insertions).
-                readOnly = state.isUploading || state.submission.blocksBodyMutation,
-            )
+            MessageFormErrorState(onRetry = host::retryFormLoad,
+                retryLabel = stringResource(UiR.string.editor_action_reload),
+                onIgnoreQuote = (host::ignoreQuote).takeIf { state.source.canIgnorePendingQuote },
+                onResumeQuote = (host::resumeQuote).takeIf { state.source.hasDormantQuote })
         }
     }
 }

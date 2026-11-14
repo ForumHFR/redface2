@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.model.write
 
+import fr.forumhfr.redface2.core.model.EditorSmiley
+import fr.forumhfr.redface2.core.model.EditorSmileySource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -13,6 +15,60 @@ import org.junit.Test
  * one-to-one MP / topic reply / simple participant.
  */
 class ReplyFormTest {
+
+    @Test
+    fun `toString exposes only sizes and flags without private form values`() {
+        val token = "private-csrf-token-1625"
+        val subject = "private-subject-1625"
+        val pseudo = "private-pseudo-1625"
+        val body = "private-body-1625"
+        val hiddenFields = mapOf(
+            "hash_check" to token,
+            "sujet" to subject,
+            "pseudo" to pseudo,
+            "content_form" to body,
+            "newdest" to "private-recipient-1625",
+            "extra" to "private-hidden-value-1625",
+        )
+        val icon = "private-icon-1625"
+        val roster = "private-roster-1625"
+        val userId = 7654321
+        val smiley = EditorSmiley(
+            token = ":jap:",
+            imageUrl = "https://example.test/private-favorite-1625.gif",
+            source = EditorSmileySource.HFR_FAVORITE,
+        )
+        val replyForm = ReplyForm(
+            hashCheck = token,
+            sujet = subject,
+            hiddenFields = hiddenFields,
+            isAnonymous = false,
+            initialContent = body,
+            options = ReplyFormOptions(
+                signatureEnabled = true,
+                smileyDisabled = true,
+                emailNotificationEnabled = true,
+            ),
+            msgIcon = icon,
+            userId = userId,
+            recipientsRoster = roster,
+            favoriteSmileys = listOf(smiley),
+            isSubjectEditable = true,
+            submitFieldOrder = hiddenFields.keys.toList(),
+        )
+
+        val rendered = replyForm.toString()
+
+        val secrets = hiddenFields.values + listOf(icon, roster, userId.toString(), smiley.token, smiley.imageUrl)
+        secrets.forEach { secret ->
+            assertFalse("toString must not expose private form values", rendered.contains(secret))
+        }
+        assertEquals(
+            "ReplyForm(hiddenFieldCount=6, isAnonymous=false, initialContentLength=${body.length}, " +
+                "isSubjectEditable=true)",
+            rendered,
+        )
+    }
 
     private fun form(hiddenFields: Map<String, String>): ReplyForm = ReplyForm(
         hashCheck = "h",

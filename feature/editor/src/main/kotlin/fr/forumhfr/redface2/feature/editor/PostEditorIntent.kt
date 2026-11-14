@@ -1,12 +1,9 @@
 package fr.forumhfr.redface2.feature.editor
 
-import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
-import fr.forumhfr.redface2.core.ui.editor.UploadError
-import fr.forumhfr.redface2.core.ui.editor.UploadProgress
-
-import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 
 /**
@@ -14,7 +11,14 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
  * surface ; quote / edit / create-topic surface in #146 / #147 / #148 / #149.
  */
 sealed interface PostEditorIntent {
-    data class ContentChanged(val value: TextFieldValue) : PostEditorIntent
+    /** ED-40: « Restaurer » on the offered version chosen in the sheet's list, by its identity. */
+    data class DraftOfferRestored(val id: String) : PostEditorIntent
+    /** ED-121: « Ignorer » removes only the chosen offered version; the field and Q are untouched. */
+    data class DraftOfferDiscarded(val id: String) : PostEditorIntent
+    data class SubjectChanged(val value: String) : PostEditorIntent
+    data object Started : PostEditorIntent
+    /** Lifecycle ON_STOP: persist without closing the editor or cancelling an upload. */
+    data object Stopped : PostEditorIntent
     data class ToolbarActionClicked(val action: BbcodeAction) : PostEditorIntent
     data object TogglePreview : PostEditorIntent
 
@@ -31,6 +35,20 @@ sealed interface PostEditorIntent {
 
     /** User dismissed an in-flight error banner. Clears [PostEditorState.submitError]. */
     data object ErrorDismissed : PostEditorIntent
+
+    /** Explicit Masquer of a failed attempt write; releases deferred draft information without storage. */
+    data object DraftWriteFailureDismissed : PostEditorIntent
+
+    /** ED-132: GET only; never shares the submit intent or its arm identity. */
+    data object ReloadRequested : PostEditorIntent
+
+    /** ED-132: explicit abandonment after repeated failure; never sends or edits the body. */
+    data object PendingQuoteIgnored : PostEditorIntent
+
+    /** Acknowledge the uncertain attempt durably before resuming its dormant request. */
+    data object PendingQuoteResumed : PostEditorIntent
+
+    data object LegacyQuoteNoticeDismissed : PostEditorIntent
 
     /** Toggle « Activer votre signature » (HFR `signature=1`). */
     data class ToggleSignature(val enabled: Boolean) : PostEditorIntent
@@ -83,11 +101,11 @@ sealed interface PostEditorIntent {
     /** #405 — user tapped « Ignorer » on the draft banner: delete the cached draft and clear the banner. */
     data object DraftDiscardRequested : PostEditorIntent
 
-    /** #604 lot 3 — remove one quote card (✕). Identified by numreponse, like the sheet. */
-    data class QuoteRemoved(val numreponse: Int) : PostEditorIntent
+    /** ED-52: remove this snapshot, preserving another portion; legacy callers can supply numreponse only. */
+    data class QuoteRemoved(val numreponse: Int, val quote: QuoteSelection? = null) : PostEditorIntent
 
     /** #604 lot 3 — move a quote card one slot up ([delta] = -1) or down (+1) ; out-of-range = no-op. */
-    data class QuoteMoved(val numreponse: Int, val delta: Int) : PostEditorIntent
+    data class QuoteMoved(val numreponse: Int, val delta: Int, val quote: QuoteSelection? = null) : PostEditorIntent
 
     /** #436 (#604 lot 3) — « Tout vider » : drop every quote card. The typed body is untouched. */
     data object QuotesCleared : PostEditorIntent
@@ -99,6 +117,12 @@ sealed interface PostEditorIntent {
      * (a plain pop would cancel the debounce with the ViewModel).
      */
     data object CloseRequested : PostEditorIntent
+
+    /** "Rester": the unsaved-close dialog is dismissed, the editor stays open with its field. */
+    data object UnsavedCloseDismissed : PostEditorIntent
+
+    /** "Quitter sans enregistrer": the explicit abandonment of what could not be saved. */
+    data object UnsavedCloseConfirmed : PostEditorIntent
 }
 
 /**
