@@ -16,6 +16,9 @@ data class ArmToken(
 /** ED-160: synchronous reservation, made before suspending on durable storage. */
 data class SubmissionToken(val id: Long, val session: EditorSession)
 
+/** ED-170: a durable acknowledgement reserves the editor without launching another send. */
+enum class EditorSubmissionPurpose { Send, Acknowledge }
+
 /** ED-172: stale upload callbacks cannot release another session's upload lock. */
 data class EditorUploadToken(val id: Long, val session: EditorSession)
 
@@ -23,7 +26,10 @@ data class EditorUploadToken(val id: Long, val session: EditorSession)
 sealed interface EditorSubmissionState {
     data object Ready : EditorSubmissionState
     data class Armed(val token: ArmToken) : EditorSubmissionState
-    data class PersistingAttempt(val submission: SubmissionToken) : EditorSubmissionState
+    data class PersistingAttempt(
+        val submission: SubmissionToken,
+        val purpose: EditorSubmissionPurpose = EditorSubmissionPurpose.Send,
+    ) : EditorSubmissionState
     data class Sending(val attempt: AttemptToken) : EditorSubmissionState
     data class Succeeded(val attempt: AttemptToken) : EditorSubmissionState
     data class Uncertain(val attempt: AttemptToken?, val accepted: Boolean = false) : EditorSubmissionState

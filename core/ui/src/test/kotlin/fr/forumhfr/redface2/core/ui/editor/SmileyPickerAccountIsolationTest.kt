@@ -81,7 +81,7 @@ class SmileyPickerAccountIsolationTest {
             controller.onFavoriteClicked(alice)
             controller.onFavoriteClicked(wiki)
             controller.dismiss()
-            controller.open()
+            controller.open(SmileyPickerOpenIntent.CONSULTATION)
             controller.assertHfrUnavailable()
             runCurrent()
             assertEquals(emptyList<String>(), calls)
@@ -108,7 +108,7 @@ class SmileyPickerAccountIsolationTest {
             ),
         )
         controller.refreshFavorites(controller.favoriteFormStamp())
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertNull(controller.openState().onFavoriteChange)
         assertNull(controller.openState().favoriteAction(alice))
         assertNull(controller.openState().favoriteAction(wiki))
@@ -134,7 +134,7 @@ class SmileyPickerAccountIsolationTest {
             ),
         )
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onFavoriteClicked(alice)
         runCurrent()
         controller.onFavoriteClicked(wiki)
@@ -179,7 +179,7 @@ class SmileyPickerAccountIsolationTest {
                 staleCommand(alice)
                 controller.onFavoriteClicked(wiki)
                 controller.dismiss()
-                controller.open()
+                controller.open(SmileyPickerOpenIntent.CONSULTATION)
                 controller.assertHfrUnavailable()
                 if (owner == null) {
                     controller.refreshFavorites(controller.favoriteFormStamp())
@@ -193,7 +193,7 @@ class SmileyPickerAccountIsolationTest {
             assertNotNull(controller.openState().onLocalFavoriteChange)
 
             form = listOf(bob)
-            controller.open()
+            controller.open(SmileyPickerOpenIntent.CONSULTATION)
             controller.assertHfrUnavailable()
             controller.refreshFavorites(controller.favoriteFormStamp())
             assertEquals(listOf(bob), controller.openState().favoriteSmileys)
@@ -228,7 +228,7 @@ class SmileyPickerAccountIsolationTest {
                 runCurrent()
                 assertEquals(result.toString(), before, controller.openState())
                 controller.dismiss()
-                controller.open()
+                controller.open(SmileyPickerOpenIntent.CONSULTATION)
                 controller.assertHfrUnavailable()
                 assertNull(controller.openState().favoriteFeedback)
 
@@ -260,7 +260,7 @@ class SmileyPickerAccountIsolationTest {
                 runCurrent()
                 assertEquals(result.toString(), before, controller.openState())
                 controller.dismiss()
-                controller.open()
+                controller.open(SmileyPickerOpenIntent.CONSULTATION)
                 assertEquals(listOf(bob), controller.openState().favoriteSmileys)
                 assertNull(controller.openState().favoriteFeedback)
             }
@@ -294,7 +294,7 @@ class SmileyPickerAccountIsolationTest {
             runCurrent()
             assertEquals(result.toString(), before, controller.openState())
             controller.dismiss()
-            controller.open()
+            controller.open(SmileyPickerOpenIntent.CONSULTATION)
             assertEquals(listOf(bob, favorite), controller.openState().favoriteSmileys)
             assertEquals(wiki.token, controller.openState().pendingFavoriteToken)
             assertNull(controller.openState().favoriteFeedback)
@@ -321,7 +321,7 @@ class SmileyPickerAccountIsolationTest {
         gate.completeExceptionally(IOException("transport unavailable"))
         runCurrent()
         assertEquals(SmileyPickerState.Hidden, controller.state.value)
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.assertHfrUnavailable()
         assertNull(controller.openState().favoriteFeedback)
         assertNull(controller.openState().favoriteFeedbackToken)
@@ -406,7 +406,7 @@ class SmileyPickerAccountIsolationTest {
             ),
             localCollections = locals,
         ),
-    ).also { it.open() }
+    ).also { it.open(SmileyPickerOpenIntent.CONSULTATION) }
 
     private fun SmileyPickerController.assertHfrUnavailable() {
         val open = openState()

@@ -1,0 +1,18 @@
+<resources>
+    <!-- #1417 point 5 (#1513) : onglet « Formats » de la feuille Options des éditeurs. -->
+    <string name="editor_formats_tab">Formats</string>
+    <string name="editor_formats_hint">Un format s’applique au texte sélectionné, ou pose ses balises au curseur.</string>
+    <string name="editor_formats_apply">Appliquer</string>
+    <string name="editor_format_desc_bold">Texte en gras</string>
+    <string name="editor_format_desc_italic">Texte en italique</string>
+    <string name="editor_format_desc_underline">Texte souligné</string>
+    <string name="editor_format_desc_strike">Texte barré</string>
+    <string name="editor_format_desc_url">Lien cliquable vers une adresse web</string>
+    <string name="editor_format_desc_spoiler">Texte masqué, révélé par le lecteur</string>
+    <string name="editor_format_desc_color">Texte en couleur : choisissez une teinte</string>
+    <string name="editor_format_desc_bullet">Puce de liste devant le texte</string>
+    <string name="editor_format_desc_quote">Bloc de citation</string>
+    <string name="editor_format_desc_cpp">Bloc de code</string>
+    <string name="editor_format_desc_fixed">Bloc à chasse fixe, espaces conservés</string>
+    <string name="editor_format_desc_email">Lien vers une adresse e-mail</string>
+</resources>

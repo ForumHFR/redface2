@@ -119,7 +119,7 @@ internal fun ProfilePreviewSheetContent(
     onDismiss: () -> Unit,
     onOpenFullProfile: () -> Unit,
 ) {
-    val sheetState = rememberModalBottomSheetState()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val coroutineScope = rememberCoroutineScope()
 
     ModalBottomSheet(

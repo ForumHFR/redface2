@@ -1,0 +1,50 @@
+Provenance — private_message_dt_edit_form.html (#1625, « Modifier » sur son propre message dans un DT)
+
+FIXTURE RÉDUITE. Capture authentifiée live du 2026-11-14 (vers 00:21, heure de Paris), compte agent
+XaTelitte, sur une discussion à plusieurs (DT) de test dont XaTelitte est PARTICIPANT et non
+créateur. Même session, même régime et même recette que private_message_edit_form.html
+(docs/guides/capture-fixture-citation-mp.md).
+
+Séquence : GET authentifié de la page de conversation (page unique) pour relever le lien « Modifier »
+RÉELLEMENT servi sur un message de XaTelitte, puis GET de ce lien. Session XaTelitte existante
+réutilisée en lecture seule (`-b`, jamais réécrite) : aucun login, aucun mot de passe saisi, AUCUN
+POST. Le formulaire n'a jamais été soumis.
+
+URL capturée (identifiants déjà fictifs), fragment #formulaire retiré :
+  /message.php?config=hfr.inc&cat=prive&post=3000004&numreponse=1980000402&page=1&p=1&subcat=0
+  &sondage=0&owntopic=0
+Le message édité est le 2e de la conversation ; il ne cite aucun message.
+
+RÉDUCTION : seul le sous-arbre `form[name=hop]` est conservé, squelette HTML minimal. Retirés : chrome,
+recherche rapide et formulaire d'aperçu (avec leurs hash_check), récapitulatifs et vue rapide — donc
+tous les pseudos, corps, dates, avatars et signatures des participants. Les quatre `md_cryptlink` du
+chrome ont été décodés avant réduction (#1 portail www.hardware.fr, #2 /unlog.php?config&codehex,
+#3 /user/editprofil.php?config, #4 /online.php?config) et retirés ; aucun n'était dans le formulaire.
+
+CE QUE LA FIXTURE PROUVE (contrat serveur DT mesuré, côté participant) :
+- form[name=hop] method=post action=/bdd.php?config=hfr.inc ;
+- champs strictement identiques, en nom, type et ordre, à private_message_edit_form.html (1:1) et au
+  formulaire d'édition Topic ;
+- parents VIDE pour un message qui ne cite rien (contre parents = message cité en 1:1) ;
+- AUCUNE ligne « Destinataires » (ni champ newdest, ni cellule en lecture seule) : contrairement aux
+  formulaires de RÉPONSE DT, l'édition ne porte pas la liste des participants ;
+- emaill COCHÉE ici (abonnement e-mail du compte à ce DT) : la case reflète l'état d'abonnement ;
+  signature décochée, MsgIcon=1 coché, case delete présente.
+
+SANITISATION :
+- compte courant XaTelitte -> TestUser (champ pseudo) et userId -> 990002 (find_smilies_timer),
+  alignés par rôle sur les fixtures MP existantes ;
+- aucun autre participant n'apparaît dans le formulaire ;
+- DT -> post=3000004 ; message édité -> numreponse=1980000402. Lien avec la conversation de
+  private_message_dt_quote_form.html (3000002) NON prouvé : ids distincts ;
+- sujet réel -> « Sujet prive collectif fictif » (même libellé que private_message_dt_quote_form) ;
+- corps (texte brut sans BBCode ni saut de ligne) -> « Message prive collectif fictif (contenu
+  remplace). » ;
+- hash_check -> TESTHASH ; favori de smiley perso -> testsmiley (chemin /10/ conservé) ;
+- conservés : structure, noms de champs, valeurs de routage non identifiantes, options, smileys
+  builtin, textes d'aide BBCode, URLs statiques HFR.
+Vérification : énumération HTMLParser intégrale ; les entrées différant de celles de
+private_message_edit_form.html (déjà relue en entier) ont été relues une à une. Le brut de la capture
+n'est PAS conservé dans le dépôt.
+
+NORMALISATION NON SÉMANTIQUE : espace de fin de ligne interne à `onsubmit` retiré (git diff --check).

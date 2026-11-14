@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.parser.write
 
+import fr.forumhfr.redface2.core.model.write.MissingFirstPostSubcategoryException
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.TopicForm
 import fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice
@@ -41,9 +42,16 @@ class TopicFormParser {
      * `<option selected>` with `id > 0` — anything else returns
      * `Result.failure`, which prevents the FP submit from silently
      * re-categorising the topic.
+     * The content textarea must also exist, even when empty : an absent
+     * body is unknown and must never unlock first-post editing (#1512).
      */
     fun parseEditFirstPost(html: String): Result<TopicForm> =
-        parseTopicForm(html = html, actionSelector = "form[action*=bdd.php]", requireSelectedSubcat = true)
+        parseTopicForm(
+            html = html,
+            actionSelector = "form[action*=bdd.php]",
+            requireSelectedSubcat = true,
+            requireContent = true,
+        )
 
     /**
      * Parses HFR's create-topic form (`form[action*=bddpost.php]`). HFR serves
@@ -61,13 +69,19 @@ class TopicFormParser {
      * select to avoid silently re-categorising an existing topic.
      */
     fun parseNewTopic(html: String): Result<TopicForm> =
-        parseTopicForm(html = html, actionSelector = "form[action*=bddpost.php]", requireSelectedSubcat = false)
+        parseTopicForm(
+            html = html,
+            actionSelector = "form[action*=bddpost.php]",
+            requireSelectedSubcat = false,
+            requireContent = false,
+        )
 
-    @Suppress("ReturnCount") // Two failure guards (form / hash_check) + the success return.
+    @Suppress("ReturnCount") // Fail-safe guards reject incomplete forms before the success return.
     private fun parseTopicForm(
         html: String,
         actionSelector: String,
         requireSelectedSubcat: Boolean,
+        requireContent: Boolean,
     ): Result<TopicForm> {
         val document = Jsoup.parse(html)
         val form = document.selectFirst(actionSelector)
@@ -86,7 +100,10 @@ class TopicFormParser {
         val subject = form.selectFirst("input[name=sujet]")?.attr("value").orEmpty()
         // `wholeText()` preserves the BBCode and line breaks HFR rendered ; `text()`
         // would collapse whitespace and HTML-decode entities, breaking the round-trip.
-        val initialContent = form.selectFirst("textarea[name=content_form]")?.wholeText().orEmpty()
+        val initialContent = form.selectFirst("textarea[name=content_form]")?.wholeText()
+        if (requireContent && initialContent == null) {
+            return Result.failure(IllegalStateException("content_form textarea missing from first-post form"))
+        }
 
         // #213 — distinguish « no <select name=subcat> at all » (a category
         // WITHOUT sub-category, e.g. cat IA : valid, posts with subcat=0) from
@@ -95,12 +112,7 @@ class TopicFormParser {
         // mode ; the latter still fail-fasts.
         val hasSubcategorySelect = form.selectFirst("select[name=subcat]") != null
         if (!hasSubcategorySelect && requireSelectedSubcat) {
-            return Result.failure(
-                IllegalStateException(
-                    "topic form has no <select name=subcat> — refusing to edit a first post " +
-                        "without an explicit sub-category to avoid silent re-categorisation on submit",
-                ),
-            )
+            return Result.failure(MissingFirstPostSubcategoryException())
         }
         val subcatOutcome = parseSubcategories(form, requireSelectedSubcat)
             ?: if (hasSubcategorySelect) {
@@ -133,7 +145,7 @@ class TopicFormParser {
             TopicForm(
                 hashCheck = hashCheck,
                 subject = subject,
-                initialContent = initialContent,
+                initialContent = initialContent.orEmpty(),
                 userId = SmileyUserIdExtractor.extract(html),
                 favoriteSmileys = SmileySearchParser().parseFavorites(form),
                 selectedSubcat = selectedSubcat,

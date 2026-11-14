@@ -10,6 +10,29 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## [0.13.5] - 2026-11-14
+
+**Promotion bêta 0.70.0** : les pages publiques passent à la nouvelle bêta, et les évolutions de specs depuis la bêta 0.68.0 sont tracées ci-dessous.
+
+### Changed
+
+- Pages d'entrée (`README.md`, `AGENTS.md`, `docs/index.md`, `docs/guides/contributing.md`) : état du projet = bêta publique **0.70.0**, canal dev aligné sur la bêta au 14/11/2026.
+- `docs/specs/roadmap.md` : la plage de livraison de la refonte UI va jusqu'à la bêta **0.70.0**.
+- `docs/specs/mvi.md` :
+  - champ de texte de l'éditeur de post porté par le ViewModel ([#1567](https://github.com/ForumHFR/redface2/pull/1567)) ;
+  - accusé d'envoi unique avec offre « Dernière page » prédite, qui garde sa révision après l'échéance ([#1437](https://github.com/ForumHFR/redface2/issues/1437), [#1546](https://github.com/ForumHFR/redface2/pull/1546), [#1627](https://github.com/ForumHFR/redface2/pull/1627), [#1633](https://github.com/ForumHFR/redface2/pull/1633)) ;
+  - édition MP ([#1625](https://github.com/ForumHFR/redface2/issues/1625)) ;
+  - scellement d'une livraison de citations seulement si toutes les citations sont encore dans le champ ([#1644](https://github.com/ForumHFR/redface2/pull/1644)).
+- `docs/specs/navigation.md` : parcours « Modifier » d'un message MP ([#1635](https://github.com/ForumHFR/redface2/pull/1635)) ; la feuille ↺ reste ouverte après « Ignorer » tant qu'il reste des brouillons ([#1645](https://github.com/ForumHFR/redface2/pull/1645)).
+- `docs/specs/protocol-hfr.md` : contrat d'édition MP, avec le formulaire et la réponse capturés en réel ([#1634](https://github.com/ForumHFR/redface2/pull/1634), [#1637](https://github.com/ForumHFR/redface2/pull/1637)). Il couvre aussi le repli « Modifier » sur ses propres messages quand HFR ne fournit pas le lien ([#1647](https://github.com/ForumHFR/redface2/pull/1647)).
+- `docs/specs/models.md` : modèles d'édition MP sans donnée privée persistée, résultat d'envoi lié au compte ([#1634](https://github.com/ForumHFR/redface2/pull/1634), [#1639](https://github.com/ForumHFR/redface2/pull/1639)).
+- `docs/specs/reading-parity.md` : édition de ses messages en MP ([#1635](https://github.com/ForumHFR/redface2/pull/1635), [#1647](https://github.com/ForumHFR/redface2/pull/1647)).
+- `docs/adr/016-roborazzi-screenshot-testing.md`, `docs/specs/methodology.md`, `docs/specs/stack.md`, `docs/guides/contributing.md` : Roborazzi en `verify` bloquant, avec des références versionnées, une tolérance nulle et un `record` explicite relu dans la PR ([#1571](https://github.com/ForumHFR/redface2/issues/1571), [#1575](https://github.com/ForumHFR/redface2/pull/1575), [#1636](https://github.com/ForumHFR/redface2/pull/1636), [#1638](https://github.com/ForumHFR/redface2/pull/1638)). Le cache Gradle de la CI est écrit depuis `dev` ([#1623](https://github.com/ForumHFR/redface2/pull/1623)).
+- `docs/adr/015-iconographie-boutons-icones.md` : icônes de l'éditeur à 2 dp de trait, icône ↺ `restore_page` ([#1608](https://github.com/ForumHFR/redface2/pull/1608), [#1610](https://github.com/ForumHFR/redface2/pull/1610)).
+- `docs/guides/release.md` : garde de la CD contre un APK ou un AAB auquel manquent des modules Hilt ([#1582](https://github.com/ForumHFR/redface2/pull/1582)).
+
+---
+
 ## [0.13.4] - 2026-11-03
 
 **Promotion bêta 0.68.0** : alignement des pages publiques sur la nouvelle bêta et traçabilité des évolutions de specs depuis la bêta 0.65.0.

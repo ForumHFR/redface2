@@ -1,0 +1,75 @@
+Provenance — private_message_edit_form.html (#1625, « Modifier » sur son propre message dans un fil MP)
+
+FIXTURE RÉDUITE. Capture authentifiée live du 2026-11-14 (vers 00:19, heure de Paris), compte agent
+XaTelitte, sur une conversation privée 1:1 de test (XaTelitte -> mainteneur, 2 messages, tous deux de
+XaTelitte), ouverte en août 2026 pour produire des fixtures publiques. Recette :
+docs/guides/capture-fixture-citation-mp.md (réduction, décodage des cryptlinks, énumération).
+
+Séquence : GET authentifié de la liste des MP (forum1.php?cat=prive), GET de la page de conversation
+pour relever le lien « Modifier » RÉELLEMENT servi, puis GET de ce lien. Les requêtes ont réutilisé une
+session XaTelitte existante en lecture seule (cookie jar lu avec `-b`, jamais réécrit) : aucun login,
+aucun mot de passe saisi, AUCUN POST, ni bdd.php ni bddpost.php. Le formulaire n'a jamais été soumis.
+
+Pourquoi HTTP et pas hfr-mcp : hfr_read et hfr_quote exigent une catégorie ENTIÈRE, or les MP
+utilisent cat=prive (une chaîne) ; hfr_read rend en outre des posts parsés, pas le HTML brut.
+
+URL capturée (identifiants déjà remplacés par leurs valeurs fictives) — le href servi par la toolbar
+du message (en clair et en md_noclass_cryptlink, les deux décodés identiques), fragment #formulaire
+retiré :
+  /message.php?config=hfr.inc&cat=prive&post=3000003&numreponse=1980000302&page=1&p=1&subcat=0
+  &sondage=0&owntopic=0
+Le message édité est le 2e (dernier) de la conversation ; il ne contient qu'une citation du 1er.
+
+RÉDUCTION : seul le sous-arbre `form[name=hop]` est conservé, enveloppé dans un squelette HTML
+minimal (title générique servi par HFR conservé tel quel, accents compris). Ont été RETIRÉS :
+- le chrome de page, les onglets, la recherche rapide (form#fastsearch et son hash_check), le
+  formulaire d'aperçu (form#apercu_form et son hash_check) et le pied de page ;
+- les récapitulatifs et la vue rapide de la conversation, donc tous les corps, dates et pseudos ;
+- les quatre `md_cryptlink` du chrome, TOUS décodés avec l'algorithme de CryptlinkDecoder avant
+  réduction : #1 portail www.hardware.fr, #2 /unlog.php?config&codehex (jeton de déconnexion lié à
+  la session), #3 /user/editprofil.php?config, #4 /online.php?config. Aucun n'était dans le
+  formulaire ; aucun cryptlink encodé ou décodé ne subsiste.
+
+CE QUE LA FIXTURE PROUVE (contrat serveur mesuré) :
+- form[name=hop] method=post action=/bdd.php?config=hfr.inc — l'endpoint d'ÉDITION des sujets, pas
+  bddpost.php ;
+- exactement les mêmes champs, dans le même ordre, que le formulaire d'édition Topic
+  (write_edit_form_test_post.html) : hash_check, subcat, parents, post, stickold, new, cat,
+  numreponse, numrep, page, verifrequet, p, sondage, sond, cache, owntopic, config, sujet (caché),
+  pseudo, password, MsgIcon 1..16, search_smilies, ColorUsedMem, content_form, wysiwyg, submit,
+  Aperçu, signature, smiley, emaill, delete ;
+- cat=prive, subcat=0, numreponse = message édité, numrep vide, stickold et cache VIDES (Topic :
+  stickold=0, cache=cache) ;
+- parents = numreponse du message CITÉ par le message édité (vide quand le message ne cite rien,
+  cf. private_message_dt_edit_form.html) : à renvoyer tel que servi ;
+- content_form prérempli avec le BBCode du message, y compris le [quotemsg=…] produit par HFR ;
+- case signature reflétant le message édité (décochée ici), emaill décochée, MsgIcon=1 coché ;
+- case `delete` (« Effacer ce message ») présente, comme en Topic ;
+- AUCUNE ligne « Destinataire(s) », AUCUN dest/newdest, AUCUN ref ;
+- l'userId du compte courant reste lisible via find_smilies_timer (dans le formulaire).
+
+SANITISATION (mapping fictif stable, relations préservées) :
+- compte courant XaTelitte -> TestUser (champ pseudo, servi en minuscules) et userId -> 990002
+  (find_smilies_timer et 3e paramètre du [quotemsg]), alignés par RÔLE sur les fixtures MP
+  existantes (compte courant = TestUser = 990002) ;
+- le correspondant n'apparaît pas dans le formulaire ;
+- conversation -> post=3000003 ; 1er message (cité) -> 1980000301 (parents et [quotemsg]) ; message
+  édité -> numreponse=1980000302. Aucun lien prouvé avec une conversation déjà fixturée : nouveaux
+  ids, sans collision avec 3000001/3000002 ni 19800000xx/19800001xx/19800002xx ;
+- sujet réel -> « Sujet prive de test » ;
+- corps : texte réel remplacé par un texte neutre de MÊME structure BBCode — [quotemsg=…,1,…],
+  [b]…[/b], [fixed]…[/fixed], paragraphes, liste de trois lignes « - », même nombre de sauts de ligne
+  (14 LF) ; smiley perso réel (variante :2) -> [:testsmiley:2] ;
+- hash_check -> TESTHASH (unique occurrence dans le formulaire) ;
+- favori de smiley perso (images/perso/10/<nom>.gif, [:<nom>:10]) -> testsmiley, chemin de
+  variante /10/ conservé ;
+- conservés car non sensibles : structure du formulaire, noms et ordre des champs, verifrequet=1100,
+  options, smileys BUILTIN, textes d'aide BBCode (dont le placeholder « email@hostname.com »), URLs
+  forum-images.hardware.fr.
+Vérification : énumération HTMLParser intégrale (balises, textes, commentaires, déclarations,
+entités, chaque attribut/valeur) relue en entier ; aucune référence numérique, aucun espace de fin de
+ligne. Le brut de la capture n'est PAS conservé dans le dépôt.
+
+NORMALISATION NON SÉMANTIQUE : un espace de fin de ligne interne à l'attribut `onsubmit` du
+formulaire a été retiré (git diff --check). Aucun autre octet du sous-arbre n'a été reformaté hors
+substitutions de sanitisation.

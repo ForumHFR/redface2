@@ -38,6 +38,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -69,6 +70,7 @@ import fr.forumhfr.redface2.feature.messages.NoopShadowMagnifier
 import java.time.Instant
 import org.junit.Before
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -1659,6 +1661,216 @@ class PrivateMessageThreadContentTest {
             fullWidthPosts = fullWidthPosts,
         )
         mountState(state)
+    }
+
+    @Test
+    fun `own editable message opens the shared editor in a one to one thread`() = editMenuRoutes(false)
+
+    @Test
+    fun `own editable message opens the shared editor in a group thread`() = editMenuRoutes(true)
+
+    @Test
+    fun `own message without toolbar opens the shared editor in a one to one thread`() = editMenuRoutes(false, false)
+
+    @Test
+    fun `own message without toolbar opens the shared editor in a group thread`() = editMenuRoutes(true, false)
+
+    private fun editMenuRoutes(group: Boolean, isEditable: Boolean = true) {
+        var edited: Int? = null
+        val state = contentState(listOf(message(101, "Alice", "Owned body").copy(isEditable = isEditable)),
+            isMultiRecipient = group, canReply = true).copy(connectedPseudo = "  aLiCe  ", editActionsAvailable = true)
+        mountState(state, NO_OP_CALLBACKS.copy(onEdit = { edited = it.numreponse }))
+        compose.onNodeWithContentDescription("Options du message").performClick()
+        compose.onNodeWithText("Modifier").assertIsDisplayed().performClick()
+        compose.waitUntil(timeoutMillis = 2_000) { edited == 101 }
+    }
+
+    @Test
+    fun `own message without toolbar never offers edit in a read only one to one thread`() =
+        readOnlyEditMenuAbsent(false)
+
+    @Test
+    fun `own message without toolbar never offers edit in a read only group thread`() = readOnlyEditMenuAbsent(true)
+
+    private fun readOnlyEditMenuAbsent(group: Boolean) {
+        val state = contentState(listOf(message(101, "Alice", "Owned body")),
+            isMultiRecipient = group, canReply = false).copy(connectedPseudo = "Alice", editActionsAvailable = true)
+        mountState(state, NO_OP_CALLBACKS.copy(onEdit = {}))
+        compose.onNodeWithContentDescription("Options du message").performClick()
+        compose.onNodeWithText("Modifier").assertDoesNotExist()
+    }
+
+    @Test
+    fun `own previous page recap never offers fallback edit in a one to one thread`() = recapEditMenuAbsent(false, 0)
+
+    @Test
+    fun `own previous page recap never offers fallback edit in a group thread`() = recapEditMenuAbsent(true, 0)
+
+    @Test
+    fun `own previous page recap without tools never offers edit in a one to one thread`() =
+        recapEditMenuAbsent(false, null)
+
+    @Test
+    fun `own previous page recap without tools never offers edit in a group thread`() = recapEditMenuAbsent(true, null)
+
+    private fun recapEditMenuAbsent(group: Boolean, quoteRef: Int?) {
+        val state = contentState(
+            messages = listOf(
+                message(101, "Alice", "Previous page recap").copy(quoteRef = quoteRef),
+                message(102, "Alice", "Current page body"),
+            ),
+            page = 2,
+            totalPages = 2,
+            isMultiRecipient = group,
+            canReply = true,
+        ).copy(connectedPseudo = "Alice", editActionsAvailable = true)
+        mountState(state, NO_OP_CALLBACKS.copy(onEdit = {}))
+        compose.onAllNodesWithContentDescription("Options du message")[0].performClick()
+        compose.onNodeWithText("Modifier").assertDoesNotExist()
+    }
+
+    @Test
+    fun `open menu follows refreshed edit permission and dispatches the current message`() {
+        // Different pseudos isolate toolbar permission from the ownership fallback.
+        val original = message(101, "Alice", "Cached body")
+        val refreshed = original.copy(isEditable = true, citedCount = 2)
+        val state = mutableStateOf(contentState(listOf(original), canReply = true).copy(
+            connectedPseudo = "Bob",
+            editActionsAvailable = true,
+        ))
+        var edited: Post? = null
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state.value,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS.copy(onEdit = { edited = it }),
+                )
+            }
+        }
+        compose.onNodeWithContentDescription("Options du message").performClick()
+        compose.onNodeWithText("Modifier").assertDoesNotExist()
+
+        compose.runOnIdle {
+            val content = state.value.mode as PrivateMessageThreadUiState.Mode.Content
+            state.value = state.value.copy(mode = content.copy(thread = content.thread.copy(
+                messages = listOf(message(102, "Other", "Other body"), refreshed),
+            )))
+        }
+
+        compose.onNodeWithText("Cité 2 fois").assertIsDisplayed()
+        compose.onNodeWithText("Modifier").assertIsDisplayed().performClick()
+        compose.waitUntil(timeoutMillis = 2_000) { edited != null }
+        assertEquals(refreshed, edited)
+    }
+
+    @Test
+    fun `another authors message never offers edit in a one to one thread`() = editMenuAbsent(false)
+
+    @Test
+    fun `another authors message never offers edit in a group thread`() = editMenuAbsent(true)
+
+    private fun editMenuAbsent(group: Boolean) {
+        val state = contentState(listOf(message(101, "Bob", "Other body")),
+            isMultiRecipient = group, canReply = true).copy(connectedPseudo = "Alice", editActionsAvailable = true)
+        mountState(state, NO_OP_CALLBACKS.copy(onEdit = {}))
+        compose.onNodeWithContentDescription("Options du message").performClick()
+        compose.onNodeWithText("Modifier").assertDoesNotExist()
+    }
+
+    @Test
+    fun `storage conversation never offers edit even with a cold location cache`() {
+        val state = contentState(listOf(message(101, "Alice", "Storage").copy(isEditable = true)), canReply = true)
+        val mode = state.mode as PrivateMessageThreadUiState.Mode.Content
+        mountState(state.copy(connectedPseudo = "Alice", editActionsAvailable = true,
+            mode = mode.copy(thread = mode.thread.copy(
+                subject = fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository.STORAGE_SUBJECT_HASH))),
+            NO_OP_CALLBACKS.copy(onEdit = {}))
+        compose.onNodeWithContentDescription("Options du message").performClick()
+        compose.onNodeWithText("Modifier").assertDoesNotExist()
+    }
+
+    @Test
+    fun `pending submit retries when connected pseudo changes without a new event`() {
+        val result = PrivateMessageSubmitResult(18L, 1, "Alice")
+        val pending = mutableStateOf<PrivateMessageSubmitResult?>(result)
+        val connectedPseudo = mutableStateOf<String?>(null)
+        val attempts = mutableListOf<String?>()
+        val consumed = mutableListOf<PrivateMessageSubmitResult>()
+        compose.setContent {
+            PrivateMessageSubmitResultEffect(
+                pendingSubmitResult = pending.value,
+                connectedPseudo = connectedPseudo.value,
+                applySubmitResult = {
+                    attempts += connectedPseudo.value
+                    connectedPseudo.value != null
+                },
+                onSubmitResultConsumed = {
+                    consumed += it
+                    pending.value = null
+                },
+            )
+        }
+        compose.runOnIdle {
+            assertEquals(listOf<String?>(null), attempts)
+            assertTrue(consumed.isEmpty())
+            connectedPseudo.value = "Alice"
+        }
+        compose.runOnIdle {
+            assertEquals(listOf(null, "Alice"), attempts)
+            assertEquals(listOf(result), consumed)
+            connectedPseudo.value = "Bob"
+        }
+        compose.runOnIdle {
+            assertEquals(listOf(null, "Alice"), attempts)
+            assertEquals(listOf(result), consumed)
+        }
+    }
+
+    @Test
+    fun `edit acknowledgement is displayed once and never replayed after presentation`() {
+        compose.mainClock.autoAdvance = false
+        val state = mutableStateOf(contentState(listOf(message(101, "Alice", "Edited body")))
+            .copy(connectedPseudo = "Alice"))
+        val mounted = mutableStateOf(true)
+        val presentations = mutableListOf<Long>()
+        val callbacks = NO_OP_CALLBACKS.copy(onEditAcknowledgementPresented = { id ->
+            presentations += id
+            state.value = state.value.copy(editAcknowledgement = null)
+        })
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                if (mounted.value) {
+                    PrivateMessageThreadContent(state.value, isMultiRecipientHint = false, callbacks = callbacks)
+                }
+            }
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText("Message modifié").assertDoesNotExist()
+
+        compose.runOnIdle { state.value = state.value.copy(editAcknowledgement = 18L) }
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        compose.onAllNodes(hasText("Message modifié")).assertCountEquals(1)
+        compose.onNodeWithText("Message modifié").assertIsDisplayed()
+        assertEquals(listOf(18L), presentations)
+        assertNull(state.value.editAcknowledgement)
+
+        // Clearing the pending id and an unrelated recomposition must leave the visible snackbar.
+        compose.runOnIdle { state.value = state.value.copy(showSignatures = true) }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText("Message modifié").assertIsDisplayed()
+        assertEquals(listOf(18L), presentations)
+        compose.mainClock.advanceTimeBy(5_000)
+        compose.onNodeWithText("Message modifié").assertDoesNotExist()
+
+        // A fresh content host after navigation/rotation must not present the acknowledged id again.
+        compose.runOnIdle { mounted.value = false }
+        compose.mainClock.advanceTimeByFrame()
+        compose.runOnIdle { mounted.value = true }
+        compose.mainClock.advanceTimeBy(5_000)
+        compose.onNodeWithText("Message modifié").assertDoesNotExist()
+        assertEquals(listOf(18L), presentations)
     }
 
     private fun mountState(

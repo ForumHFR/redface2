@@ -7,6 +7,8 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.BeginAttemptResu
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 /**
  * ED-160/161/164/166/169/170/172: session-local submission arbiter, confined to the caller's thread.
@@ -54,7 +56,7 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
             !canSubmit || blocksBodyMutation -> SubmissionRequest.Ignored
             state is EditorSubmissionState.Armed -> SubmissionRequest.Ignored
             confirmationRequired != false -> arm(timeoutMillis)
-            else -> reserve()
+            else -> reserve(EditorSubmissionPurpose.Send)
         }
     }
 
@@ -63,7 +65,7 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
         val armed = state as? EditorSubmissionState.Armed
         val elapsed = clock.elapsedRealtimeNanos() - token.armedAtNanos
         return if (armed?.token == token && token.session == session && elapsed >= MIN_CONFIRM_NANOS) {
-            reserve()
+            reserve(EditorSubmissionPurpose.Send)
         } else {
             SubmissionRequest.Ignored
         }
@@ -104,7 +106,7 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
         try {
             executeReserved(token, ports)
         } catch (cancelled: CancellationException) {
-            if (isCurrent(token) && publishedAttempt == null) {
+            if (isCurrent(token) && publishedAttempt == null && state != EditorSubmissionState.Ready) {
                 unresolvedAttempt = currentAttempt()
                 state = EditorSubmissionState.Uncertain(currentAttempt(), state is EditorSubmissionState.Succeeded)
             }
@@ -137,7 +139,7 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
         uncertain: EditorSubmissionState.Uncertain,
         ports: EditorSubmissionPorts,
     ): Boolean {
-        val token = reserve().token
+        val token = reserve(EditorSubmissionPurpose.Acknowledge).token
         return try {
             val result = finishOutcome(attempt, AttemptOutcome.CERTAIN_FAILURE, ports)
             if (result !is StoreWriteResult.Written) ports.recordFailure(EditorSubmissionFailure.OUTCOME, result)
@@ -162,11 +164,11 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
         return SubmissionRequest.Armed(token)
     }
 
-    private fun reserve(): SubmissionRequest.Accepted {
+    private fun reserve(purpose: EditorSubmissionPurpose): SubmissionRequest.Accepted {
         val token = SubmissionToken(++sequence, session)
         activeSubmission = token
         retryAttempt = unresolvedAttempt
-        state = EditorSubmissionState.PersistingAttempt(token)
+        state = EditorSubmissionState.PersistingAttempt(token, purpose)
         return SubmissionRequest.Accepted(token)
     }
 
@@ -211,8 +213,15 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
     }
 
     private suspend fun send(token: SubmissionToken, attempt: AttemptToken, ports: EditorSubmissionPorts) {
+        val owner = EditorWriteOwner(attempt.owner)
         val outcome = try {
-            ports.send(attempt)
+            withContext(owner) { ports.send(attempt) }
+        } catch (cancelled: CancellationException) {
+            // Seal even on destruction, but do not resolve an attempt on the editor's teardown path.
+            if (owner.cancelBeforeEmission() && ports.isEditorScopeActive) {
+                resolveLocalCancellation(token, attempt, ports)
+            }
+            throw cancelled
         } catch (_: IOException) {
             EditorSendOutcome.UNCERTAIN
         }
@@ -235,6 +244,24 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
                 } else {
                     EditorSubmissionState.Uncertain(attempt)
                 }
+            }
+        }
+    }
+
+    private suspend fun resolveLocalCancellation(
+        token: SubmissionToken,
+        attempt: AttemptToken,
+        ports: EditorSubmissionPorts,
+    ) = withContext(NonCancellable) {
+        val result = finishOutcome(attempt, AttemptOutcome.CERTAIN_FAILURE, ports)
+        if (result !is StoreWriteResult.Written) ports.recordFailure(EditorSubmissionFailure.OUTCOME, result)
+        // Resolve the old durable row even after invalidation; never restore its UI session.
+        if (isCurrent(token)) {
+            unresolvedAttempt = attempt.takeUnless { result is StoreWriteResult.Written }
+            state = if (result is StoreWriteResult.Written) {
+                EditorSubmissionState.Ready
+            } else {
+                EditorSubmissionState.Uncertain(attempt)
             }
         }
     }

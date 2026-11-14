@@ -1,6 +1,6 @@
 package fr.forumhfr.redface2.core.domain.editor
 
-/** ED-162/170: failure of a quote-form GET before entry into the write repository. */
+/** ED-162/170: failure of a preparatory form GET (including quote materialization), before any POST. */
 class EditorPreparationException(val reason: Reason) : Exception() {
-    enum class Reason { NETWORK, SESSION_EXPIRED }
+    enum class Reason { NETWORK, SESSION_EXPIRED, INVALID_FORM, QUOTE_FETCH }
 }

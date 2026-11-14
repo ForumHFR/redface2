@@ -20,7 +20,7 @@ import okhttp3.OkHttpClient
 /**
  * Coil 3 expects the singleton [ImageLoader] to be supplied via [SingletonImageLoader.Factory] on
  * the `Application` class — `AsyncImage` call sites scattered across `:core:ui` and the feature
- * modules read from that singleton. The factory wires a single [AnimatedImageDecoder.Factory] so
+ * modules read from that singleton. The factory wires a single [BoundedAnimatedDecoderFactory] so
  * GIF smileys and `[img]` GIFs animate at the call site without each composable having to know
  * (cf. issue #109). Decoders are cheap and global; per-call-site override would defeat the point.
  *
@@ -54,7 +54,7 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
                 // interceptors upgrade reho.st while the source URL (and Coil disk key) stays
                 // untouched. The ProxySelector routes only HFR through the user proxy.
                 add(OkHttpNetworkFetcherFactory(callFactory = { imageClient }))
-                add(AnimatedImageDecoder.Factory())
+                add(BoundedAnimatedDecoderFactory())
                 // #960 P4 — SVG [img] payloads. The header-only intrinsic probe cannot read SVG
                 // bounds by design (BitmapFactory), so an SVG settles a PROBE failure and takes
                 // its box from the painter geometry through the G2 protocol (§6). NOTE: Coil 3

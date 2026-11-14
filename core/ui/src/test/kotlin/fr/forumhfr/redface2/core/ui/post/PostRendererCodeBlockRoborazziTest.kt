@@ -12,10 +12,10 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,8 +35,8 @@ import org.robolectric.annotation.GraphicsMode
  * - [codeBlockManyLines]    : >9 lines, so the gutter widens to two digits and numbers stay
  *   right-aligned without shifting the code column.
  *
- * Run on demand (writes PNGs under `core/ui/build/outputs/roborazzi/`, gitignored — see the header
- * of [PostRendererQuoteRoborazziTest] for why the Roborazzi Gradle plugin is not applied) :
+ * References under `core/ui/src/test/screenshots/` are compared by default, including in CI.
+ * Add `-Proborazzi.mode=record` only for an intentional visual update:
  *
  *     ./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest \
  *         --tests '*PostRendererCodeBlockRoborazziTest*' --console=plain --no-daemon
@@ -58,7 +58,7 @@ class PostRendererCodeBlockRoborazziTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/post_renderer_code_wrapping.png",
+            filePath = "src/test/screenshots/post_renderer_code_wrapping.png",
         )
     }
 
@@ -70,7 +70,7 @@ class PostRendererCodeBlockRoborazziTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/post_renderer_code_many_lines.png",
+            filePath = "src/test/screenshots/post_renderer_code_many_lines.png",
         )
     }
 

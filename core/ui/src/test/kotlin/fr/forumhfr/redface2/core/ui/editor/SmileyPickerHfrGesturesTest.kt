@@ -347,7 +347,7 @@ class SmileyPickerHfrGesturesTest {
         val controller = SmileyPickerController(
             scope = CoroutineScope(dispatcher),
             searchWiki = { _, _ -> listOf(wiki) },
-        ).also { it.open() }
+        ).also { it.open(SmileyPickerOpenIntent.CONSULTATION) }
         showWiki(controller)
         mount(controller)
         assertNoFavoriteActions(wiki)
@@ -539,7 +539,7 @@ class SmileyPickerHfrGesturesTest {
         }
         // Time spent hidden must not consume the next opening's overlay timeout.
         compose.mainClock.advanceTimeBy(8000L)
-        compose.runOnIdle { controller.open() }
+        compose.runOnIdle { controller.open(SmileyPickerOpenIntent.CONSULTATION) }
         // The new dialog needs Android measure/layout between Compose frames to enter the screen.
         // Keep the clock paused and drive about 1 s of entry animation, within the 4 s timeout.
         repeat(60) {
@@ -634,7 +634,7 @@ class SmileyPickerHfrGesturesTest {
             gate.complete(HfrFavoriteSmileyMutationResult.TransportFailure)
             dispatcher.scheduler.runCurrent()
             assertEquals(SmileyPickerState.Hidden, controller.state.value)
-            controller.open()
+            controller.open(SmileyPickerOpenIntent.CONSULTATION)
         }
         compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_network_error)).assertExists()
         assertFavoriteActions(wiki, R.string.editor_smiley_favorite_add)
@@ -728,7 +728,7 @@ class SmileyPickerHfrGesturesTest {
         dispatcher.scheduler.advanceUntilIdle()
         // Pre-mount setup: restoring the search selects Wiki, but dismiss() also consumes visible feedback.
         controller.dismiss()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
     }
 
     private fun controller(
@@ -751,7 +751,7 @@ class SmileyPickerHfrGesturesTest {
             ),
             localCollections = FakePickerLocalCollections("tester"),
         ),
-    ).also { dispatcher.scheduler.runCurrent(); it.open() }
+    ).also { dispatcher.scheduler.runCurrent(); it.open(SmileyPickerOpenIntent.CONSULTATION) }
 
     private fun description(smiley: EditorSmiley) =
         context.getString(R.string.editor_smiley_insert_description, smiley.token)

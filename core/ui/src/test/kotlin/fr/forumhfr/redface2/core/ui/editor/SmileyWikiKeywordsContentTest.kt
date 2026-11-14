@@ -210,7 +210,7 @@ class SmileyWikiKeywordsContentTest {
                 if (calls == 1) SmileyWikiKeywordsResult.Failed else SmileyWikiKeywordsResult.Loaded(listOf("feu"))
             }),
         )
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onDetailChanged(perso)
         compose.setContent {
             val current by controller.state.collectAsState()

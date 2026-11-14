@@ -10,6 +10,29 @@ import org.junit.Test
 class ImagePickerDiagnosticsTest {
 
     @Test
+    fun `cancellation records only contract and code separately from empty success`() {
+        val diagnostics = DiagnosticsLog()
+        val contract = ImagePickerContract.GET_MULTIPLE_CONTENTS
+
+        diagnostics.recordImagePickerEvent(ImagePickerEvent.Cancelled(contract, resultCode = 0))
+        diagnostics.recordImagePickerEvent(ImagePickerEvent.Result(contract, uris = emptyList()))
+
+        val entries = diagnostics.entries.value
+        assertEquals(DiagnosticsLog.Level.INFO, entries.first().level)
+        assertEquals("ImagePicker", entries.first().tag)
+        assertEquals(
+            listOf(
+                "cancelled contract=GetMultipleContents resultCode=0",
+                "result contract=GetMultipleContents count=0 sources=[]",
+            ),
+            entries.map { it.message },
+        )
+        assertFalse(entries.first().message.contains("://"))
+        assertFalse(entries.first().message.contains("count="))
+        assertFalse(entries.first().message.contains("sources="))
+    }
+
+    @Test
     fun `launch records the selected mode and actual activity result contract`() {
         val diagnostics = DiagnosticsLog()
 

@@ -28,7 +28,7 @@ class SmileyPickerDetailTest {
         val controller = controller(backgroundScope)
         controller.onDetailChanged(builtin)
         assertEquals(SmileyPickerState.Hidden, controller.state.value)
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onQueryChanged("fictif")
         advanceTimeBy(SmileyPickerController.SEARCH_DEBOUNCE_MS)
         runCurrent()
@@ -44,10 +44,10 @@ class SmileyPickerDetailTest {
     @Test
     fun `dismissal and every opening discard the detail without losing the query`() = runTest {
         val controller = controller(backgroundScope)
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onQueryChanged("ab")
         controller.onDetailChanged(builtin)
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertNull(controller.openState().detailSmiley)
         assertEquals("ab", controller.openState().query)
         controller.onDetailChanged(perso)
@@ -55,7 +55,7 @@ class SmileyPickerDetailTest {
         controller.dismiss()
         staleCommand?.invoke(builtin)
         assertEquals(SmileyPickerState.Hidden, controller.state.value)
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertNull(controller.openState().detailSmiley)
         assertEquals("ab", controller.openState().query)
     }
@@ -67,7 +67,7 @@ class SmileyPickerDetailTest {
         )
         val controller = controller(backgroundScope)
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         listOf(SmileyLocalCollectionSnapshot("bob"), SmileyLocalCollectionSnapshot()).forEach { snapshot ->
             controller.onDetailChanged(builtin)
             locals.snapshot.value = snapshot
@@ -84,7 +84,7 @@ class SmileyPickerDetailTest {
         )
         val controller = controller(backgroundScope)
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onDetailChanged(perso)
         assertEquals(SmileyFavoriteAction.REMOVE, controller.openState().localFavoriteAction(perso))
         controller.openState().onLocalFavoriteChange?.invoke(perso)
@@ -109,7 +109,7 @@ class SmileyPickerDetailTest {
         )
         val controller = controller(backgroundScope)
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         val last = perso.copy(token = entries.last().token)
         controller.onDetailChanged(last)
         assertEquals(24, controller.openState().mostUsedSmileys.size)

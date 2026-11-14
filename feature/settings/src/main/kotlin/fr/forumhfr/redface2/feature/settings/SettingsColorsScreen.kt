@@ -430,7 +430,9 @@ private fun CustomAccentField(
         isError = state.error,
         singleLine = true,
         label = { Text(stringResource(R.string.settings_colors_custom_label)) },
-        placeholder = state.placeholder?.let { placeholder -> { Text(placeholder) } },
+        // M3 1.5.0-beta02 remembers placeholder visibility from the initial slot. Keep it
+        // non-null when starting with a custom accent, then supply the selected preset's seed.
+        placeholder = { state.placeholder?.let { Text(it) } },
         supportingText = {
             val text = if (state.error) {
                 stringResource(R.string.settings_colors_custom_error)

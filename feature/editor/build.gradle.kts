@@ -1,5 +1,6 @@
 plugins {
     id("redface.android.compose.library")
+    id("redface.android.roborazzi")
     id("redface.android.hilt.library")
 }
 
@@ -41,5 +42,7 @@ dependencies {
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.coil.core)
     testImplementation(libs.coil.test)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

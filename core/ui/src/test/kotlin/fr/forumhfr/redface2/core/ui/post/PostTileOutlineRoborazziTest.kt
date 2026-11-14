@@ -21,7 +21,6 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
@@ -30,6 +29,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -37,7 +37,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** #1297 — theme wiring and record-only comparison of the same post/quotes on two light tones. */
+/** #1297 — theme wiring and screenshot comparison of the same post/quotes on two light tones. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -142,7 +142,7 @@ class PostTileOutlineRoborazziTest {
         } else {
             assertNoOutline()
         }
-        composeTestRule.onRoot().captureRoboImage(filePath = "build/outputs/roborazzi/$name.png")
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/$name.png")
     }
 
     private fun assertOutline(width: Float, color: Color) {

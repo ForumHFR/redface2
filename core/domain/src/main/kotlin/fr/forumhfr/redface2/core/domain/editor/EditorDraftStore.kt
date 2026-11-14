@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.domain.editor
 
 import java.io.IOException
 import java.security.MessageDigest
+import java.util.UUID
 
 /**
  * Per-account local cache of in-progress editor content (#405).
@@ -57,8 +58,66 @@ interface EditorDraftStore {
     /** ED-161: explicitly start a new composition after publication, never by a late autosave. */
     suspend fun startNewComposition(owner: String?, key: String, draft: Draft, expectedVersion: Long): StoreWriteResult
 
-    /** ED-170: atomically store the complete snapshot and IN_PROGRESS before issuing any POST. */
-    suspend fun beginAttempt(owner: String?, key: String, snapshot: Draft, expectedVersion: Long): BeginAttemptResult
+    /**
+     * #1553: persist a new explicit quote action before opening an editor. Owner/version checked;
+     * merge with an ordinary draft, preserving user content. An intact quote-only reply is cleared
+     * first (ED-121: new Cite B gives B alone), without touching offers. A published row starts an
+     * empty composition; an unresolved attempt keeps its exact identity/status and a dormant request.
+     * No saved-instance-state restoration may call this mutation to replay old coordinates.
+     */
+    suspend fun enqueueInlineQuoteRequest(
+        owner: String?, key: String, request: PendingInlineQuoteRequest, expectedVersion: Long,
+    ): StoreWriteResult
+
+    /**
+     * #1553: CAS removal of exactly [request]. With [draft], atomically deliver the reconciled body
+     * and remove the request; unresolved attempts reject delivery. Without [draft], ignore only the
+     * request, retaining all fields and attempt metadata. Failures leave the entire row unchanged.
+     * Ignore uses the session's [offerToPreserve]; raw callers can still [protectCurrent] by default.
+     * A delivered [draft] carrying `offerToResolve` also removes that offer in the same transaction
+     * (ED-121/132); an offer that is no longer available rejects the whole write.
+     */
+    @Suppress("LongParameterList") // Request CAS plus the session's independent offer protection on Ignore.
+    suspend fun consumeInlineQuoteRequest(
+        owner: String?, key: String, request: PendingInlineQuoteRequest, expectedVersion: Long, draft: Draft? = null,
+        offerToPreserve: DraftOffer? = null, protectCurrent: Boolean = true,
+    ): StoreWriteResult
+
+    /** ED-121: offers are read independently of C's publication status, newest first. */
+    suspend fun loadOffers(owner: String?, key: String): List<DraftOffer>
+
+    /**
+     * ED-121: a fresh reply opening durably drops an intact quote-only body and its provenance.
+     * CAS-guarded; preserves offers, pending requests and headers, and rejects every attempt.
+     * Keep the empty revision so a stale writer or a later Bundle cannot resurrect the old quote.
+     */
+    suspend fun discardQuoteOnly(owner: String?, key: String, expectedVersion: Long): StoreWriteResult
+
+    /**
+     * ED-121: write C and consume exactly this offer atomically (also for Ignore). An absent or
+     * published row starts a new composition; unresolved attempts keep their identity as UNCERTAIN.
+     */
+    suspend fun resolveOffer(
+        owner: String?, key: String, offer: DraftOffer, expected: Revision, draft: Draft,
+    ): StoreWriteResult
+
+    /** Clear only the request of the revision observed by the unreadable load; otherwise reload. */
+    suspend fun discardUnreadableInlineQuoteRequest(
+        owner: String?, key: String, expectedVersion: Long,
+    ): StoreWriteResult
+
+    /**
+     * ED-170: atomically store the complete snapshot and IN_PROGRESS before issuing any POST.
+     * Every accepted invocation supplies a fresh [attemptId], including after rejection;
+     * the default keeps direct callers independent of any previously attempted identity.
+     */
+    suspend fun beginAttempt(
+        owner: String?,
+        key: String,
+        snapshot: Draft,
+        expectedVersion: Long,
+        attemptId: String = UUID.randomUUID().toString(),
+    ): BeginAttemptResult
 
     /**
      * ED-170: compare identity/version; certain failure clears only the attempt, even after an account
@@ -71,6 +130,22 @@ interface EditorDraftStore {
 
     /** ED-170: migrated drafts start at version 0, also used for absent rows when writing. */
     data class DraftEntry(val draft: Draft, val version: Long, val attempt: Attempt? = null)
+
+    /** Identity includes the source revision and content; occupied offers are never replaced. */
+    data class DraftOffer(val id: String, val sourceVersion: Long, val draft: Draft) {
+        companion object {
+            fun from(entry: DraftEntry): DraftOffer = DraftOffer(
+                "${entry.version}:${entry.draft.updatedAt}:${entry.draft.restoreOfferFingerprint()}", entry.version,
+                entry.draft.copy(
+                    pendingInlineQuoteRequest = null, offerToPreserve = null,
+                    offerToResolve = null, protectCurrent = true,
+                ),
+            )
+        }
+    }
+
+    /** The session's last owning read/write, including state changes that do not increment contentVersion. */
+    data class Revision(val contentVersion: Long, val attemptStatus: AttemptStatus?)
 
     /** ED-170: identity bound to an account, context and initial revision; later edits keep this version. */
     data class AttemptToken(val owner: String, val key: String, val id: String, val version: Long)
@@ -105,6 +180,16 @@ interface EditorDraftStore {
         val isPrivate: Boolean = false,
         /** Epoch millis of last write; set by the store, ignored on save input. */
         val updatedAt: Long = 0L,
+        /** #1553: owned by the draft session, never restored from a field or navigation snapshot. */
+        val pendingInlineQuoteRequest: PendingInlineQuoteRequest? = null,
+        /** ED-89/121: durable delivery proof and D | quotes | typing boundaries; never in a Bundle. */
+        val bodyProvenance: EditorBodyProvenance? = null,
+        /** Write-only session protection. The store copies it transactionally, never stores it in C. */
+        val offerToPreserve: DraftOffer? = null,
+        /** Session-only restore decision: a post-merge autosave also resolves D atomically. */
+        val offerToResolve: DraftOffer? = null,
+        /** Raw/legacy writers protect the current source by default; a loaded session decides explicitly. */
+        val protectCurrent: Boolean = true,
     ) {
         /**
          * Content-only marker for the restore-offer guard (#1415). The full draft must not be put

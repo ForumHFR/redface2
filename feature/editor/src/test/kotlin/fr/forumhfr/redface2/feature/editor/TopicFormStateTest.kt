@@ -31,8 +31,9 @@ class TopicFormStateTest {
             topicId = null,
             page = null,
             numreponse = null,
+            hasLoadedForm = true,
             subject = TextFieldValue("Titre"),
-            draft = TextFieldValue("Corps"),
+            bodyText = "Corps",
             hasSubcategorySelect = hasSubcategorySelect,
             selectedSubcat = selectedSubcat,
         )
@@ -45,11 +46,35 @@ class TopicFormStateTest {
             topicId = 35395,
             page = 1,
             numreponse = 1,
+            hasLoadedForm = true,
             subject = TextFieldValue("Titre"),
-            draft = TextFieldValue("Corps"),
+            bodyText = "Corps",
             selectedSubcat = 401,
+            draftHydratedFromServer = true,
             isUploading = isUploading,
         )
+
+    @Test
+    fun contentAloneNeverProvesThatTheFormLoaded() {
+        val states = listOf(newState(false, null), editFirstPostState())
+        states.forEach { state ->
+            assertTrue(state.canSubmit)
+            assertFalse(state.copy(hasLoadedForm = false).canSubmit)
+            assertFalse(state.copy(isInitializing = true).canSubmit)
+        }
+    }
+
+    @Test
+    fun `ED35 missing first post route context disables activation as well as POST`() {
+        val ready = editFirstPostState()
+        assertTrue(ready.sendActivatable)
+        listOf(ready.copy(cat = null), ready.copy(subcat = null), ready.copy(topicId = null),
+            ready.copy(numreponse = null), ready.copy(page = null)).forEach { incomplete ->
+            assertFalse(incomplete.sendActivatable)
+            assertFalse(incomplete.canSubmit)
+        }
+        assertFalse(newState(false, null).copy(cat = null).sendActivatable)
+    }
 
     @Test
     fun `New with a cat WITHOUT sub-category allows submit even with a null selectedSubcat`() {
@@ -76,7 +101,7 @@ class TopicFormStateTest {
     @Test
     fun `New blocks submit when the draft is blank even on a cat without sub-category`() {
         val state = newState(hasSubcategorySelect = false, selectedSubcat = null)
-            .copy(draft = TextFieldValue(""))
+            .copy(bodyText = "")
         assertFalse(state.canSubmit)
     }
 
@@ -85,6 +110,15 @@ class TopicFormStateTest {
         val state = newState(hasSubcategorySelect = false, selectedSubcat = null)
             .copy(isUploading = true)
         assertFalse(state.canSubmit)
+    }
+
+    @Test
+    fun editFirstPostCannotSubmitUnhydratedBody() {
+        val state = editFirstPostState().copy(draftHydratedFromServer = false)
+        assertTrue(state.isAwaitingInitialBody)
+        assertFalse(state.canSubmit)
+        assertFalse(editFirstPostState().isAwaitingInitialBody)
+        assertFalse(newState(hasSubcategorySelect = false, selectedSubcat = null).isAwaitingInitialBody)
     }
 
     @Test

@@ -1,5 +1,11 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.lifecycle.SavedStateHandle
+
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
+import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.author.AuthorRoleRepository
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
@@ -19,6 +25,7 @@ import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.AuthorRole
@@ -89,6 +96,10 @@ class PrivateMessageThreadViewModelTest {
         mpStorageRepository: MpStorageRepository = FakeMpStorageRepository(),
         writeRepository: PrivateMessageWriteRepository = mockk(relaxed = true),
         postImageSaver: PostImageSaver = mockk(relaxed = true),
+        draftStore: EditorDraftStore = VersionedEditorDraftStore(),
+        mpStorageLocationStore: fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocationStore =
+            mockk(relaxed = true),
+        savedStateHandle: SavedStateHandle = SavedStateHandle(),
     ) = PrivateMessageThreadViewModel(
         request = threadRequest,
         repository = repository,
@@ -100,6 +111,9 @@ class PrivateMessageThreadViewModelTest {
         mpStorageRepository = mpStorageRepository,
         writeRepository = writeRepository,
         postImageSaver = postImageSaver,
+        draftStore = draftStore,
+        mpStorageLocationStore = mpStorageLocationStore,
+        savedStateHandle = savedStateHandle,
     )
 
     @Suppress("LongParameterList") // test helper: every param is an optional, defaulted preference flow.
@@ -117,6 +131,39 @@ class PrivateMessageThreadViewModelTest {
         every { observeTopicEgoQuoteEnabled() } returns egoQuoteEnabled
         every { observeTopicEgoPostEnabled() } returns egoPostEnabled
         every { observeTopicPageFabs() } returns showPageFabs
+    }
+
+    @Test
+    fun `MP quote navigation waits for a durable private request with ordered page and ref coordinates`() = runTest {
+        val drafts = VersionedEditorDraftStore()
+        val vm = threadViewModel(loadedRepository(), draftStore = drafts)
+        val returned = kotlinx.coroutines.CompletableDeferred<Unit>()
+        drafts.saveReturnGate = returned
+        var navigated = false
+        val quotes = listOf(PendingInlineQuoteRequest.Quote(202, 4, 8),
+            PendingInlineQuoteRequest.Quote(101, 2, 7))
+        vm.enqueueQuotes(quotes) { navigated = true }
+        val stored = checkNotNull(drafts.saved[EditorDraftKey.mpReply(42)])
+        assertTrue(stored.isPrivate)
+        assertEquals(quotes, stored.pendingInlineQuoteRequest?.quotes)
+        assertFalse(navigated)
+        returned.complete(Unit)
+        testScheduler.runCurrent()
+        assertTrue(navigated)
+    }
+
+    @Test
+    fun `MP quote storage failure keeps the reader on the thread and reports it - ED132`() = runTest {
+        val drafts = VersionedEditorDraftStore()
+        val vm = threadViewModel(loadedRepository(), draftStore = drafts)
+        drafts.saveFailure = IOException("disk")
+        var navigated = false
+
+        vm.enqueueQuotes(listOf(PendingInlineQuoteRequest.Quote(101, 2, 7))) { navigated = true }
+
+        assertFalse(navigated)
+        assertNull(drafts.saved[EditorDraftKey.mpReply(42)])
+        assertEquals(PrivateMessageThreadEffect.QuotePreparationFailed, vm.effects.first())
     }
 
     @Test
@@ -246,6 +293,9 @@ class PrivateMessageThreadViewModelTest {
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
             postImageSaver = mockk(relaxed = true),
+            draftStore = VersionedEditorDraftStore(),
+            mpStorageLocationStore = mockk(relaxed = true),
+            savedStateHandle = SavedStateHandle(),
         )
 
         assertEquals(PrivateMessageThreadUiState.Mode.RequiresLogin, viewModel.state.value.mode)
@@ -822,7 +872,7 @@ class PrivateMessageThreadViewModelTest {
         viewModel.refresh()
         assertNull("same-page refresh must not arm a scroll", viewModel.state.value.pageLanding)
 
-        val submit = PrivateMessageSubmitResult(eventId = 17L, page = 1)
+        val submit = PrivateMessageSubmitResult(eventId = 17L, page = 1, account = "xaat")
         viewModel.applySubmitResult(submit)
         viewModel.applySubmitResult(submit)
         assertNull("same-page post-submit refetch stays at the current position", viewModel.state.value.pageLanding)
@@ -836,6 +886,153 @@ class PrivateMessageThreadViewModelTest {
         viewModel.selectPage(1)
         val restored = viewModel.state.value.pageLanding as PrivateMessagePageLanding.Anchor
         assertEquals(anchor, restored.anchor)
+    }
+
+    @Test
+    fun `edit result refreshes exactly the edited page once and retains the viewport anchor`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery { repository.getPrivateMessageThread(42, any(), null) } answers {
+            network(thread(page = secondArg(), totalPages = 5))
+        }
+        val vm = threadViewModel(repository, threadRequest = request.copy(page = 3))
+        vm.acknowledgePageLanding(requireNotNull(vm.state.value.pageLanding))
+        val anchor = PrivateMessageScrollAnchor(index = 4, offset = 37)
+        vm.reportPageAnchor(anchor)
+        val result = PrivateMessageSubmitResult(18L, 3, "XaAT", PostSubmitOperation.Edit)
+        vm.applySubmitResult(result)
+        vm.applySubmitResult(result)
+        assertEquals(3, vm.state.value.page)
+        assertNull(vm.state.value.pageLanding)
+        coVerify(exactly = 2) { repository.getPrivateMessageThread(42, 3, null) }
+        coVerify(exactly = 0) { repository.getPrivateMessageThread(42, 5, null) }
+        assertEquals(18L, vm.state.value.editAcknowledgement)
+        vm.editAcknowledgementPresented(18L)
+        assertNull(vm.state.value.editAcknowledgement)
+        vm.selectPage(2)
+        vm.acknowledgePageLanding(requireNotNull(vm.state.value.pageLanding))
+        vm.selectPage(3)
+        assertEquals(anchor, (vm.state.value.pageLanding as PrivateMessagePageLanding.Anchor).anchor)
+    }
+
+    @Test
+    fun `edit result waits for authentication before being consumed and applies once on retry`() = runTest {
+        val authenticated = CompletableDeferred<AuthState>()
+        val auth = mockk<AuthRepository> {
+            every { observeAuthState() } returns flow { emit(authenticated.await()) }
+        }
+        val repository = loadedRepository()
+        val vm = threadViewModel(repository, authRepository = auth)
+        val result = PrivateMessageSubmitResult(20L, 1, "xaat", PostSubmitOperation.Edit)
+        assertFalse(vm.applySubmitResult(result))
+        assertNull(vm.state.value.editAcknowledgement)
+        coVerify(exactly = 0) { repository.getPrivateMessageThread(42, any(), null) }
+
+        authenticated.complete(AuthState.Authenticated("xaat"))
+        testScheduler.runCurrent()
+        assertEquals("xaat", vm.state.value.connectedPseudo)
+        assertTrue(vm.applySubmitResult(result))
+        assertTrue(vm.applySubmitResult(result))
+        coVerify(exactly = 2) { repository.getPrivateMessageThread(42, 1, null) }
+        assertEquals(20L, vm.state.value.editAcknowledgement)
+        vm.editAcknowledgementPresented(20L)
+        assertTrue(vm.applySubmitResult(result))
+        assertNull(vm.state.value.editAcknowledgement)
+        coVerify(exactly = 2) { repository.getPrivateMessageThread(42, 1, null) }
+    }
+
+    @Test
+    fun `results from the previous account are consumed without refresh or edit acknowledgement`() = runTest {
+        val auth = FakeAuthRepository(AuthState.Authenticated("alice"))
+        val repository = loadedRepository()
+        val saved = SavedStateHandle()
+        val vm = threadViewModel(repository, authRepository = auth, savedStateHandle = saved)
+        auth.emit(AuthState.Authenticated("bob"))
+        testScheduler.runCurrent()
+        val landing = vm.state.value.pageLanding
+
+        val reply = PrivateMessageSubmitResult(21L, 3, "alice")
+        val edit = PrivateMessageSubmitResult(22L, 3, "alice", PostSubmitOperation.Edit)
+        listOf(reply, edit).forEach { result ->
+            assertTrue(vm.applySubmitResult(result))
+            assertTrue(vm.applySubmitResult(result))
+        }
+
+        assertEquals("bob", vm.state.value.connectedPseudo)
+        assertEquals(1, vm.state.value.page)
+        assertEquals(landing, vm.state.value.pageLanding)
+        assertNull(vm.state.value.editAcknowledgement)
+        assertFalse(saved.keys().any { it.startsWith("mpEditAck.") })
+        coVerify(exactly = 2) { repository.getPrivateMessageThread(42, 1, null) }
+        coVerify(exactly = 0) { repository.getPrivateMessageThread(42, 3, null) }
+    }
+
+    @Test
+    fun `a raw cookie pseudo matches the canonical submitting account`() = runTest {
+        // md_user is decoded without trimming: spacing and case differ from the canonical handoff.
+        val auth = FakeAuthRepository(AuthState.Authenticated("  Bob   Le  Bricoleur "))
+        val repository = loadedRepository()
+        val vm = threadViewModel(repository, authRepository = auth)
+        testScheduler.runCurrent()
+
+        val edit = PrivateMessageSubmitResult(23L, 1, "bob le bricoleur", PostSubmitOperation.Edit)
+        assertTrue(vm.applySubmitResult(edit))
+        assertEquals(23L, vm.state.value.editAcknowledgement)
+        coVerify(exactly = 2) { repository.getPrivateMessageThread(42, 1, null) }
+    }
+
+    @Test
+    fun `successful edit still gets its acknowledgement when the refresh fails`() = runTest {
+        val repository = loadedRepository()
+        val vm = threadViewModel(repository)
+        coEvery { repository.getPrivateMessageThread(42, 1, null) } throws IOException("offline")
+        vm.effects.test {
+            vm.applySubmitResult(PrivateMessageSubmitResult(19L, 1, "xaat", PostSubmitOperation.Edit))
+            assertEquals(PrivateMessageThreadEffect.RefreshFailed, awaitItem())
+            assertEquals(19L, vm.state.value.editAcknowledgement)
+            assertTrue(vm.state.value.mode is PrivateMessageThreadUiState.Mode.Content)
+        }
+    }
+
+    @Test
+    fun `storage cache hides all edit actions and never performs discovery`() = runTest {
+        val location = mockk<fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocationStore>()
+        coEvery { location.read(any()) } returns
+            fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocation(42, 101)
+        val storage = FakeMpStorageRepository()
+        val vm = threadViewModel(loadedRepository(), mpStorageLocationStore = location, mpStorageRepository = storage)
+        assertFalse(vm.state.value.editActionsAvailable)
+        coVerify(exactly = 1) { location.read(any()) }
+    }
+
+    @Test
+    fun `refresh retries a failed local storage read before restoring edit actions`() = runTest {
+        val location = mockk<fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocationStore>()
+        coEvery { location.read(any()) } throws IOException("local read failed")
+        val storage = FakeMpStorageRepository()
+        val vm = threadViewModel(loadedRepository(), mpStorageLocationStore = location, mpStorageRepository = storage)
+        assertFalse(vm.state.value.editActionsAvailable)
+
+        coEvery { location.read(any()) } returns null
+        vm.refresh()
+        testScheduler.runCurrent()
+
+        assertTrue(vm.state.value.editActionsAvailable)
+        coVerify(exactly = 2) { location.read(any()) }
+    }
+
+    @Test
+    fun `refresh still excludes storage when the retried local read identifies it`() = runTest {
+        val location = mockk<fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocationStore>()
+        coEvery { location.read(any()) } throws IOException("local read failed")
+        val vm = threadViewModel(loadedRepository(), mpStorageLocationStore = location)
+
+        coEvery { location.read(any()) } returns
+            fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocation(42, 101)
+        vm.refresh()
+        testScheduler.runCurrent()
+
+        assertFalse(vm.state.value.editActionsAvailable)
+        coVerify(exactly = 2) { location.read(any()) }
     }
 
     @Test
@@ -1436,6 +1633,7 @@ class PrivateMessageThreadViewModelTest {
         val viewModel = threadViewModel(
             loadedRepository(),
             postImageSaver = FakePostImageSaver { throw ImageSaveException.Fetch() },
+            draftStore = VersionedEditorDraftStore(),
         )
 
         viewModel.effects.test {
@@ -1449,6 +1647,7 @@ class PrivateMessageThreadViewModelTest {
         val viewModel = threadViewModel(
             loadedRepository(),
             postImageSaver = FakePostImageSaver { throw ImageSaveException.Storage() },
+            draftStore = VersionedEditorDraftStore(),
         )
 
         viewModel.effects.test {
@@ -1546,6 +1745,9 @@ class PrivateMessageThreadViewModelTest {
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
             postImageSaver = mockk(relaxed = true),
+            draftStore = VersionedEditorDraftStore(),
+            mpStorageLocationStore = mockk(relaxed = true),
+            savedStateHandle = SavedStateHandle(),
         )
 
         coVerify(exactly = 1) {
@@ -1573,6 +1775,9 @@ class PrivateMessageThreadViewModelTest {
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
             postImageSaver = mockk(relaxed = true),
+            draftStore = VersionedEditorDraftStore(),
+            mpStorageLocationStore = mockk(relaxed = true),
+            savedStateHandle = SavedStateHandle(),
         )
 
         coVerify(exactly = 1) {
@@ -1603,6 +1808,9 @@ class PrivateMessageThreadViewModelTest {
                 mpStorageRepository = FakeMpStorageRepository(),
                 writeRepository = mockk(relaxed = true),
                 postImageSaver = mockk(relaxed = true),
+            draftStore = VersionedEditorDraftStore(),
+            mpStorageLocationStore = mockk(relaxed = true),
+            savedStateHandle = SavedStateHandle(),
             )
         assertEquals(1, store.saved[42])
 

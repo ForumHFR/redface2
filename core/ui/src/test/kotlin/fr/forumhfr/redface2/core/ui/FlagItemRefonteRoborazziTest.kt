@@ -19,10 +19,10 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -31,10 +31,10 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * #603 PR3 — showcase Roborazzi (rendu JVM, record-only) de la LIGNE de drapeau refondue (ADR-017) :
+ * #603 PR3 — showcase Roborazzi (rendu JVM, références comparées) de la LIGNE de drapeau refondue (ADR-017) :
  * marqueur configurable (barre de couleur par défaut / pastille tonale+icône catégorie / dot),
  * désaturation des lus, décoration favori, et pastille « pages à lire » en fin de ligne. PNG sous
- * `core/ui/build/outputs/roborazzi/` pour revue visuelle avant/après :
+ * `core/ui/src/test/screenshots/` pour revue visuelle avant/après :
  *
  *     ./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest \
  *         --tests '*FlagItemRefonteRoborazziTest*' --console=plain
@@ -159,7 +159,7 @@ class FlagItemRefonteRoborazziTest {
                 Surface(color = MaterialTheme.colorScheme.surface) { Showcase() }
             }
         }
-        composeTestRule.onRoot().captureRoboImage(filePath = "build/outputs/roborazzi/$name.png")
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/$name.png")
     }
 
     private companion object {

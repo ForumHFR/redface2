@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
+import fr.forumhfr.redface2.core.model.persoSmileyUrl
 
 /**
  * Best-effort BBCode → [PostContent] parser for the Phase 2B editor preview.
@@ -16,8 +17,8 @@ import fr.forumhfr.redface2.core.model.SmileyKind
  *    degrade to plain text rather than blowing up the preview.
  * 2. **Subset coverage.** Phase 2B covers the inlines and blocks the toolbar can
  *    insert plus the constructs HFR pre-fills (notably `[quotemsg=…]`). Anything
- *    outside the subset is preserved as raw text so the editor stays usable while
- *    follow-up issues (#11 smileys/images, color picker UX) catch up.
+ *    outside the subset is preserved as raw text. Images become blocks at top level
+ *    and inline images inside links, formatting and color containers.
  *
  * The parser intentionally lives in `:core:parser` per ADR-011 and the contract
  * documented in `docs/specs/architecture.md` (`fun parsePostContentFromBbcode(...)`).
@@ -25,7 +26,7 @@ import fr.forumhfr.redface2.core.model.SmileyKind
 class BbcodeContentParser {
 
     fun parse(bbcode: String): PostContent {
-        val tokens = if (bbcode.isEmpty()) emptyList() else Tokenizer(bbcode).tokenize()
+        val tokens = if (bbcode.isEmpty()) emptyList() else protectRawBullets(Tokenizer(bbcode).tokenize())
         val blocks = parseBlocks(tokens, 0, tokens.size, depth = 0).blocks
         return if (blocks.isEmpty()) EMPTY_AST else PostContent(blocks = blocks)
     }
@@ -111,7 +112,7 @@ class BbcodeContentParser {
             }
         }
 
-        return handleInlineOpen(tokens, i, to, depth, token, paragraph)
+        return i + handleInlineOpen(tokens, i, to, depth, paragraph).consumed.coerceAtLeast(1)
     }
 
     @Suppress("LongParameterList") // intentionally explicit — context object would add noise
@@ -193,27 +194,38 @@ class BbcodeContentParser {
         return close + 1
     }
 
-    @Suppress("LongParameterList") // intentionally explicit — context object would add noise
     private fun handleInlineOpen(
         tokens: List<Token>,
         i: Int,
         to: Int,
         depth: Int,
-        token: Token.Open,
         paragraph: MutableList<PostInline>,
-    ): Int {
+    ): InlineSlice {
         val inline = parseInline(tokens, i, to, depth)
-        return if (inline.consumed == 0) {
-            paragraph += PostInline.Text(token.raw)
-            i + 1
-        } else {
-            paragraph += inline.node
-            i + inline.consumed
+        // Carry the list boundary through wrappers so their parent's text also starts a new line.
+        if (inline.startsWithBullet && paragraph.isNotEmpty() && paragraph.last() !is PostInline.LineBreak) {
+            paragraph += PostInline.LineBreak
         }
+        paragraph += inline.node
+        return inline
     }
 
     private fun parseInline(tokens: List<Token>, from: Int, to: Int, depth: Int): InlineSlice {
         val open = tokens[from] as Token.Open
+        // Only the standalone marker opens an item, without a closing tag (quote-form fixture).
+        if (open.raw == "[*]") {
+            return InlineSlice(PostInline.Text("• "), consumed = 1, startsWithBullet = true)
+        }
+        return parseFormattedInline(tokens, from, to, depth, open)
+    }
+
+    private fun parseFormattedInline(
+        tokens: List<Token>,
+        from: Int,
+        to: Int,
+        depth: Int,
+        open: Token.Open,
+    ): InlineSlice {
         val tag = open.name.lowercase()
         if (depth >= MAX_NESTING_DEPTH) {
             return InlineSlice(PostInline.Text(open.raw), 1)
@@ -223,6 +235,7 @@ class BbcodeContentParser {
             "i" -> wrapInline(tokens, from, to, depth, tag) { PostInline.Emphasis(it) }
             "u" -> wrapInline(tokens, from, to, depth, tag) { PostInline.Underline(it) }
             "strike" -> wrapInline(tokens, from, to, depth, tag) { PostInline.Strike(it) }
+            "img" -> parseInlineImage(tokens, from, to)
             "url" -> parseInlineUrl(tokens, from, to, depth, open)
             "email" -> parseInlineEmail(tokens, from, to, depth, open)
             else -> {
@@ -250,7 +263,24 @@ class BbcodeContentParser {
             return InlineSlice(PostInline.Text((tokens[from] as Token.Open).raw), 1)
         }
         val children = parseInlinesOnly(tokens, from + 1, close, depth + 1)
-        return InlineSlice(wrap(children), close - from + 1)
+        return InlineSlice(wrap(children.nodes), close - from + 1, children.startsWithBullet)
+    }
+
+    private fun parseInlineImage(tokens: List<Token>, from: Int, to: Int): InlineSlice {
+        val close = findMatchingClose(tokens, from, to, "img")
+        if (close <= from) {
+            return InlineSlice(PostInline.Text((tokens[from] as Token.Open).raw), 1)
+        }
+        val rawUrl = flattenRawText(tokens, from + 1, close).trim()
+        // Nested or crossed tags belong to the draft text, never to an image URL.
+        val containsTag = tokens.subList(from + 1, close).any { it !is Token.Text }
+        val url = if (containsTag) null else sanitizeImageHref(rawUrl)
+        val node = if (url == null) {
+            PostInline.Text(flattenRawText(tokens, from, close + 1))
+        } else {
+            PostInline.InlineImage(url = url, description = null)
+        }
+        return InlineSlice(node, close - from + 1)
     }
 
     private fun parseInlineUrl(
@@ -265,16 +295,17 @@ class BbcodeContentParser {
             return InlineSlice(PostInline.Text(open.raw), 1)
         }
         val children = parseInlinesOnly(tokens, from + 1, close, depth + 1)
-        val rawUrl = open.params.takeIf { it.isNotBlank() } ?: flattenInlineText(children)
+        val rawUrl = open.params.takeIf { it.isNotBlank() } ?: flattenInlineText(children.nodes)
         val url = sanitizeLinkHref(rawUrl)
         val node = if (url == null) {
             PostInline.Text(flattenRawText(tokens, from, close + 1))
         } else {
-            PostInline.Link(url = url, children = children)
+            PostInline.Link(url = url, children = children.nodes)
         }
         return InlineSlice(
             node,
             close - from + 1,
+            startsWithBullet = url != null && children.startsWithBullet,
         )
     }
 
@@ -290,10 +321,11 @@ class BbcodeContentParser {
             return InlineSlice(PostInline.Text(open.raw), 1)
         }
         val children = parseInlinesOnly(tokens, from + 1, close, depth + 1)
-        val address = open.params.takeIf { it.isNotBlank() } ?: flattenInlineText(children)
+        val address = open.params.takeIf { it.isNotBlank() } ?: flattenInlineText(children.nodes)
         return InlineSlice(
-            PostInline.Link(url = "mailto:$address", children = children),
+            PostInline.Link(url = "mailto:$address", children = children.nodes),
             close - from + 1,
+            startsWithBullet = children.startsWithBullet,
         )
     }
 
@@ -310,13 +342,15 @@ class BbcodeContentParser {
         }
         val children = parseInlinesOnly(tokens, from + 1, close, depth + 1)
         return InlineSlice(
-            PostInline.Color(colorHex = tag.uppercase(), children = children),
+            PostInline.Color(colorHex = tag.uppercase(), children = children.nodes),
             close - from + 1,
+            startsWithBullet = children.startsWithBullet,
         )
     }
 
-    private fun parseInlinesOnly(tokens: List<Token>, from: Int, to: Int, depth: Int): List<PostInline> {
+    private fun parseInlinesOnly(tokens: List<Token>, from: Int, to: Int, depth: Int): InlineChildren {
         val out = mutableListOf<PostInline>()
+        var startsWithBullet = false
         var i = from
         while (i < to) {
             val token = tokens[i]
@@ -327,14 +361,10 @@ class BbcodeContentParser {
                 }
 
                 is Token.Open -> {
-                    val inline = parseInline(tokens, i, to, depth)
-                    if (inline.consumed == 0) {
-                        out += PostInline.Text(token.raw)
-                        i += 1
-                    } else {
-                        out += inline.node
-                        i += inline.consumed
-                    }
+                    val first = out.all { it is PostInline.LineBreak }
+                    val inline = handleInlineOpen(tokens, i, to, depth, out)
+                    if (first) startsWithBullet = inline.startsWithBullet
+                    i += inline.consumed.coerceAtLeast(1)
                 }
 
                 is Token.Close -> {
@@ -343,7 +373,22 @@ class BbcodeContentParser {
                 }
             }
         }
-        return collapseInlines(out)
+        return InlineChildren(collapseInlines(out), startsWithBullet)
+    }
+
+    private fun protectRawBullets(tokens: List<Token>): List<Token> {
+        var rawClose = -1
+        return tokens.mapIndexed { index, token ->
+            if (index > rawClose && token is Token.Open && token.name.lowercase() in RawTextTags) {
+                rawClose = findMatchingClose(tokens, index, tokens.size, token.name)
+            }
+            // Protect only [*]; keep the existing inline fallback for nested raw block tags.
+            if (index < rawClose && token is Token.Open && token.raw == "[*]") {
+                Token.Text(token.raw)
+            } else {
+                token
+            }
+        }
     }
 
     private fun findMatchingClose(
@@ -392,7 +437,7 @@ class BbcodeContentParser {
                 is PostInline.Strike -> append(flattenInlineText(node.children))
                 is PostInline.Color -> append(flattenInlineText(node.children))
                 is PostInline.Link -> append(flattenInlineText(node.children))
-                is PostInline.InlineImage -> Unit
+                is PostInline.InlineImage -> append(node.url)
                 is PostInline.Smiley -> Unit
             }
         }
@@ -463,9 +508,8 @@ class BbcodeContentParser {
      *    (`:)`, `:D`, `:o`, `:/`) are deliberately NOT scanned — in free text they are ambiguous
      *    (URLs, code, prose) and a wrong hit is worse in a preview than a missing sprite.
      *  - **perso `[:name]`** — unambiguous bracket syntax (names may carry spaces/accents/`:N`
-     *    variants). Emitted with `imageUrl = null` : the sprite URL is NOT derivable from the name
-     *    (shard directories), so the renderer keeps showing the typed token — no regression, and a
-     *    resolution channel (picker-fed registry) can land separately.
+     *    variants). ED-66 uses the same pure URL derivation as local favorites. Failed images
+     *    fall back to the typed token in the renderer; parsing never performs a network lookup.
      */
     private fun splitSmileyRuns(text: String): List<PostInline> {
         val out = mutableListOf<PostInline>()
@@ -476,7 +520,7 @@ class BbcodeContentParser {
             val smiley = when {
                 candidate.startsWith("[:") -> PostInline.Smiley(
                     kind = SmileyKind.Perso(candidate.removeSurrounding("[:", "]")),
-                    imageUrl = null,
+                    imageUrl = persoSmileyUrl(candidate),
                 )
                 else -> BuiltinSmileyUrls[candidate]?.let { url ->
                     PostInline.Smiley(kind = SmileyKind.Builtin(candidate), imageUrl = url)
@@ -505,7 +549,13 @@ class BbcodeContentParser {
 
     private data class BlockSlice(val blocks: List<PostBlock>, val consumed: Int)
 
-    private data class InlineSlice(val node: PostInline, val consumed: Int)
+    private data class InlineSlice(
+        val node: PostInline,
+        val consumed: Int,
+        val startsWithBullet: Boolean = false,
+    )
+
+    private data class InlineChildren(val nodes: List<PostInline>, val startsWithBullet: Boolean)
 
     private companion object {
         val EMPTY_AST: PostContent = PostContent(blocks = emptyList())
@@ -523,15 +573,14 @@ class BbcodeContentParser {
             .filter { SMILEY_CANDIDATE_REGEX.matches(it.token) }
             .associate { it.token to it.imageUrl }
 
+        /** Contents flattened verbatim at block level, including image URLs. */
+        val RawTextTags: Set<String> = setOf("fixed", "code", "cpp", "img")
+
         /**
          * Tag names handled at block level (paragraph flush + dedicated block node).
          * Anything outside this set falls through to inline parsing or text fallback.
          */
-        val BlockLevelTags: Set<String> = setOf(
-            "quote", "quotemsg", "spoiler",
-            "fixed", "code", "cpp",
-            "img",
-        )
+        val BlockLevelTags: Set<String> = setOf("quote", "quotemsg", "spoiler") + RawTextTags
 
         /**
          * Hard cap on how deep [parseBlocks] and [parseInlinesOnly] are willing to

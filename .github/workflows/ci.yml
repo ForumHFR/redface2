@@ -64,16 +64,18 @@ jobs:
 
   # Fan-out by task type (was a single `verify` job running every task in one invocation). Each
   # entry runs on its own runner, so the four task groups parallelise PAST the 4-vCPU cap of a
-  # single runner. `setup-gradle` gives each entry its own incremental build cache (seeded on push
-  # to main/dev, read-only on PRs) so unchanged modules are not recompiled per job; the only
+  # single runner. `setup-gradle` gives each entry its own incremental build cache (written by push
+  # runs on main and dev through `cache-read-only` below, read-only on PRs, which restore the entries
+  # of their base branch) so unchanged modules are not recompiled per job; the only
   # duplication is recompiling the PR's *changed* modules in each entry — the build cache cannot be
   # shared across jobs running concurrently.
   #
   # `:app` is flavored (#233 channels) so its variant tasks are flavored: the unqualified
   # `lintDebug` / `:app:assembleDebug` no longer resolve for `:app`. Use the default `prod` flavor
   # for the `:app` lint + APK; `lintDebug` / `test` / `testDebugUnitTest` still cover the
-  # (flavour-less) core/feature/jvm modules, and the unqualified `test` covers `:app`'s unit tests
-  # across variants (incl. the Konsist architecture test).
+  # (flavour-less) core/feature/jvm modules, and the unqualified `test` runs `:app`'s unit tests
+  # for the prod flavor only (beta/dev unit tests are disabled in app/build.gradle.kts), incl. the
+  # Konsist architecture test.
   verify:
     name: ${{ matrix.task.name }}
     needs: [changes]
@@ -89,7 +91,7 @@ jobs:
           - name: assemble
             gradle: ":app:assembleProdDebug"
           - name: test
-            gradle: "test testDebugUnitTest"
+            gradle: "test testDebugUnitTest verifyRoborazziDebug -Proborazzi.mode=verify"
           - name: lint
             gradle: "lintDebug :app:lintProdDebug"
           - name: detekt
@@ -101,11 +103,25 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
+        with:
+          # Default: only the default branch (main) writes. dev is the integration branch, so
+          # its push runs write too; PR runs (refs/pull/N/merge) stay read-only.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' }}
 
       - name: ${{ matrix.task.name }}
         run: ./gradlew ${{ matrix.task.gradle }}
 
-  # Repo hygiene guards (no Gradle/SDK needed — pure bash). Fixture provenance is BLOCKING;
+      - name: Upload Roborazzi comparisons and results
+        if: ${{ always() && matrix.task.name == 'test' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: roborazzi-comparisons
+          path: |
+            **/build/outputs/roborazzi/**
+            **/build/test-results/roborazzi/**
+          if-no-files-found: warn
+
+  # Repo hygiene guards (no Gradle/SDK needed — bash/Python standard library). Fixture provenance is BLOCKING;
   # the large-file report is advisory (writes to the job summary, never fails). Wired into the
   # required aggregate check below so the guard is actually enforced on `main` (dev→main promotion).
   # Job-level permissions REPLACE the workflow-level block: `pull-requests: read` lets the
@@ -122,6 +138,8 @@ jobs:
         uses: actions/checkout@v7
       - name: Fixture provenance (blocking)
         run: bash scripts/check-fixtures-provenance.sh
+      - name: No duplicate Roborazzi references within a module (blocking)
+        run: python3 scripts/check-roborazzi-duplicates.py
       - name: Changelog updated on versionName bump (PR, blocking)
         if: github.event_name == 'pull_request'
         shell: bash

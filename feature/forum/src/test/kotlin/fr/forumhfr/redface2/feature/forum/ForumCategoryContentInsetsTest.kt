@@ -31,11 +31,11 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
 import fr.forumhfr.redface2.core.model.TopicSummary
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -55,13 +55,13 @@ import org.robolectric.annotation.GraphicsMode
  * title) must move down by exactly 24 dp — the pre-fix `.padding(padding).statusBarsPadding()`
  * chain moved it by 48 dp — and lose exactly one navigation-bar height at the bottom (or side).
  *
- * Two record-only Roborazzi captures (light / dark, red bands overlaying the simulated bars)
+ * Two Roborazzi reference captures (light / dark, red bands overlaying the simulated bars)
  * complement the assertions for human review:
  *
  *     ./scripts/docker-dev.sh ./gradlew :feature:forum:testDebugUnitTest \
  *         --tests '*ForumCategoryContentInsetsTest*' --console=plain --no-daemon
  *
- * Output: `feature/forum/build/outputs/roborazzi/forum_category_system_bars_*.png` (gitignored).
+ * Output: `feature/forum/src/test/screenshots/forum_category_system_bars_*.png` (versioned).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h780dp-xxhdpi")
@@ -126,7 +126,7 @@ class ForumCategoryContentInsetsTest {
         mount(darkTheme = darkTheme, simulateBars = true, collapsed = collapsed)
         applySystemBars(statusTop = STATUS_BAR, navBottom = NAV_BAR)
         compose.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/forum_category_system_bars_$suffix.png",
+            filePath = "src/test/screenshots/forum_category_system_bars_$suffix.png",
         )
     }
 

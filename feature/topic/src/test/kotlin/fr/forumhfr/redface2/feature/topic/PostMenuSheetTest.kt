@@ -9,11 +9,13 @@ import android.content.pm.ResolveInfo
 import android.net.Uri
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHasClickAction
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
@@ -101,6 +103,26 @@ class PostMenuSheetTest {
             compose.onNodeWithText(label).assertExists()
         }
         compose.onNodeWithText("Alerter").assertIsEnabled()
+    }
+
+    // #1630 (Astra): one detent, so in a short window the menu scrolls to its last action.
+    @Test
+    @Config(qualifiers = "w360dp-h480dp-xxhdpi")
+    fun `last action stays reachable in a short window`() {
+        var deleted = 0
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PostMenuSheet(
+                    post = samplePost().copy(citedCount = 2), permalink = PERMALINK, citedCount = 2,
+                    onDismiss = {}, onAlert = {}, onDelete = { deleted += 1 }, onEditFirstPost = {},
+                    onOpenProfile = {}, onSendPrivateMessage = {}, favoriteAction = PostFavoriteAction.ADD,
+                    onFavoriteClick = {}, multiQuoteSelected = false, onToggleMultiQuote = {},
+                    onQuoteStart = {}, authorBlocked = false, onToggleBlockAuthor = {},
+                )
+            }
+        }
+        compose.onNodeWithText("Supprimer ce message").performScrollTo().assertIsDisplayed().performClick()
+        compose.waitUntil(timeoutMillis = 5_000) { deleted == 1 }
     }
 
     @Test

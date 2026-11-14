@@ -12,9 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
@@ -307,5 +307,6 @@ private fun ReportError.messageRes(): Int = when (this) {
     ReportError.ANTI_FLOOD -> R.string.report_error_flood
     ReportError.UNKNOWN_RECIPIENT -> R.string.report_error_recipient
     ReportError.EMPTY_MESSAGE -> R.string.report_error_empty
+    ReportError.INVALID_FORM -> fr.forumhfr.redface2.core.ui.R.string.editor_error_unknown
     ReportError.REFUSED -> R.string.report_error_refused
 }

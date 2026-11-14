@@ -22,6 +22,9 @@ internal class EditorWriteOwnerInterceptor : Interceptor {
             if (expected.owner == null || actual != expected.owner) {
                 expected.rejectBeforeEmission()
             }
+            // DNS, connect and TLS precede this network interceptor. From this point onwards
+            // headers or body may reach HFR, even if CallServerInterceptor subsequently fails.
+            if (request.method == "POST") expected.markEmissionPossible()
         }
         return chain.proceed(request)
     }

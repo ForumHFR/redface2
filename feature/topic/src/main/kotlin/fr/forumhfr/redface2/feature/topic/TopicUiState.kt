@@ -215,6 +215,14 @@ data class TopicUiState(
             val pollVote: PollVoteUiState? = null,
             /** #1296 — keep results expanded for this page visit; never persisted or snapshotted. */
             val pollJustVoted: Boolean = false,
+            /**
+             * #1437 — provenance of the page ON SCREEN: `true` when [topic] is a `transsearch`
+             * response (a search VIEW with its own pager), `false` for a canonical topic page.
+             * Carried by the displayed content itself, so it outlives the search cursor and the
+             * filtered flag (a later search without result resets both yet keeps this page) and
+             * only falls when a canonical page actually replaces it.
+             */
+            val fromSearch: Boolean = false,
         ) : Mode
 
         data class Error(
@@ -404,8 +412,11 @@ sealed interface TopicIntent {
     /** #783 — opens the native HFR reverse-citation sheet for a server-counted post. */
     data class OnCitedBadgeClick(val post: Post) : TopicIntent
 
-    /** #783 — closes the sheet, resolves the citing post's real page, then uses the jump engine. */
-    data class OnCitingPostClick(val post: Post) : TopicIntent
+    /** #783 — keeps the tap-time departure while resolving the citing post's real page. */
+    data class OnCitingPostClick(
+        val post: Post,
+        val departureAnchor: TopicScrollAnchor? = null,
+    ) : TopicIntent
 
     /** #783 — closes the reverse-citation sheet and cancels its in-flight read. */
     data object OnDismissCitingSheet : TopicIntent
@@ -519,6 +530,9 @@ enum class DeleteFailureReason {
  * the user scrolled away, replaying a scroll on rotation would steal focus).
  */
 sealed interface TopicEffect {
+    /** A quote request failed to reach durable storage; the editor must stay closed. */
+    data object QuotePreparationFailed : TopicEffect
+
     data class ModerationAlertCompleted(val outcome: ModerationAlertOutcome) : TopicEffect
     data class ModerationAlertFailed(val kind: HfrErrorKind) : TopicEffect
     data object ModerationAlertSignInRequired : TopicEffect

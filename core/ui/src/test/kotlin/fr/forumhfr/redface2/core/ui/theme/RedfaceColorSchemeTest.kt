@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.ui.theme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import com.materialkolor.dynamiccolor.ColorSpec
 import com.materialkolor.hct.Hct
 import com.materialkolor.scheme.SchemeTonalSpot
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
@@ -326,6 +327,7 @@ class RedfaceColorSchemeTest {
             sourceColorHct = Hct.fromInt(ThemeAccent.Preset(preset).seedArgb()),
             isDark = darkTheme,
             contrastLevel = 0.0,
+            specVersion = ColorSpec.SpecVersion.SPEC_2021,
         ).primary.toColorForTest()
 
     private fun assertAmoledSurfaceLadder(name: String, scheme: ColorScheme) {

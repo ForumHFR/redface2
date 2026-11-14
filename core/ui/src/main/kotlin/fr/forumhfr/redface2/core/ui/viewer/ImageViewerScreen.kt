@@ -9,6 +9,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,8 +44,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
@@ -285,6 +290,27 @@ internal fun ZoomableRemoteImage(
     val context = LocalContext.current
     // Telephoto 0.19 can retain the first non-null tap callback across image changes.
     val currentOnClick by rememberUpdatedState(onClick)
+    val touchSlop = LocalViewConfiguration.current.touchSlop
+    var movedBeyondTouchSlop by remember { mutableStateOf(false) }
+    val guardedOnClick: () -> Unit = { if (!movedBeyondTouchSlop) currentOnClick() }
+    // Telephoto can report an unconsumed pan as a tap when the image cannot move on that axis.
+    // Observe before its Main-pass handlers without consuming any zoom, pan or double-tap events.
+    val observedModifier = modifier.pointerInput(touchSlop) {
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            movedBeyondTouchSlop = false
+            do {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val pointer = event.changes.firstOrNull { it.id == down.id }
+                val moved = pointer == null || (pointer.position - down.position).getDistance() > touchSlop
+                val secondPointerDown = event.changes.any { it.id != down.id && it.pressed }
+                if (moved || secondPointerDown) {
+                    movedBeyondTouchSlop = true
+                }
+            } while (event.changes.any { it.pressed })
+            // Keep the result until the next down: Telephoto delays onClick for double-tap detection.
+        }
+    }
     val imageRequest = remember(context, request) {
         ImageRequest.Builder(context)
             .data(request.sourceUrl)
@@ -303,16 +329,16 @@ internal fun ZoomableRemoteImage(
             model = imageRequest,
             contentDescription = contentDescription,
             contentScale = ContentScale.Fit,
-            onClick = { currentOnClick() },
+            onClick = { guardedOnClick() },
             onDoubleClick = DoubleClickToZoomListener.cycle(maxZoomFactor = DOUBLE_TAP_ZOOM),
-            modifier = modifier,
+            modifier = observedModifier,
         )
     } else {
         MemoryOnlyZoomableImage(
             imageRequest = imageRequest,
             contentDescription = contentDescription,
-            onClick = { currentOnClick() },
-            modifier = modifier,
+            onClick = guardedOnClick,
+            modifier = observedModifier,
         )
     }
 }

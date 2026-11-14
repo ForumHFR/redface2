@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageFailure
 import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageMutationResult
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
+import fr.forumhfr.redface2.core.model.write.MissingFirstPostSubcategoryException
 import fr.forumhfr.redface2.core.model.write.NewTopicContext
 import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -98,6 +99,44 @@ class DefaultTopicFormRepositoryTest {
         assertEquals("388", url.queryParameter("subcat"))
         assertEquals("1", url.queryParameter("page"))
         assertEquals("2523829", url.queryParameter("numreponse"))
+    }
+
+    @Test
+    fun `GET FP forwards the typed parser refusal for a real response without subcat selector`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("write_edit_form_test_post.html")))
+
+        val error = runCatching {
+            repository.fetchEditFirstPostForm(EditFirstPostContext(10, 388, 148_749, 1, 2_523_829))
+        }.exceptionOrNull()
+
+        assertTrue(error is MissingFirstPostSubcategoryException)
+    }
+
+    @Test
+    fun `GET FP form without content textarea fails instead of returning a known empty body`() = runTest {
+        // #1512 — the real capture with its body textarea stripped: an absent body must not unlock first-post editing.
+        val stripped = fixture("write_edit_first_post_form.html")
+            .replace(Regex("""(?s)<textarea[^>]*name="content_form"[^>]*>.*?</textarea>"""), "")
+        assertFalse(stripped.contains("content_form\""))
+        server.enqueue(MockResponse().setBody(stripped))
+
+        val error = runCatching {
+            repository.fetchEditFirstPostForm(EditFirstPostContext(10, 388, 148_749, 1, 2_523_829))
+        }.exceptionOrNull()
+
+        assertTrue("expected a parse failure, got $error", error is IllegalStateException)
+    }
+
+    @Test
+    fun `GET FP form with an empty content textarea returns a known empty body`() = runTest {
+        val emptied = fixture("write_edit_first_post_form.html")
+            .replace(Regex("""(?s)(<textarea[^>]*name="content_form"[^>]*>).*?(</textarea>)"""), "$1$2")
+        server.enqueue(MockResponse().setBody(emptied))
+
+        val form = repository.fetchEditFirstPostForm(EditFirstPostContext(10, 388, 148_749, 1, 2_523_829))
+
+        assertEquals("", form.initialContent)
+        assertEquals(388, form.selectedSubcat)
     }
 
     @Test

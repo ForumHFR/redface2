@@ -11,21 +11,62 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.CancellationException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 /** Astra gate regressions: real adapters, writes suspended at commit/return and cleanup boundaries. */
 @OptIn(ExperimentalCoroutinesApi::class)
 abstract class EditorSubmissionRecoveryContract {
     protected var submissionScenario = EditorSubmissionScenario()
+    private var independentOffers = emptyMap<String, List<EditorDraftStore.DraftOffer>>()
     protected abstract fun createAdapter(
         scope: TestScope,
         preferences: Flow<Boolean>,
         delayedSharedRestore: Boolean,
     ): EditorSubmissionAdapter
+
+    /** All five surfaces: an autosave failure cannot turn an unknown POST into non-emission. */
+    @Test
+    fun autosaveFailurePreservesUncertaintyAfterTyping() {
+        val scenario = EditorSubmissionScenario().apply { postFailure = IOException("response lost") }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            startSending(adapter)
+            adapter.completePost()
+            runCurrent()
+            val attempt = scenario.store.entries.values.single().attempt
+            scenario.store.saveFailure = IOException("disk full")
+            adapter.editBody("edited after uncertainty")
+            advanceTimeBy(751)
+            runCurrent()
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+            assertEquals("edited after uncertainty", adapter.snapshot().body)
+            assertEquals(attempt, scenario.store.entries.values.single().attempt)
+            assertEquals(1, adapter.postCalls)
+        }
+    }
+
+    /** The pre-POST attempt failure keeps its certain diagnostic despite later draft failures. */
+    @Test
+    fun autosaveFailureDoesNotReplaceAttemptWriteFailure() {
+        val scenario = EditorSubmissionScenario().apply { store.beginFailure = IOException("disk full") }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            adapter.clickSubmit()
+            runCurrent()
+            assertEquals(SubmissionErrorProbe.DRAFT_WRITE_FAILED, adapter.snapshot().error)
+            scenario.store.saveFailure = IOException("still full")
+            adapter.editBody("keep this text")
+            advanceTimeBy(751)
+            runCurrent()
+            assertEquals(SubmissionErrorProbe.DRAFT_WRITE_FAILED, adapter.snapshot().error)
+            assertEquals("keep this text", adapter.snapshot().body)
+            assertEquals(0, adapter.postCalls)
+        }
+    }
 
     /** Gate Astra: accepted success stays locked while durable cleanup is suspended. */
     @Test
@@ -62,15 +103,20 @@ abstract class EditorSubmissionRecoveryContract {
             runCurrent()
             assertEquals("edited after uncertainty", adapter.snapshot().body)
             assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
-            assertFalse(adapter.snapshot().restoreOffered)
+            assertOnlyIndependentOffers(adapter)
         }
     }
 
     /** An unrecognised POST response cannot prove refusal: retain the attempt across reopening. */
     @Test
-    fun unknownPostResponsePersistsAndRestoresUncertainty() {
+    fun unknownPostResponsePersistsAndRestoresUncertainty() = unknownResponse(preloadIndependentDraft = false)
+
+    @Test
+    fun unknownPostResponseKeepsPreloadedIndependentDraft() = unknownResponse(preloadIndependentDraft = true)
+
+    private fun unknownResponse(preloadIndependentDraft: Boolean) {
         val scenario = EditorSubmissionScenario().apply { postRejection = ReplyFailureReason.Unknown }
-        withReadyAdapter(scenario = scenario) { adapter ->
+        withReadyAdapter(scenario = scenario, preloadIndependentDraft = preloadIndependentDraft) { adapter ->
             startSending(adapter)
             val body = adapter.snapshot().body
             adapter.completePost()
@@ -91,7 +137,7 @@ abstract class EditorSubmissionRecoveryContract {
             assertEquals(body, adapter.snapshot().body)
             assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
             assertEquals(entry.attempt, scenario.store.entries.values.single().attempt)
-            assertFalse(adapter.snapshot().restoreOffered)
+            assertOnlyIndependentOffers(adapter)
             assertFalse(adapter.snapshot().confirmationVisible)
             assertEquals("aucun renvoi automatique à la réouverture", 1, adapter.postCalls)
             assertEquals(0, adapter.successEffects)
@@ -99,8 +145,120 @@ abstract class EditorSubmissionRecoveryContract {
     }
 
     @Test
-    fun recognisedPostRejectionRemainsCertain() {
-        val scenario = EditorSubmissionScenario().apply { postRejection = ReplyFailureReason.AntiFlood }
+    fun restoreIndependentDraftAfterPublishedSend() = resolveIndependentDraft(uncertain = false, restoring = true)
+
+    @Test
+    fun ignoreIndependentDraftAfterPublishedSend() = resolveIndependentDraft(uncertain = false, restoring = false)
+
+    @Test
+    fun restoreIndependentDraftAfterUncertainSend() = resolveIndependentDraft(uncertain = true, restoring = true)
+
+    @Test
+    fun ignoreIndependentDraftAfterUncertainSend() = resolveIndependentDraft(uncertain = true, restoring = false)
+
+    @Test
+    fun failedRestoreDoesNotBlockTypingOrDuplicateTheMerge() =
+        resolveIndependentDraft(uncertain = false, restoring = true, failResolution = true)
+
+    @Test
+    fun failedRestoreAfterUncertainSendDoesNotSealAutosave() =
+        resolveIndependentDraft(uncertain = true, restoring = true, failResolution = true)
+
+    @Test
+    fun typingDuringOfferResolutionIsSavedAfterItsCallback() = withReadyAdapter(
+        preloadIndependentDraft = true,
+    ) { adapter ->
+        val key = submissionScenario.store.entries.keys.single()
+        assertTrue("ED-121 keeps offered drafts on this surface", keepsOfferedDrafts(key))
+        startSending(adapter)
+        adapter.completePost()
+        runCurrent()
+        submissionScenario.recreateEditor()
+        runCurrent()
+        assertOnlyIndependentOffers(adapter)
+        val gate = CompletableDeferred<Unit>()
+        submissionScenario.store.saveReturnGate = gate
+        val offered = checkNotNull(adapter.snapshot().offeredBody)
+        adapter.resolveOfferedDraft(restoring = true)
+        runCurrent()
+        val continued = adapter.snapshot().body + " typed while resolving"
+        adapter.editBody(continued)
+        runCurrent()
+        gate.complete(Unit)
+        advanceTimeBy(751)
+        runCurrent()
+        assertEquals(continued, submissionScenario.store.entries.getValue(key).draft.body)
+        assertOfferDecided(adapter, key, offered)
+        assertEquals(1, adapter.postCalls)
+    }
+
+    /** ED-121 applies to replies, the sheet, new topics and new MPs; edits and reports keep their contract. */
+    private fun resolveIndependentDraft(uncertain: Boolean, restoring: Boolean, failResolution: Boolean = false) {
+        val scenario = EditorSubmissionScenario().apply {
+            if (uncertain) postFailure = IOException("response lost")
+        }
+        withReadyAdapter(scenario = scenario, preloadIndependentDraft = true) { adapter ->
+            val key = scenario.store.entries.keys.single()
+            assertTrue("ED-121 keeps offered drafts on this surface", keepsOfferedDrafts(key))
+            startSending(adapter)
+            adapter.completePost()
+            runCurrent()
+            val attempt = scenario.store.entries.getValue(key).attempt
+            assertEquals(if (uncertain) EditorDraftStore.AttemptStatus.UNCERTAIN
+                else EditorDraftStore.AttemptStatus.PUBLISHED, attempt?.status)
+            scenario.recreateEditor()
+            runCurrent()
+            assertOnlyIndependentOffers(adapter)
+            val before = adapter.snapshot().body
+            val offered = checkNotNull(adapter.snapshot().offeredBody)
+            if (failResolution) scenario.store.saveFailure = IOException("disk full")
+            adapter.resolveOfferedDraft(restoring)
+            runCurrent()
+            val resolvedBody = adapter.snapshot().body
+            if (failResolution) {
+                assertEquals(offered, adapter.snapshot().offeredBody)
+                scenario.store.saveFailure = null
+                adapter.editBody(resolvedBody + " more typing")
+                advanceTimeBy(751)
+                runCurrent()
+                assertEquals(adapter.snapshot().body, scenario.store.entries.getValue(key).draft.body)
+                // ED-121: the autosave of the merged field may already have consumed D. A retry exists
+                // only while that same draft is still offered, and it must not merge it twice.
+                if (adapter.snapshot().offeredBody == offered) {
+                    adapter.resolveOfferedDraft(restoring)
+                    runCurrent()
+                }
+                assertEquals(resolvedBody + " more typing", adapter.snapshot().body)
+            }
+            assertOfferDecided(adapter, key, offered)
+            if (restoring) assertTrue(adapter.snapshot().body.contains(offered))
+            else assertEquals(before, adapter.snapshot().body)
+            assertEquals(adapter.snapshot().body, scenario.store.entries.getValue(key).draft.body)
+            val expected = independentOffers[key].orEmpty().filterNot { it.draft.body == offered }
+            assertEquals(expected, scenario.store.loadOffers(scenario.store.currentOwner(), key))
+            val resolvedAttempt = scenario.store.entries.getValue(key).attempt
+            if (uncertain) assertEquals(attempt, resolvedAttempt) else assertNull(resolvedAttempt)
+            adapter.editBody("typing after the decision")
+            advanceTimeBy(751)
+            runCurrent()
+            assertEquals("typing after the decision", scenario.store.entries.getValue(key).draft.body)
+            assertEquals("no automatic resend", 1, adapter.postCalls)
+            if (!uncertain) {
+                adapter.clickSubmit()
+                runCurrent()
+                assertEquals("the next send is not blocked by offer resolution", 2, adapter.postCalls)
+            }
+        }
+    }
+
+    @Test
+    fun recognisedPostRejectionRemainsCertain() = recognisedRejection(ReplyFailureReason.AntiFlood)
+
+    @Test
+    fun unknownRecipientRejectionRemainsCertain() = recognisedRejection(ReplyFailureReason.UnknownRecipient)
+
+    private fun recognisedRejection(reason: ReplyFailureReason) {
+        val scenario = EditorSubmissionScenario().apply { postRejection = reason }
         withReadyAdapter(scenario = scenario) { adapter ->
             startSending(adapter)
             val body = adapter.snapshot().body
@@ -115,6 +273,148 @@ abstract class EditorSubmissionRecoveryContract {
             assertTrue(adapter.snapshot().canSubmit)
             assertEquals(0, adapter.successEffects)
             assertEquals(1, adapter.postCalls)
+        }
+    }
+
+    @Test
+    fun cancelledPreparationResolvesBeforeReopeningWithoutAPost() {
+        val scenario = EditorSubmissionScenario().apply {
+            preparationFailure = CancellationException("local preparation cancelled")
+        }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            adapter.clickSubmit()
+            runCurrent()
+            assertEquals(0, adapter.postCalls)
+            assertEquals(0, scenario.emittedPosts)
+            assertNull(scenario.store.entries.values.single().attempt)
+            assertFalse(adapter.snapshot().isSending)
+            scenario.recreateEditor()
+            runCurrent()
+            assertTrue(adapter.snapshot().error != SubmissionErrorProbe.UNCERTAIN)
+            assertEquals(0, adapter.successEffects)
+        }
+    }
+
+    @Test
+    fun failedCancellationResolutionKeepsConservativeRecovery() {
+        val scenario = EditorSubmissionScenario().apply {
+            preparationFailure = CancellationException("local preparation cancelled")
+            store.finishFailure = IOException("outcome unavailable")
+        }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            adapter.clickSubmit()
+            runCurrent()
+            assertEquals(0, adapter.postCalls)
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+            assertEquals(
+                EditorDraftStore.AttemptStatus.IN_PROGRESS, scenario.store.entries.values.single().attempt?.status,
+            )
+            scenario.recreateEditor()
+            runCurrent()
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+            assertEquals(0, adapter.successEffects)
+        }
+    }
+
+    /**
+     * ED-170: teardown is not a local send cancellation, even before the emission boundary.
+     * Restored attempts remain unresolved; autosave can normalize their marker to UNCERTAIN.
+     */
+    @Test
+    fun recreationDuringPreparationRestoresUnresolvedAttemptWithoutResending() {
+        val gate = CompletableDeferred<Unit>()
+        val scenario = EditorSubmissionScenario().apply { preparationGate = gate }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            adapter.clickSubmit()
+            runCurrent()
+            assertEquals(1, scenario.preparationCalls)
+            assertEquals(0, adapter.postCalls)
+            val entry = scenario.store.entries.values.single()
+            assertEquals(EditorDraftStore.AttemptStatus.IN_PROGRESS, entry.attempt?.status)
+            scenario.recreateEditor()
+            runCurrent()
+            assertEquals(entry.attempt, scenario.store.entries.values.single().attempt)
+            assertEquals(entry.draft.body, adapter.snapshot().body)
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+            assertFalse(adapter.snapshot().isSending)
+            assertOnlyIndependentOffers(adapter)
+            assertFalse(adapter.snapshot().confirmationVisible)
+            gate.complete(Unit)
+            runCurrent()
+            assertEquals("teardown must not finish the old attempt", 0, scenario.store.finishCalls)
+            assertEquals(entry, scenario.store.entries.values.single())
+            advanceTimeBy(751)
+            runCurrent()
+            assertEquals(1, scenario.preparationCalls)
+            assertEquals(0, adapter.postCalls)
+            assertEquals(0, scenario.emittedPosts)
+            assertEquals(0, adapter.successEffects)
+            val recovered = scenario.store.entries.values.single()
+            assertEquals(entry.draft, recovered.draft)
+            assertEquals(entry.attempt?.token, recovered.attempt?.token)
+            // Opening autosaves may normalize IN_PROGRESS to UNCERTAIN via saveUnresolved.
+            // Neither marker acknowledges the attempt; no outcome may come from the destroyed scope.
+            assertTrue(
+                recovered.attempt?.status in setOf(
+                    EditorDraftStore.AttemptStatus.IN_PROGRESS, EditorDraftStore.AttemptStatus.UNCERTAIN,
+                ),
+            )
+            assertEquals(0, scenario.store.finishCalls)
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+            adapter.editBody("edited after preparation teardown")
+            advanceTimeBy(751)
+            runCurrent()
+            val edited = scenario.store.entries.values.single()
+            assertEquals("edited after preparation teardown", edited.draft.body)
+            assertEquals(entry.attempt?.copy(status = EditorDraftStore.AttemptStatus.UNCERTAIN), edited.attempt)
+            assertEquals(0, scenario.store.finishCalls)
+            assertEquals(1, scenario.preparationCalls)
+            assertEquals(0, adapter.postCalls)
+            assertEquals(0, scenario.emittedPosts)
+            assertEquals(0, adapter.successEffects)
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+        }
+    }
+
+    @Test
+    fun accountChangeCancelsPreparationWithoutRevivingTheOldUi() {
+        val scenario = EditorSubmissionScenario().apply { preparationGate = CompletableDeferred() }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            adapter.clickSubmit()
+            runCurrent()
+            assertEquals(1, scenario.preparationCalls)
+            assertEquals(0, adapter.postCalls)
+            val owner = scenario.store.currentOwner()
+            scenario.switchAccount()
+            runCurrent()
+            val invalidated = adapter.snapshot()
+            scenario.preparationGate?.complete(Unit)
+            runCurrent()
+            assertEquals(invalidated.body, adapter.snapshot().body)
+            assertEquals(invalidated.error, adapter.snapshot().error)
+            assertEquals(0, adapter.postCalls)
+            assertEquals(0, adapter.successEffects)
+            scenario.store.activeOwner = owner
+            assertNull(scenario.store.entries.values.single().attempt)
+        }
+    }
+
+    @Test
+    fun cancelledPostRetainsUnresolvedAttempt() {
+        val scenario = EditorSubmissionScenario().apply { cancelPost = true }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            startSending(adapter)
+            adapter.completePost()
+            runCurrent()
+            assertEquals(1, scenario.emittedPosts)
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+            assertEquals(
+                EditorDraftStore.AttemptStatus.IN_PROGRESS, scenario.store.entries.values.single().attempt?.status,
+            )
+            scenario.recreateEditor()
+            runCurrent()
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+            assertEquals(0, adapter.successEffects)
         }
     }
 
@@ -276,16 +576,68 @@ abstract class EditorSubmissionRecoveryContract {
         assertTrue(adapter.snapshot().isSending)
     }
 
+    /**
+     * ED-121/161/170 v0.7.8 replaces "no offer at all" with "no attempted C as an offer".
+     * Compare the complete set with the exact pre-send D (identity, revision and fields), and
+     * the real visible offer with that set: neither publication nor uncertainty may invent D.
+     * All attempt-status, body, acknowledgement and POST-count assertions remain mandatory.
+     */
+    /**
+     * v0.7.8, "Plusieurs brouillons offerts" (ED-41, ED-121): the decided draft leaves the offer, and
+     * the editor keeps offering exactly while another durable draft still awaits a choice.
+     */
+    private suspend fun assertOfferDecided(adapter: EditorSubmissionAdapter, key: String, decided: String) {
+        val store = submissionScenario.store
+        val remaining = store.loadOffers(store.currentOwner(), key)
+        assertTrue(remaining.none { it.draft.body == decided })
+        assertFalse(decided == adapter.snapshot().offeredBody)
+        assertEquals(remaining.isNotEmpty(), adapter.snapshot().restoreOffered)
+    }
+
+    protected suspend fun assertOnlyIndependentOffers(adapter: EditorSubmissionAdapter) {
+        val (key, entry) = submissionScenario.store.entries.entries.single()
+        val expected = independentOffers[key].orEmpty()
+        assertEquals(expected, submissionScenario.store.loadOffers(submissionScenario.store.currentOwner(), key))
+        assertTrue(expected.none { it.draft.body == entry.draft.body })
+        val probe = adapter.snapshot()
+        assertEquals(expected.firstOrNull()?.draft?.body, probe.offeredBody)
+        assertEquals(expected.isNotEmpty(), probe.restoreOffered)
+    }
+
     protected fun withReadyAdapter(
         preferences: Flow<Boolean> = flowOf(false),
         delayedSharedRestore: Boolean = false,
         scenario: EditorSubmissionScenario = EditorSubmissionScenario(),
+        preloadIndependentDraft: Boolean = false,
         block: suspend TestScope.(EditorSubmissionAdapter) -> Unit,
     ) = runTest {
         submissionScenario = scenario
         val adapter = createAdapter(this, preferences, delayedSharedRestore)
         try {
+            if (preloadIndependentDraft) {
+                assumeTrue("ED-121 requires independent draft offers", adapter.supportsIndependentDraftOffers)
+            }
             runCurrent()
+            if (preloadIndependentDraft) {
+                scenario.store.entries.keys.filter(::keepsOfferedDrafts).forEach { key ->
+                    val private = key.startsWith("mpreply:") || key == EditorDraftKey.mpCompose()
+                    val draft = EditorDraftStore.Draft("independent D", isPrivate = private, updatedAt = 1234)
+                    scenario.store.preloadOffer(key,
+                        EditorDraftStore.DraftOffer.from(EditorDraftStore.DraftEntry(draft, 0)))
+                }
+            }
+            // Only an actually offered, ordinary draft of a reply, a new topic or a new MP is D.
+            // The sheet's auto-resumed body is C; edits and reports keep their non-ED-121 contract.
+            independentOffers = scenario.store.entries.mapValues { (key, entry) ->
+                val offered = adapter.snapshot().restoreOffered && entry.attempt == null
+                val source = if (offered && keepsOfferedDrafts(key)) {
+                    listOf(EditorDraftStore.DraftOffer.from(entry))
+                } else emptyList()
+                (scenario.store.loadOffers(scenario.store.currentOwner(), key) + source)
+                    .distinctBy { it.id }.sortedWith(compareByDescending<EditorDraftStore.DraftOffer> {
+                        it.draft.updatedAt
+                    }.thenByDescending { it.sourceVersion })
+            }
             adapter.editBody("contract body")
             runCurrent()
             assertTrue("formulaire valide avant l'exercice du contrat", adapter.snapshot().canSubmit)
@@ -295,4 +647,6 @@ abstract class EditorSubmissionRecoveryContract {
             runCurrent()
         }
     }
+
+    private fun keepsOfferedDrafts(key: String): Boolean = EditorDraftKey.keepsOfferedDrafts(key)
 }

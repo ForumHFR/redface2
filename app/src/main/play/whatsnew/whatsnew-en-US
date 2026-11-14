@@ -1,5 +1,6 @@
-Redface 2 v0.68.0 — beta.
-- In-app reporting: Settings → HFR account or account menu, by HFR private message to the project.
-- Sending: "Message posted" / "Message edited" confirmations and "Last page" button; duplicate sends prevented; uncertain sends flagged, check before retrying.
-- Quotes: jumps no longer get stuck when the message is missing from the page.
-- TalkBack: First/Last page announced only once.
+Redface 2 v0.70.0 — beta.
+- Redesigned editor: bottom action bar, formats, preview beside the text, Options sheet.
+- Drafts under ↺: "Quote" inserts right away, the draft waits.
+- PM: edit your own messages.
+- Sending: clearer errors, uncertain sends better delimited.
+- Viewer: lighter animated GIFs.

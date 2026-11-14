@@ -163,7 +163,7 @@ class ReadingPostCardTest {
             signature.spanStyles.any { it.item.color != Color.Unspecified },
         )
         // A pin of the CONSTANT, not proof of rendering: `Modifier.alpha` leaves no semantics to
-        // assert on and Roborazzi is record-only here (ADR-016), so an accidental edit of the
+        // assert on and this test does not capture a screenshot, so an accidental edit of the
         // historical 0.7f is what this line catches — nothing more.
         assertEquals("historical signature alpha", 0.7f, READING_POST_SIGNATURE_ALPHA, 0f)
     }

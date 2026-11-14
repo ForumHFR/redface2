@@ -10,7 +10,9 @@ permalink: /adr/015-iconographie-boutons-icones
 
 ## Statut
 
-Accepté — 2026-06-16
+Accepté — 2026-06-16 · **amendé 2026-11-12** ([#1417](https://github.com/ForumHFR/redface2/issues/1417) :
+les icônes de l'éditeur passent à `strokeWidth="2"`, la famille hors éditeur reste à 2,5 — voir la
+note sous § Décision)
 
 ## Contexte
 
@@ -49,6 +51,18 @@ Convention de tracé (famille homogène) :
 Le `strokeWidth` 2.5 donne un trait **plus épais** que l'ancien `ic_arrow_back` en `fillColor`
 (retour nicko) et un poids identique d'une icône à l'autre.
 
+> **Amendement 2026-11-12 ([#1417](https://github.com/ForumHFR/redface2/issues/1417), refonte de
+> l'éditeur)** — les icônes propres à l'éditeur sont désormais tracées à **`strokeWidth="2"`**, gras
+> compris, pour une graisse proche des Material Symbols en poids 400. C'est une décision du
+> mainteneur, prise en deux temps : le 11/11/2026, il retient le trait de 2 pour l'éditeur d'abord,
+> avec le B (`ic_editor_bold`) à 3 ; le 12/11/2026, il ramène aussi le B à 2. Fichiers concernés :
+> les 28 `ic_editor_*` et `ic_image_upload`, qui ne sert qu'aux surfaces d'édition (barre BBCode,
+> rangée image, catalogue des raccourcis). La famille hors éditeur (`ic_arrow_back`,
+> `ic_chevron_left`, `ic_chevron_right`, `ic_edit`, `ic_expand_less`, `ic_expand_more`) **reste à
+> 2,5** en attendant une décision sur la portée, y compris là où l'éditeur l'emprunte (flèche retour
+> de la top bar et des rangées, chevron d'ouverture de l'en-tête). Le reste de la convention
+> (viewport, caps et joins ronds, teinte à l'usage, `RedfaceVectorIcon`) est inchangé.
+
 Primitive partagé : **`RedfaceVectorIcon`** (`:core:ui`, package `core.ui.icon`) encapsule
 `material3 Icon` + `painterResource` + la taille canonique (`RedfaceIconDefaults.Size = 24.dp`)
 + le contrat a11y (icône **décorative**, `contentDescription` porté par le conteneur cliquable
@@ -68,8 +82,9 @@ Drawables de la famille : `ic_arrow_back`, `ic_chevron_left`, `ic_chevron_right`
   une flèche, plus épais et cohérent — c'est l'effet recherché ;
 - coût : maintenir les drawables à la main (pas de dépendance `material-icons`, dont c'était
   l'objectif de la règle detekt) ;
-- les icônes denses préexistantes (`ic_ms_*`, Material Symbols recadrés grille 960, p.ex.
-  `ic_ms_edit_square` du shell réglages #494) ne sont **pas** retracées en stroke : ce sont des
+- les icônes denses `ic_ms_*` (Material Symbols recadrés grille 960), préexistantes comme
+  `ic_ms_edit_square` du shell réglages #494 ou ajoutées depuis sur décision du mainteneur, comme
+  `ic_ms_restore_page` (offre de restauration de l'éditeur, #1450, 11/11/2026), ne sont **pas** retracées en stroke : ce sont des
   pictogrammes pleins, pas des boutons-icônes simples ; elles peuvent toujours passer par
   `RedfaceVectorIcon` pour la taille/a11y.
 

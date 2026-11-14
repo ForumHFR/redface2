@@ -58,6 +58,9 @@ class RoomEditorDraftStoreTest {
     @Test
     fun `save folds the owner into the row key and stamps the clock`() = runTest {
         val store = store(AuthState.Authenticated("XaTriX"))
+        // ED-121 now reads the previous source before saving. Model an absent row explicitly:
+        // a relaxed entity mock fabricates non-null, invalid provenance instead of Room's null.
+        coEvery { dao.get("xatrix|reply:29:123456") } returns null
 
         store.save(
             owner = "xatrix",

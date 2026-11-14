@@ -8,9 +8,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -74,6 +74,6 @@ class SettingsImagePickerRoborazziTest {
             }
         }
         composeTestRule.onNodeWithTag("image_picker_group")
-            .captureRoboImage(filePath = "build/outputs/roborazzi/$name.png")
+            .captureRoboImage(filePath = "src/test/screenshots/$name.png")
     }
 }

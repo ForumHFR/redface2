@@ -1,36 +1,43 @@
 package fr.forumhfr.redface2.feature.messages
 
-import androidx.compose.ui.text.input.TextFieldValue
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftOffer
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
-import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 /**
  * MVI state of the new-conversation composer (#301 follow-up). Mirrors
- * [PrivateMessageReplyUiState] (the parsed `ReplyForm` stays private to the ViewModel, no private
- * metadata in snapshots) plus the two user-typed routing fields HFR's standalone composer exposes :
+ * [PrivateMessageReplyUiState]: the parsed `ReplyForm` stays private to the ViewModel; UI text lives
+ * only in memory. The two user-typed routing fields HFR's standalone composer exposes are:
  *
  * - [recipients] — HFR's `dest` field. One pseudo, or several separated by commas (a MultiMP),
- *   per HFR's own field help. Plain `String` : no selection/toolbar interplay to preserve.
+ *   per HFR's own field help. Legacy display adapter; [recipientState] preserves chips and buffer.
  * - [subject] — HFR's `sujet` field, capped at [SUBJECT_MAX_LENGTH] like the web composer's
  *   `maxlength=70` (the ViewModel truncates, so the cap holds even through paste).
  *
- * Submit-phase errors reuse [PrivateMessageReplyError] : the POST rides the same `bddpost.php`
+ * Submit-phase errors reuse [EditorError] : the POST rides the same `bddpost.php`
  * family, and the non-destructive-Unknown rule (draft kept, « vérifiez vos messages » banner)
  * applies identically since the success response was never exercised live.
  */
 data class PrivateMessageComposeUiState(
+    val isInitializing: Boolean = false,
+    /** A successful GET, resumed checkpoint or explicit body edit proves the body is known. */
+    val bodyKnown: Boolean = false,
     val isLoadingForm: Boolean = true,
     val formAvailable: Boolean = false,
     val formError: Boolean = false,
     val recipients: String = "",
-    /** Exact untouched recipient prefill supplied by routing/HFR, distinct from a user edit. */
-    val recipientsHydratedContent: String? = null,
+    /** Private representation (chips and D4 buffer); [recipients] only mirrors it as a display string. */
+    val recipientState: EditorRecipientState = EditorRecipientState(
+        recipients.takeIf(String::isNotBlank)?.split(',').orEmpty(),
+    ),
     val subject: String = "",
-    val draft: TextFieldValue = TextFieldValue(),
+    val bodyText: String = "",
     val isPreviewVisible: Boolean = false,
     val preview: PostContent = PostContent(blocks = emptyList()),
     val signatureEnabled: Boolean = false,
@@ -39,34 +46,53 @@ data class PrivateMessageComposeUiState(
     val optionsHydratedFromForm: Boolean = false,
     val submission: EditorSubmissionState = EditorSubmissionState.Ready,
     val isSubmitting: Boolean = false,
-    val submitError: PrivateMessageReplyError? = null,
+    val submitError: EditorError? = null,
     val showSubmitConfirmation: Boolean = false,
     /**
      * #405 — body of a previously-cached new-conversation draft, surfaced on init when a non-empty
      * draft was found. [restorableSubject] / [restorableRecipients] carry the cached routing fields.
-     * « Restaurer » pre-fills the composer ; « Ignorer » clears the cached content. Never silently lost.
+     * Matching ED-81 checkpoints resume silently; other rows remain explicit restore offers.
+     * [restorableRecipients] is the private encoded checkpoint (or a historical CSV), never POST data.
      */
     val restorableDraft: String? = null,
+    val draftOffers: List<DraftOffer> = emptyList(),
+    /** A Restore/Ignore write locks every offer until its result, including a failed result. */
+    val draftOfferDecisionPending: Boolean = false,
+    /** After a failed Restore, settle that merged offer before deciding a different one (ED-121). */
+    val draftOfferToResolveId: String? = null,
     val restorableSubject: String? = null,
     val restorableRecipients: String? = null,
+    /** ED-10/85: a close could not save the fields; the dialog asks before anything is abandoned. */
+    val showUnsavedCloseDialog: Boolean = false,
     /**
      * #459 — `true` while an image upload (single or batch) is in flight: toolbar spinner + body
      * field locked (`readOnly`) so the caret cannot move between two programmatic `[img]` insertions.
      */
     val isUploading: Boolean = false,
     /** #459 — typed upload failure surfaced as a dismissible banner (shared `:core:ui` taxonomy). */
-    val uploadError: UploadError? = null,
+    val uploadError: EditorError? = null,
     /** #459 — « n/N » batch counter (null for a single image). */
     val uploadProgress: UploadProgress? = null,
     /** #1128 — observed continuously so the next image pick uses the current preference. */
     val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
+    val editorShortcut: EditorShortcut = EditorShortcut.NONE,
 ) {
-    /** All three user-typed fields are required — HFR's « remplir tous les champs » rule. */
+    val draftDecisionsEnabled: Boolean get() = !draftOfferDecisionPending
+
+    fun canDecideDraftOffer(id: String? = draftOffers.firstOrNull()?.id): Boolean =
+        draftDecisionsEnabled && (draftOfferToResolveId == null || draftOfferToResolveId == id)
+
     val armToken: ArmToken? get() = (submission as? EditorSubmissionState.Armed)?.token
 
+    /** ED-35: missing routing fields are explained before arming, while POST remains strict. */
+    val sendActivatable: Boolean
+        get() = !isInitializing && formAvailable && !isLoadingForm && !isSubmitting && !isUploading &&
+            !submission.blocksBodyMutation && bodyText.isNotBlank()
+
+    /** All three user-typed fields are required — HFR's « remplir tous les champs » rule. */
     val canSubmit: Boolean
-        get() = formAvailable && !isLoadingForm && !isSubmitting && !isUploading && !submission.blocksBodyMutation &&
-            recipients.isNotBlank() && subject.isNotBlank() && draft.text.isNotBlank()
+        get() = sendActivatable && recipientState.buffer.isBlank() &&
+            recipientState.chips.any(String::isNotBlank) && subject.isNotBlank()
 
     companion object {
         /** HFR's `maxlength=70` on the composer's `sujet` input (fixture `mp_compose_form.html`). */

@@ -43,6 +43,186 @@ Workflow source : [`.github/workflows/release.yml`](https://github.com/ForumHFR/
 - **Routing (`resolve-target`)** : `channel=beta` → Play track `beta` + F-Droid `.beta` ; `channel=dev` → Play track `internal` + F-Droid `.dev`. Le **label** (`-PappLabel`) et le **versionCode** (`-PversionCodeOverride`, calculé depuis le registre) sont injectés au build des deux artefacts ; un **check CI** (`aapt2 dump badging`) vérifie package + label + **versionCode** de chaque APK avant publication.
 - **Sérialisation** : le `concurrency: group: release` (sans `cancel-in-progress`) sérialise les runs pour que deux dispatches n'allouent jamais le même code.
 
+### Garde Hilt des artefacts (#1581)
+
+Après le build signé et avant le staging ou toute publication (GitHub, Play, F-Droid),
+`release.yml` exécute `scripts/release/verify-hilt-artifact.sh` sur tous les APK F-Droid
+du canal et, si Play est activé, tous les APK et AAB prod. Un artefact manquant,
+illisible ou dépourvu d'au moins un marqueur attendu arrête le job avant tout upload.
+
+La garde lit `classes*.dex` dans les APK et `base/dex/classes*.dex` dans les AAB.
+Les projets sont dérivés des `include(...)` littéraux de `settings.gradle(.kts)`,
+hors commentaires. La garde applique une **liste fermée de noms exacts** aux
+dossiers `src/<set>/` de chaque projet inclus :
+
+- Dans `main`, les sources `.kt` et `.java` contribuent si elles déclarent
+  `@HiltViewModel`, `@AndroidEntryPoint`, `@HiltAndroidApp` ou `@Module` accompagné
+  de `@InstallIn` sur la même déclaration, hors commentaires et littéraux.
+- `test`, `androidTest`, `testFixtures`, `debug` : ignorés pour l'analyse Hilt,
+  mais soumis au refus des liens symboliques ci-dessous.
+- Tout autre dossier (`release`, `prod`, `prodDebug`, `internalDebug`,
+  `screenshotTest`, `devRelease`, nom inconnu…) échoue, même vide ou sans Hilt :
+  `::error::Hilt: source set <module>/src/<set> non supporté par la garde`.
+
+**Justification des exclusions :** le contrôle des noms dans AGP **9.5.0**, vérifié
+dans son JAR par l'orchestrateur de cette garde, interdit qu'un flavor porte le
+nom d'un build type (« ProductFlavor names cannot collide with BuildType names »)
+et interdit les préfixes `test` et `androidTest` (« … names cannot start with '%2$s' »).
+`debug` exact désigne donc le build type debug, pas un flavor ; la release du
+projet compile des variantes `<flavor>Release`. Les trois noms de test retenus
+désignent des source sets de test. Ces garanties ne couvrent pas un suffixe
+`Debug` : un flavor `internalDebug` peut participer à `internalDebugRelease`.
+Aucun préfixe ni suffixe ne suffit à élargir la liste fermée.
+
+La configuration inspectée comprend exclusivement :
+
+- `settings.gradle` et `settings.gradle.kts` de la racine ;
+- `build.gradle` et `build.gradle.kts` de la racine et de chaque projet inclus ;
+- `build-logic/settings.gradle(.kts)` et `build-logic/build.gradle(.kts)` ;
+- les fichiers `.kt`, `.kts` et `.java` de `build-logic/src/main/**`.
+
+La liste des **fichiers Gradle est fermée** : tout autre fichier `*.gradle` ou
+`*.gradle.kts`, même non chargé, échoue avec « fichier Gradle non couvert par la
+garde ». Cela couvre aussi les builds de projets non inclus et les scripts placés
+sous `build-logic/src/`. Un dossier `buildSrc/` à la racine est refusé, même vide.
+Le dépôt actuel contient 22 fichiers Gradle, tous dans la liste couverte.
+
+Dans un checkout Git, l'inventaire utilise `git ls-files` : fichiers suivis et
+fichiers non suivis non ignorés. Les caches locaux ignorés ne participent donc
+pas au contrôle. Sans Git, `find` parcourt le dépôt en excluant les dossiers
+`.git`, `build`, `.gradle`, `.gradle-user`, `.gradle-tmp` et `.kotlin`, à toute
+profondeur ; ces mêmes dossiers sont exclus de l'inventaire Git. Ce repli permet
+de contrôler un export sans supposer que ses autres scripts seraient inoffensifs.
+
+Tout lien symbolique, fichier ou dossier, relatif ou absolu, cassé ou non, est
+refusé dans les arbres `src/` des projets inclus, dans `build-logic/src/main/`
+et sur les chemins des fichiers de l'inventaire Gradle. Ce contrôle couvre aussi
+les dossiers parents de ces chemins, notamment le module et son dossier `src`.
+Le diagnostic est `::error::Hilt: <chemin relatif> : lien symbolique non supporté
+par la garde` ; les liens ne sont pas suivis.
+
+Hors fichiers Gradle soumis à cet inventaire, les autres source sets de
+`build-logic`, dont `src/test` et `src/roborazziTest`, ne sont pas lus. Les sources
+des projets non inclus ne participent pas à la dérivation.
+
+Hors commentaires et chaînes, tout identifiant exact parmi `sourceSets`,
+`getSourceSets`, `srcDir`, `srcDirs`, `setSrcDirs`, `getSrcDirs`, `setRoot`, `root`,
+`directories`, `getDirectories`, `sources`, `getSources`, `addSource`,
+`addStaticSourceDirectory`, `addGeneratedSourceDirectory`, `from`, `includeBuild`
+et `buildSrc` échoue avec
+« configuration de sources non supportée par la garde ». Dans les seuls fichiers
+`settings.gradle(.kts)`, ce refus couvre aussi `projectDir`, `setProjectDir` et
+`buildFileName`. La garde ne résout ni récepteur implicite, ni sélecteur, ni
+variante Gradle.
+
+Une **liste blanche explicite** dans le bloc `BEGIN` du script autorise seulement
+ces cinq couples (chemin relatif, ligne exacte après suppression des blancs de
+début et de fin) :
+
+| Fichier | Ligne autorisée |
+|---|---|
+| `core/database/build.gradle.kts` | `sourceSets {` |
+| `core/database/build.gradle.kts` | `assets.directories.add("$projectDir/schemas")` |
+| `build-logic/src/main/kotlin/fr/forumhfr/redface2/buildlogic/RedfaceAndroidRoborazziConventionPlugin.kt` | `sourceSets.getByName("test").kotlin.directories +=` |
+| `build-logic/settings.gradle.kts` | `from(files("../gradle/libs.versions.toml"))` |
+| `settings.gradle.kts` | `includeBuild("build-logic")` |
+
+Les deux premières lignes exposent les schémas Room aux tests ; la troisième
+ajoute le helper Roborazzi au source set `test`. Les deux dernières chargent le
+catalogue de versions et l'unique build inclus, dont la configuration est inspectée.
+Les autres chargements (`apply(from = …)`, `apply { from(…) }`, `apply from: …`,
+autre `includeBuild`) sont refusés. Une ligne modifiée, un commentaire
+ajouté à cette ligne ou la même ligne dans un autre fichier ne bénéficie pas de
+l'exception. Les lignes de continuation sont inspectées comme les autres lignes.
+
+Pour étendre les listes, un humain doit vérifier la configuration réelle et sa
+portée en release, modifier explicitement la liste concernée dans le script et
+ajouter des régressions : cas autorisé, ligne ou nom modifié, même ligne dans un
+autre fichier, archive synthétique sans le marqueur d'une contribution cachée.
+Un faux rouge sur une configuration nouvelle est accepté ; la garde ne devine
+pas qu'elle serait sans effet.
+
+- Pour **chaque classe `@HiltViewModel`**, y compris dans `app`, la garde exige les
+  octets du descripteur
+  `Lhilt_aggregated_deps/_<package_avec_des_underscores>_<Classe>_HiltModules_KeyModule;`.
+  Le package et le nom de classe sont lus dans les sources, après l'annotation.
+- Pour un **module contributeur sans ViewModel**, elle exige au moins un descripteur
+  commençant par `Lhilt_aggregated_deps/_<package_commun_avec_des_underscores>_`.
+  Ce package commun est dérivé des déclarations `package` de ses sources, jamais
+  de son chemin Gradle.
+- Pour **chaque classe `@HiltAndroidApp`**, elle exige aussi `Hilt_<Classe>`
+  (actuellement `Hilt_RedfaceApplication`).
+
+Dans `main`, les annotations simples (nom court ou qualifié)
+doivent viser une déclaration nommée au premier niveau du fichier. Les formes
+Kotlin `internal class`, Java `public final class`, les arguments d'annotations
+multilignes et les annotations intermédiaires sont reconnus. `@Module` et
+`@InstallIn` peuvent précéder un `object`, une `class` ou une `interface` ; les
+trois autres annotations exigent une `class`. La cible est la première déclaration
+qui suit, même si plusieurs déclarations partagent une ligne ; seuls les
+modificateurs reconnus et les autres annotations simples peuvent s'intercaler.
+
+Le lexer retire les chaînes avec échappements, les chaînes Kotlin triples
+multilignes (y compris leurs interpolations), les caractères, les commentaires
+`//` et les commentaires `/* … */` (imbriqués en Kotlin uniquement ; en Java,
+fermeture au premier `*/`). Le contenu des chaînes est conservé uniquement
+pour lire les `include(...)` littéraux des settings racine.
+Dans `main`, après analyse, chaque token `HiltViewModel`, `AndroidEntryPoint`, `HiltAndroidApp`
+et `InstallIn` hors imports et littéraux/commentaires doit correspondre à une
+contribution retenue. Les occurrences non appariées sont toutes signalées.
+
+Les annotations Hilt groupées (`@[HiltViewModel …]`), les cibles Hilt imbriquées
+(Kotlin ou Java), les alias d'import Hilt et les syntaxes non reconnues échouent
+avec `::error::`, le fichier, la ligne et « forme non supportée ». La garde ne
+déduit aucun nom de marqueur pour les classes imbriquées. Les noms de cibles
+doivent être des identifiants ASCII simples ; les échappements Unicode et les
+blocs texte Java sont refusés. Un humain doit réécrire la déclaration dans une
+forme reconnue ou étendre le parseur et ses régressions avant publication.
+
+**Hypothèse : DEX non minifié et non obfusqué.** La convention
+`RedfaceConventionPlugins.kt` impose `isMinifyEnabled = false` ; les fixtures
+release v371 à v377 ne sont pas minifiées. Si la minification est activée, cette
+garde devra être revue : revérifier la conservation des noms et des marqueurs dans
+les APK et AAB finaux, puis rejouer les cas sains et les pertes totales et partielles.
+
+**Limites :** la recherche porte sur des octets dans les DEX, sans vérifier les
+définitions de classes ni leur intégration au graphe de composants généré. Les
+autres liaisons `@Module` ne sont pas contrôlées individuellement ; une perte partielle
+de ces liaisons peut donc passer. La lecture statique n'est pas un parseur Kotlin
+ou Java complet. Les remappages explicites de projets dans les settings inspectés
+sont refusés par les tokens ci-dessus.
+Les init scripts Gradle (`init.gradle`, option `-I`, `~/.gradle/init.d`) restent
+hors de portée, tout comme l'ajout de sources dans une convention par une API
+de tâche non listée (par exemple `KotlinCompile.source(…)`). Ces chemins doivent
+être couverts par la garde et ses régressions avant toute adoption dans le projet.
+Les plugins tiers publiés (leur code n'est pas inspecté) et les sources générées
+pendant le build restent hors de portée. Une source ajoutée par un de ces plugins
+sans configuration de répertoire visible dans les fichiers inspectés peut donc
+échapper à la dérivation ; cette lecture statique ne garantit pas sa couverture.
+Utiliser un checkout correspondant au binaire.
+
+Depuis un checkout du code correspondant au binaire, contrôle manuel sans Gradle
+(Bash, `unzip`, `grep`, `find` et outils standard de l'image Android SDK du job) :
+
+```bash
+bash scripts/release/verify-hilt-artifact.sh /chemin/redface2.apk
+# Plusieurs APK/AAB peuvent être passés à la même commande.
+
+# Dérivation seule, sans APK/AAB (chemin du dépôt facultatif).
+bash scripts/release/verify-hilt-artifact.sh --list-expected
+
+# Régressions : dépôts et archives synthétiques dans mktemp -d, sans Gradle.
+# Le test requiert aussi zip ; aucun APK réel n'est construit.
+bash scripts/release/verify-hilt-artifact.test.sh
+```
+
+Le test compare les listes complètes et les diagnostics localisés, puis rejoue
+les contournements avec des archives synthétiques sans le marqueur caché. Des
+APK et AAB factices dont la dérivation est reconnue vérifient aussi le contrôle
+DEX : perte d'un ViewModel parmi deux, préfixe d'un module sans ViewModel,
+`Hilt_<Application>` manquant, et archive complète acceptée. Le test
+s'arrête au premier écart et n'est pas branché dans un workflow.
+
 ### Compatibilité Room et rollback
 
 Depuis le schéma Room **17**, `redface.db` contient les tables du substrat de cache des conversations

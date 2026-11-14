@@ -17,7 +17,7 @@ Voir SKILLS.md à la racine pour l'index humain des skills.
 
 ## Projet
 
-- État : bêta publique **0.68.0** (3 novembre 2026, F-Droid ; soumise à Google Play), canal dev aligné sur la bêta au 3 novembre 2026. Phases 0 à 3 de la [roadmap](docs/specs/roadmap.md) livrées, refonte UI de la phase 4 livrée (#603, #604, #876, #874, #1040). Le travail courant est suivi par **milestones de vue** (Vue · Topic 2, Éditeur 2, Drapeaux 2, Forum 1, MP 1, Réglages 1, Compte HFR 1, Infra & dette) ; les phases restent des épics thématiques. Fond ouvert : architecture d'extensions (#7), sync MPStorage entre appareils (#6).
+- État : bêta publique **0.70.0** (14 novembre 2026, F-Droid ; soumise à Google Play), canal dev aligné sur la bêta au 14 novembre 2026. Phases 0 à 3 de la [roadmap](docs/specs/roadmap.md) livrées, refonte UI de la phase 4 livrée (#603, #604, #876, #874, #1040). Le travail courant est suivi par **milestones de vue** (Vue · Topic 2, Éditeur 2, Drapeaux 2, Forum 1, MP 1, Réglages 1, Compte HFR 1, Infra & dette) ; les phases restent des épics thématiques. Fond ouvert : architecture d'extensions (#7), sync MPStorage entre appareils (#6).
 - Versions : `versionName` dans `app/build.gradle.kts`, une entrée par release dans `app/CHANGELOG.md`, notes Play dans `app/src/main/play/whatsnew/` ; le `versionCode` est alloué par la CD (tags `app-v<N>`, cf. `docs/guides/release.md`).
 - Licence : GPL-3.0-only
 - Documentation : GitHub Pages via `docs/` (Jekyll + just-the-docs)
@@ -71,9 +71,9 @@ Kotlin, Jetpack Compose, MVI, Compose Navigation 3, Hilt (KSP), OkHttp 5, Jsoup,
 ## Tests
 
 Tests bootstrappes en Phase 0 et consommes des Phase 1 :
-- **Konsist** (`app/src/test/.../ArchitectureKonsistTest.kt`) — frontières architecture, scope non vide. Vit dans `:app` : après un fix hors `:app`, relancer `:app:testProdDebugUnitTest --tests '*ArchitectureKonsistTest*' --rerun` (le task est sinon UP-TO-DATE). La règle « material tokens » interdit d'importer les types `androidx.compose.material3.ColorScheme`/`Typography`/`Shapes` hors `core/ui`, **tests des features compris** : lire `MaterialTheme.colorScheme` en place.
+- **Konsist** (`app/src/test/.../ArchitectureKonsistTest.kt`) — frontières architecture, scope non vide. Vit dans `:app` : les sources de tous les modules sont des entrées déclarées des tests de `:app` (#1619), donc un fix hors `:app` relance de lui-même `:app:testProdDebugUnitTest --tests '*ArchitectureKonsistTest*'` ; `--rerun` reste un forçage volontaire. La règle « material tokens » interdit d'importer les types `androidx.compose.material3.ColorScheme`/`Typography`/`Shapes` hors `core/ui`, **tests des features compris** : lire `MaterialTheme.colorScheme` en place.
 - **JUnit 4** + **Turbine** sur le parser (`core/parser/src/test/.../PostContentParserTest.kt`, `TopicPageParserTest.kt`) et les ViewModel slice (`feature/topic/src/test/.../TopicViewModelTest.kt`).
-- **MockK** et **Robolectric** consommés dans tout le repo (tests ViewModel/écrans, Compose Testing JVM, tests Roborazzi record de `:core:ui`).
+- **MockK** et **Robolectric** consommés dans tout le repo (tests ViewModel/écrans, Compose Testing JVM, captures Roborazzi comparées aux références versionnées de six modules, `verifyRoborazziDebug`).
 
 Strategie complete (TDD/spec/prototype par sous-chantier, fixtures, couverture differenciee) definie dans `docs/specs/methodology.md` et `docs/guides/contributing.md` :
 - Couverture **hybride differenciee** : 100% sur les transformers du parser HFR (fixtures dictent l'exhaustivite), guidee par risque ailleurs (ViewModels, mappers, repositories). **Pas d'objectif 100% global.**
@@ -117,7 +117,7 @@ Codex n'a pas de runner CI : c'est une **discipline**, signalée (pas imposée) 
 Le pipeline canonique (`choix techno → … → review`, `[advisory]`) est défini dans
 **`docs/specs/methodology.md` § Pipeline de développement** (source canonique) — `AGENTS.md` ne le
 redéfinit pas. Conséquences opérationnelles pour les agents :
-- **Validation** = reproduire la CI via le skill **`/validate`** ; **jamais `:app:testDevDebugUnitTest`
+- **Validation** = reproduire la CI via le skill **`/validate`** ; **jamais `:app:testProdDebugUnitTest`
   seul** (il compile mais n'exécute pas les tests des modules `feature`/`core`).
 - **Review** = Codex (cf. § Cadence Codex ci-dessus) + `/code-review`.
 

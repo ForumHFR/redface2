@@ -15,6 +15,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
 import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorWriteOwner
 import fr.forumhfr.redface2.core.network.cookie.CookieStore
 import fr.forumhfr.redface2.core.network.cookie.PersistentCookieJar
 import fr.forumhfr.redface2.core.network.di.NetworkModule
@@ -29,6 +30,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.currentCoroutineContext
 import okhttp3.Cookie
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
@@ -62,6 +64,7 @@ class HfrClientWriteOwnerTest(private val path: WritePath) {
     private lateinit var client: HfrClient
     private var beforeCookieSelection: () -> Unit = {}
     private var afterCookieSelection: () -> Unit = {}
+    private var witness: EditorWriteOwner? = null
 
     @Before
     fun setUp() {
@@ -129,11 +132,13 @@ class HfrClientWriteOwnerTest(private val path: WritePath) {
 
         binding.launch(binding.request(4_000, true) as SubmissionRequest.Accepted, Draft("body")) {
             if (switchBeforeClient) replaceAccount("bob")
+            witness = currentCoroutineContext()[EditorWriteOwner]
             path.submit(client, body())
             EditorDelivery(effect = Unit)
         }
 
         assertEquals("session", settled.await())
+        assertTrue(checkNotNull(witness).provesNoEmission)
         assertEquals("no HTTP request headers or body may reach HFR", 0, server.requestCount)
         assertEquals(EditorSubmissionState.Ready, binding.state)
         assertFalse(binding.blocksMutation)
@@ -200,11 +205,15 @@ class HfrClientWriteOwnerTest(private val path: WritePath) {
         server.enqueue(MockResponse().setBody("unexpected write"))
 
         binding.launch(binding.request(4_000, true) as SubmissionRequest.Accepted, Draft("body")) {
+            witness = currentCoroutineContext()[EditorWriteOwner]
             path.submit(client, body())
             EditorDelivery(effect = Unit)
         }
 
         val result = withContext(Dispatchers.Default) { withTimeout(5_000) { resolved.await() } }
+        assertTrue(checkNotNull(witness).provesNoEmission)
+        assertEquals(EditorSubmissionState.Ready, binding.state)
+        assertFalse(binding.isInitialized)
         assertEquals(StoreWriteResult.Written(1), result)
         assertEquals(0, server.requestCount)
         drafts.activeOwner = "alice"
@@ -220,6 +229,30 @@ class HfrClientWriteOwnerTest(private val path: WritePath) {
         assertTrue(runCatching { path.submit(client, body()) }.isFailure)
 
         assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun cancelledAttemptCannotCrossALateNetworkBoundary() = runTest {
+        val owner = EditorWriteOwner("alice")
+        assertTrue(owner.cancelBeforeEmission())
+        server.enqueue(MockResponse().setBody("unexpected write"))
+
+        assertTrue(runCatching { withContext(owner) { path.submit(client, body()) } }.isFailure)
+
+        assertTrue(owner.provesNoEmission)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun preparatoryGetNeverAdvancesThePostWitness() = runTest {
+        val owner = EditorWriteOwner("alice")
+        server.enqueue(MockResponse().setBody("unparsed preparation response"))
+
+        withContext(owner) { client.getReplyForm(cat = 23, subcat = 401, post = 35421, page = 1) }
+
+        assertTrue(owner.provesNoEmission)
+        assertEquals(1, server.requestCount)
+        assertEquals("GET", server.takeRequest().method)
     }
 
     private fun replaceAccount(owner: String) {

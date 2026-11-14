@@ -70,14 +70,21 @@ Quand un nouveau sujet arrive, commencer par cette question :
 
 Une fois le mode de travail choisi (matrice ci-dessus), l'ordre d'exécution canonique est :
 
-`choix techno → (Roborazzi baseline si refonte d'un écran existant) → développement → validation → (Roborazzi record/inspection si rendu UI) → review`
+`choix techno → (Roborazzi verify avant refonte) → développement → (Roborazzi verify, puis record explicite/inspection si changement visuel voulu) → validation → review`
 
 C'est `[advisory]` (une discipline, pas un gate dur — aucun runner CI ne l'impose) :
 
 - **Neuf** : techno (si API incertaine) → dev → validation → review.
-- **Refonte d'un écran existant** : capturer le rendu Roborazzi *avant* le changement (si un test existe déjà), puis record/inspection *après*. Le setup actuel est **record-only** (le plugin Gradle Roborazzi n'est pas applicable sous AGP 9 ; pas de `verify`) — cf. [contributing.md]({{ site.baseurl }}/guides/contributing#tests) et [ADR-016]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing).
+- **Refonte d'un écran existant** : vérifier les références Roborazzi *avant* le changement (si un
+  test existe déjà), puis vérifier *après*. Un changement visuel voulu nécessite un enregistrement
+  explicite sur box dans l'environnement épinglé et une relecture des PNG avant/après dans la PR.
+  `verify` est le défaut des tests unitaires ; `verifyRoborazziDebug` les agrège sur les six modules
+  couverts et fait partie du job CI `test`. Les références sont versionnées, la tolérance est de
+  zéro pixel et la CI ne les régénère jamais. Le mode opératoire reste dans
+  [contributing.md]({{ site.baseurl }}/guides/contributing#tests) ; décision dans
+  [ADR-016, évolution #1571]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing).
 - **Choix techno** : sur une API au statut incertain, consulter la doc officielle actuelle (Context7/Docfork, mot-clé *stable release*) ; ADR seulement pour une décision structurante.
-- **Validation** : reproduire la CI canonique en local via le skill **`/validate`** — la commande exacte et ses garde-fous (env Docker, `--rerun-tasks`, et « jamais `:app:testDevDebugUnitTest` seul ») y sont définis comme **source unique**, pour éviter deux formulations divergentes.
+- **Validation** : reproduire la CI canonique en local via le skill **`/validate`** — la commande exacte et ses garde-fous (env Docker, `--rerun-tasks`, et « jamais `:app:testProdDebugUnitTest` seul ») y sont définis comme **source unique**, pour éviter deux formulations divergentes.
 - **Review** : un agent distinct du producteur (cf. § Rôle du LLM) — en pratique Codex (cadrage avant un chantier non-trivial + relecture du diff + gate avant merge) puis `/code-review`. Les conséquences opérationnelles pour les agents (cadence Codex, méta-règle `[enforced]`/`[advisory]`) vivent dans [`AGENTS.md`](https://github.com/ForumHFR/redface2/blob/main/AGENTS.md) § Cadence de validation, qui pointe vers cette page comme source canonique.
 
 Exception au caractère `[advisory]` du pipeline : la **règle d'entretien de la matrice de parité de

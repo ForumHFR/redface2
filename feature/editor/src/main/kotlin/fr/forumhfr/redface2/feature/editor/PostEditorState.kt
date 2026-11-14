@@ -1,33 +1,35 @@
 package fr.forumhfr.redface2.feature.editor
-import fr.forumhfr.redface2.core.ui.editor.UploadError
-import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
-import androidx.compose.ui.text.input.TextFieldValue
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftOffer
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
-import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
-import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
-import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 /**
  * MVI state of the post-level editor. Local draft + parsed preview AST + the
  * write submit lifecycle. Reply (#145) and quote (#146) reach HFR through
  * `ReplyRepository` (POST `bddpost.php`) ; edit (#147) goes through
  * `EditPostRepository` (POST `bdd.php`). All three share this state. Topic-level
- * writes (edit FP #148 and create topic #149) live in [TopicFormState].
+ * writes (public edit FP #148 and create topic #149) live in [TopicFormState]. Private edits
+ * share this state, including a subject only when their first-message form exposes it.
  */
 data class PostEditorState(
     val mode: PostEditorMode,
-    val cat: Int,
+    val cat: Int?,
     val topicId: Int?,
     val numreponse: Int?,
     /** Page index of the topic for the reply form GET (Phase 2C). Null when unknown. */
     val page: Int?,
     /** Sub-category id required by HFR's write contract. Null when unknown — reply disabled. */
     val subcat: Int?,
+    /** ED-81: no field composition until the owner-bound read and rendering choice are complete. */
+    val isInitializing: Boolean = false,
     /**
      * #604 lot 3 (mockup P3) — the armed quote CARDS, in citation order. Seeded from
      * [PostEditorRequest.initialQuotes], reorderable / removable / clearable from the UI
@@ -36,26 +38,50 @@ data class PostEditorState(
      * (one implementation, `TopicReplyQuoteMaterializer`). Always empty in [PostEditorMode.Edit].
      */
     val quotes: List<QuoteSelection> = emptyList(),
-    val draft: TextFieldValue = TextFieldValue(),
+    /** ED-132: acknowledgement never abandons a requested inline quote. */
+    val pendingQuotes: List<QuoteSelection> = emptyList(),
+    /** Saturates at two; restored with the pending request after process death. */
+    val quoteFetchFailures: Int = 0,
+    /** ED-132: v20 Bundle coordinates were dropped, without importing them into Room. */
+    val legacyQuoteRequestDropped: Boolean = false,
+    /** Invalid/unreadable durable content cannot authorize submission. */
+    val quoteStorageUnavailable: Boolean = false,
+    val unreadableQuoteRequest: Boolean = false,
+    /** Display-only mirror of the ViewModel-owned body field. */
+    val bodyText: String = "",
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,
     val validation: BbcodeValidation = BbcodeValidation.Idle,
     /** True while we GET `message.php` (reply / quote / edit form) to grab `hash_check`. */
     val isLoadingForm: Boolean = false,
+    /** Binding mutation guard shared by reload and its chrome affordances, including owner invalidation. */
+    val blocksFormReload: Boolean = false,
+    /** Read identity of the quote GET; ED-132 starts it without waiting for a decision on the offer. */
+    val isFetchingQuote: Boolean = false,
+    /** The quote is in the field but its body + request CAS is not durable yet: no offer decision meanwhile. */
+    val quoteCommitPending: Boolean = false,
+    /** Availability is evidence from the private loadedForm, never inferred from a finished GET. */
+    val hasLoadedForm: Boolean = false,
+    val hasAuthenticatedForm: Boolean = false,
+    /** ED-10/Q4 provisional source: loaded form only, empty when HFR omits its subject. */
+    val topicTitle: String = "",
     /** True while we POST `bddpost.php` (reply / quote) or `bdd.php` (edit). Guards against double submit. */
     val isSubmitting: Boolean = false,
     /** ED-161/169: terminal success and in-flight reservation are state, never a replayed effect. */
     val submission: EditorSubmissionState = EditorSubmissionState.Ready,
     /** Surfaces an HFR-classified failure to the UI. Null means "no error to show". */
-    val submitError: SubmitError? = null,
+    val submitError: EditorError? = null,
     /**
-     * Tracks whether we already prefilled [draft] from `ReplyForm.initialContent`.
+     * Tracks whether we already prefilled [bodyText] from `ReplyForm.initialContent`.
      * Used by the ViewModel to make sure a stale form refetch (e.g. after
-     * `InvalidHashCheck`) does not overwrite the user's in-progress edit.
+     * `InvalidHashCheck`) does not overwrite the user's in-progress edit. A known
+     * empty server body or a non-blank restored draft also sets this flag.
      */
     val draftHydratedFromForm: Boolean = false,
     /** Exact untouched server prefill, used to distinguish hydration from a user edit (#1415). */
     val draftHydratedContent: String? = null,
+    /** ED-89: in-memory server body actually hydrated in Edit; null until known, empty in Reply. */
+    val draftRestoreSeed: String? = if (mode == PostEditorMode.Edit) null else "",
     /**
      * Per-post options the user can flip from the editor (Phase 2C, #146 round
      * 2 follow-up). Seeded from `ReplyForm.options` on the first form load and
@@ -92,13 +118,20 @@ data class PostEditorState(
     /** ED-164: UI projection of submission.Armed; the token carries identity and deadline. */
     val showSubmitConfirmation: Boolean = false,
     /**
-     * #405 — the body of a previously-cached draft for this editor's key, surfaced on init when a
-     * non-empty draft was found. Non-null means « propose a restore » : the UI shows a banner with
-     * « Restaurer » ([PostEditorIntent.DraftRestoreRequested]) and « Ignorer »
-     * ([PostEditorIntent.DraftDiscardRequested]). The draft is never silently applied so a fresh
-     * quote prefill is not clobbered ; it is also never silently lost — discarding deletes the row.
+     * #405 — the body of the most recent offered draft for this editor's key. Non-null means
+     * « propose a restore » : ↺ carries its dot and opens the offer sheet (ED-40), with « Restaurer »
+     * and « Ignorer ». A matching interrupted session resumes silently; an unrelated revision
+     * remains an explicit offer. ED-132: it never defers a quote request nor blocks « Envoyer ».
      */
     val restorableDraft: String? = null,
+    /** ED-40/121: every offered version, most recent first; a reply decides one by its identity. */
+    val draftOffers: List<DraftOffer> = emptyList(),
+    /** A Restore/Ignore write locks every offer until its result, including a failed result. */
+    val draftOfferDecisionPending: Boolean = false,
+    /** After a failed Restore, settle that merged offer before deciding a different one (ED-121). */
+    val draftOfferToResolveId: String? = null,
+    /** ED-10/85: a close could not save the field; the dialog asks before anything is abandoned. */
+    val showUnsavedCloseDialog: Boolean = false,
     /**
      * #459 PR2 — `true` while an image picked from the photo picker is being read + uploaded to the
      * selected host. The toolbar's image-upload affordance shows a progress indicator and is
@@ -107,9 +140,9 @@ data class PostEditorState(
     val isUploading: Boolean = false,
     /**
      * #459 PR2 — typed upload failure surfaced after a failed pick→read→upload. Null means « no
-     * error to show ». Cleared on a fresh content mutation or via [PostEditorIntent.UploadErrorDismissed].
+     * error to show ». Cleared only via [PostEditorIntent.UploadErrorDismissed].
      */
-    val uploadError: UploadError? = null,
+    val uploadError: EditorError? = null,
     /**
      * Multi-image upload — progress of the in-flight batch, or null when no batch (or a single
      * image) is uploading. [UploadProgress.total] > 1 is what the editor uses to show an « n/N »
@@ -118,7 +151,23 @@ data class PostEditorState(
     val uploadProgress: UploadProgress? = null,
     /** #1128 — observed continuously so the next image pick uses the current preference. */
     val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
+    val editorShortcut: EditorShortcut = EditorShortcut.NONE,
+    val target: PostEditorTarget = PostEditorTarget.Public,
+    /** Editable only when the private first-message form exposes its subject. */
+    val subject: String = "",
+    val isSubjectEditable: Boolean = false,
+    val subjectHydrated: Boolean = false,
+    val hasMessageTone: Boolean = true,
 ) {
+    val draftDecisionsEnabled: Boolean get() = !draftOfferDecisionPending && !quoteCommitPending
+
+    fun canDecideDraftOffer(id: String? = draftOffers.firstOrNull()?.id): Boolean =
+        draftDecisionsEnabled && (draftOfferToResolveId == null || draftOfferToResolveId == id)
+
+    /** A failed initial edit fetch keeps the body locked until reload or a non-blank restore. */
+    val isAwaitingInitialBody: Boolean
+        get() = mode == PostEditorMode.Edit && !draftHydratedFromForm
+
     /**
      * Submission is allowed when : we know the routing context (page + subcat + topicId),
      * the user has typed something non-blank, the editor is not already submitting,
@@ -135,61 +184,42 @@ data class PostEditorState(
             // #213 — reject the `null` unknown and the `-1` SUBCAT_UNKNOWN sentinel.
             // `subcat = 0` is postable (cat without sub-category, e.g. IA) — see
             // `Topic.subcat` / `Topic.canReply`.
-            (subcat != null && subcat >= 0) &&
-            topicId != null &&
+            hasRoutingContext &&
+            (!isSubjectEditable || subject.isNotBlank()) &&
             // #604 lot 3 — a quotes-only reply is sendable (same rule as the quick-reply
             // sheet : the materialised [quotemsg] blocks ARE the content). Edit keeps
             // requiring a non-blank body — its cards list is always empty.
-            (draft.text.isNotBlank() || (mode == PostEditorMode.Reply && quotes.isNotEmpty())) &&
-            !isSubmitting &&
+            (bodyText.isNotBlank() || (mode == PostEditorMode.Reply && quotes.isNotEmpty())) &&
+            !isAwaitingInitialBody &&
+            !isInitializing && !isSubmitting &&
             !submission.blocksBodyMutation &&
-            !isLoadingForm &&
+            !isLoadingForm && !quoteStorageUnavailable && pendingQuotes.isEmpty() &&
             !isUploading
+
+    private val hasRoutingContext: Boolean
+        get() = when (target) {
+            PostEditorTarget.Public -> cat != null && subcat != null && subcat >= 0 && topicId != null
+            is PostEditorTarget.PrivateMessage -> mode == PostEditorMode.Edit && page != null && page > 0 &&
+                numreponse != null && numreponse > 0
+        }
+
+    override fun toString(): String = "PostEditorState(mode=$mode, target=$target)"
+
+    val hasDormantQuote: Boolean
+        get() = pendingQuotes.isNotEmpty() && submission is EditorSubmissionState.Uncertain
+
+    val canRestoreDraft: Boolean
+        get() = !isInitializing && !quoteCommitPending && restoreSeedAvailable
+
+    private val restoreSeedAvailable: Boolean
+        get() = draftRestoreSeed != null && (mode != PostEditorMode.Edit || !isLoadingForm)
+
+    @Suppress("ComplexCondition") // Explicit recovery, or an eligible readable request, plus busy-state guards.
+    val canIgnorePendingQuote: Boolean
+        get() = (unreadableQuoteRequest ||
+            pendingQuotes.isNotEmpty() && (quoteFetchFailures >= 2 || hasDormantQuote)) &&
+            !isLoadingForm &&
+            !submission.blocksBodyMutation
 
     val isSubmitEnabled: Boolean get() = canSubmit
 }
-
-/**
- * UI-facing error envelope. The repository's [ReplyFailureReason] is the canonical
- * type — we wrap it here so transport-level failures (IO, session) can land alongside
- * the HFR-classified reasons without leaking exception types into the View.
- */
-sealed interface SubmitError {
-    /** A classified failure surfaced verbatim by HFR (see fixtures). */
-    data class Hfr(val reason: ReplyFailureReason) : SubmitError
-
-    /** ED-168/170: HFR may have accepted the write; never invite an automatic retry. */
-    data object Uncertain : SubmitError
-
-    /** ED-170: the durable attempt could not be written; no write repository was entered. */
-    data object DraftWriteFailed : SubmitError
-
-    /** Network / IO error. The draft is preserved ; the user can retry. */
-    data object Network : SubmitError
-
-    /** Auth cookie was rejected mid-flow. The UI prompts a fresh login. */
-    data object SessionExpired : SubmitError
-
-    /**
-     * The active topic page does not carry a `subcat` yet (cache pre-dates Phase 2C).
-     * The UI tells the user to refresh the topic first.
-     */
-    data object MissingSubcat : SubmitError
-}
-
-// #459 — UploadError / UploadProgress were born here and are now promoted to
-// `:core:ui` (core.ui.editor.EditorUpload) so the MP composers share the same
-// upload vocabulary as the topic-side editors.
-
-internal fun PostEditorState.withDraft(updated: TextFieldValue): PostEditorState =
-    copy(
-        draft = updated,
-        validation = validateBbcodeDraft(updated.text),
-        // Clear an error as soon as the user mutates the draft — they have implicitly
-        // accepted that we will try again. Keep it on toolbar-only mutations though
-        // (caller resets `submitError` directly when needed).
-        submitError = if (submitError != SubmitError.Uncertain && updated.text != draft.text) null else submitError,
-        // #459 PR2 — same rule for the image-upload error : a fresh text edit dismisses the stale
-        // banner. A successful upload INSERTS text via this path, which also clears any prior error.
-        uploadError = if (updated.text != draft.text) null else uploadError,
-    )

@@ -3,14 +3,17 @@ package fr.forumhfr.redface2.core.domain.diagnostics
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 
 /**
- * Records the platform-free image-picker boundary without retaining complete URI values. A result
- * with `count=0` cannot distinguish a deliberate cancellation from a picker failure because the
- * Activity Result callbacks expose no result code.
+ * Records the platform-free image-picker boundary without retaining complete URI values.
+ * Cancellation records only the contract and code; `result count=0` denotes a successful empty callback.
  */
 fun DiagnosticsLog.recordImagePickerEvent(event: ImagePickerEvent) {
     val message = when (event) {
         is ImagePickerEvent.Launched ->
             "launch mode=${event.mode.name} contract=${event.contract.diagnosticName}"
+        is ImagePickerEvent.Unavailable ->
+            "unavailable mode=${event.mode.name} contract=${event.contract.diagnosticName}"
+        is ImagePickerEvent.Cancelled ->
+            "cancelled contract=${event.contract.diagnosticName} resultCode=${event.resultCode}"
         is ImagePickerEvent.Result -> {
             val sources = event.uris
                 .map(DiagnosticRedactor::redactUriSource)

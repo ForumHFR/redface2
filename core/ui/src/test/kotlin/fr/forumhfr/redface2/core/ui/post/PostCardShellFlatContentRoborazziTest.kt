@@ -17,11 +17,11 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -34,12 +34,11 @@ import org.robolectric.annotation.GraphicsMode
  * three surface-bearing content blocks: a sourced quote, a spoiler and a code block. On the flat
  * transparent card those inner surfaces are the only figure/ground separation left — each capture
  * must show quote/spoiler/code keeping their own surfaces against the plain background, with the
- * hairline closing each post. Four record-only captures: dark standard, AMOLED, fontScale 2 and a
+ * hairline closing each post. Four reference captures: dark standard, AMOLED, fontScale 2 and a
  * narrow 320.dp column.
  *
- * Record-only dump for the review (not a blocking golden). Run on demand (writes PNGs under
- * `core/ui/build/outputs/roborazzi/`, gitignored — see the header of
- * [PostRendererQuoteRoborazziTest] for why the Roborazzi Gradle plugin is not applied) :
+ * References under `core/ui/src/test/screenshots/` are compared by default, including in CI.
+ * Add `-Proborazzi.mode=record` only for an intentional visual update:
  *
  *     ./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest \
  *         --tests '*PostCardShellFlatContentRoborazziTest*' --console=plain
@@ -107,7 +106,7 @@ class PostCardShellFlatContentRoborazziTest {
                 }
             }
         }
-        composeTestRule.onRoot().captureRoboImage(filePath = "build/outputs/roborazzi/$name.png")
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/$name.png")
     }
 
     /**

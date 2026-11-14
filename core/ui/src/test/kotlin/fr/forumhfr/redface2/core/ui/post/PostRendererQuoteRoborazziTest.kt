@@ -11,11 +11,11 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -32,18 +32,15 @@ import org.robolectric.annotation.GraphicsMode
  * does not change the rendering — which invalidates the "stale AST" hypothesis and points at
  * a runtime rendering issue.
  *
- * These captures are not yet golden references gated in CI. They run on demand via :
+ * These captures are compared with versioned references by default (#1571):
  *
  *     ./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest \
  *         --tests '*PostRendererQuoteRoborazziTest*' --console=plain --no-daemon
  *
- * The Roborazzi Gradle plugin is **not** applied (AGP 9 incompatibility, cf.
- * takahirom/roborazzi#781), so the usual `recordRoborazziDebug` task does not exist —
- * `roborazzi.test.record=true` is forced via `systemProperty` in `core/ui/build.gradle.kts`
- * so the plain `:core:ui:testDebugUnitTest` task is enough to write the PNGs. Output lands
- * under `core/ui/build/outputs/roborazzi/` (gitignored). The intent is a fast visual
- * feedback loop for the AMOLED quote diagnostic without having to flash the AAB to a device
- * between every iteration.
+ * The repository convention forwards record/verify properties without the upstream Gradle plugin.
+ * References live under `core/ui/src/test/screenshots/`; update them intentionally by adding
+ * `-Proborazzi.mode=record`, then review the before/after PNGs. Verify writes failure images only
+ * under `build/outputs/roborazzi/<task>/`. No device is required.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
@@ -62,7 +59,7 @@ class PostRendererQuoteRoborazziTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/post_renderer_quote_amoled_simple.png",
+            filePath = "src/test/screenshots/post_renderer_quote_amoled_simple.png",
         )
     }
 
@@ -74,7 +71,7 @@ class PostRendererQuoteRoborazziTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/post_renderer_quote_amoled_nested.png",
+            filePath = "src/test/screenshots/post_renderer_quote_amoled_nested.png",
         )
     }
 
@@ -100,7 +97,7 @@ class PostRendererQuoteRoborazziTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/post_renderer_quote_light_simple.png",
+            filePath = "src/test/screenshots/post_renderer_quote_light_simple.png",
         )
     }
 
@@ -126,7 +123,7 @@ class PostRendererQuoteRoborazziTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/post_renderer_quote_bare_vs_sourced_light.png",
+            filePath = "src/test/screenshots/post_renderer_quote_bare_vs_sourced_light.png",
         )
     }
 
@@ -138,7 +135,7 @@ class PostRendererQuoteRoborazziTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/post_renderer_quote_bare_vs_sourced_amoled.png",
+            filePath = "src/test/screenshots/post_renderer_quote_bare_vs_sourced_amoled.png",
         )
     }
 
@@ -165,7 +162,7 @@ class PostRendererQuoteRoborazziTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/post_renderer_long_quote_folded_light.png",
+            filePath = "src/test/screenshots/post_renderer_long_quote_folded_light.png",
         )
     }
 

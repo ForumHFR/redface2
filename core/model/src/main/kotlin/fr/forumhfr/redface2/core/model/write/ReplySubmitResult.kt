@@ -36,7 +36,12 @@ sealed interface ReplySubmitResult {
         val targetPage: Int?,
         val numreponse: Int? = null,
         val topicId: Int? = null,
-    ) : ReplySubmitResult
+    ) : ReplySubmitResult {
+        // Shared with MP submissions: the opaque URL and coordinates may contain private data.
+        override fun toString(): String =
+            "Success(hasRefreshUrl=${refreshUrl != null}, hasTargetPage=${targetPage != null}, " +
+                "hasNumreponse=${numreponse != null}, hasTopicId=${topicId != null})"
+    }
 
     /** HFR refused to post and surfaced one of the known reasons. */
     data class Failure(val reason: ReplyFailureReason) : ReplySubmitResult

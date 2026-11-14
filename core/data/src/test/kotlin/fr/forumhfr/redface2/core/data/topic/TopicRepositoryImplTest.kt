@@ -27,6 +27,8 @@ import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorPreviewKey
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
@@ -618,6 +620,11 @@ class TopicRepositoryImplTest {
     private class FakeUserPreferencesRepository(
         ignoreTopicCacheInitial: Boolean = false,
     ) : UserPreferencesRepository {
+        override fun observeEditorPreviewPositions(): Flow<Map<EditorPreviewKey, Float>> =
+            MutableStateFlow(emptyMap())
+
+        override suspend fun setEditorPreviewPosition(key: EditorPreviewKey, sourceDp: Float) = Unit
+
         private val ignoreTopicCache = MutableStateFlow(ignoreTopicCacheInitial)
 
         override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
@@ -697,6 +704,10 @@ class TopicRepositoryImplTest {
         private val imagePickerMode = MutableStateFlow(ImagePickerMode.DEFAULT)
 
         override fun observeImagePickerMode(): Flow<ImagePickerMode> = imagePickerMode
+
+        override fun observeEditorShortcut(): Flow<EditorShortcut> = MutableStateFlow(EditorShortcut.NONE)
+
+        override suspend fun setEditorShortcut(shortcut: EditorShortcut) = Unit
 
         override suspend fun setImagePickerMode(mode: ImagePickerMode) {
             imagePickerMode.value = mode

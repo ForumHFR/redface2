@@ -16,6 +16,208 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.70.0` — `open` (bêta) — 2026-11-14
+
+Promotion bêta du lot développé en dev de `0.69.0` à `0.69.24`, depuis la précédente bêta `0.68.0`. Le détail par version dev figure dans les entrées ci-dessous. Contenu :
+
+- **Éditeur refait** ([#1417](https://github.com/ForumHFR/redface2/issues/1417)) : la réponse et la modification d'un post, la création et la modification d'un sujet, la réponse MP et le nouveau MP passent par un même éditeur.
+  - En haut : une app bar (« Répondre », « Modifier », catégorie du sujet, « Nouveau message ») et un panneau d'en-tête. Il porte le titre et la sous-catégorie d'un sujet ; pour un MP, les destinataires en puces et le sujet limité à 70 caractères.
+  - En bas : une barre d'action avec les rangées Format, Couleur et Image, et un bouton d'envoi en avion en papier. Un raccourci configurable s'y ajoute (réglage « Édition et publication », « Aucun » par défaut).
+  - Les citations en cartes passent dans un panneau (❝ N). L'aperçu s'ouvre à côté du texte et se masque pendant la frappe.
+  - Une feuille Options à deux onglets, Options et Formats, propose douze formats, dont Puce et E-mail, nouveaux. Le ton du message est refait et les icônes sont plus fines.
+  - Après une rotation ou un arrêt de l'app par le système, l'éditeur reprend le texte, la sélection, le défilement et l'en-tête. Le texte d'un MP ne passe jamais par l'état sauvegardé du système.
+- **Brouillons et citations** ([#1450](https://github.com/ForumHFR/redface2/issues/1450), [#1553](https://github.com/ForumHFR/redface2/issues/1553), [#1616](https://github.com/ForumHFR/redface2/issues/1616)) :
+  - « Citer » insère la citation tout de suite, même quand un brouillon non envoyé existe. Ce brouillon attend sous ↺ et n'est jamais restauré d'office. La feuille ↺ liste les brouillons avec leur date et un extrait. « Restaurer » les remet ; « Ignorer » en retire un et laisse la feuille ouverte s'il en reste.
+  - Une demande de citation survit à l'arrêt de l'app.
+  - Le panier multi-citation se vide dès que les citations sont enregistrées dans le brouillon, à condition qu'elles soient encore dans le champ.
+  - Si le brouillon ne peut pas être enregistré à la fermeture d'un éditeur plein écran ou de la réponse rapide, l'app demande « Rester » ou « Quitter sans enregistrer » au lieu de perdre la saisie.
+- **Modifier un message** : le texte est verrouillé tant que le message d'origine n'est pas chargé. Un message ne peut plus être écrasé par un texte tapé trop tôt.
+- **Envoi** ([#1456](https://github.com/ForumHFR/redface2/issues/1456), [#1437](https://github.com/ForumHFR/redface2/issues/1437)) :
+  - Une coupure prouvée avant le départ du message affiche une erreur réseau, et le message peut être renvoyé. Après un départ possible, l'envoi reste « incertain » : il faut vérifier avant de renvoyer.
+  - Les textes d'erreur sont réécrits et communs aux cinq éditeurs.
+  - L'offre « Dernière page » apparaît aussi quand le rechargement après envoi est lent.
+- **MP : modifier ses propres messages** ([#1625](https://github.com/ForumHFR/redface2/issues/1625)) : « Modifier » apparaît dans le menu « … » de ses messages, en 1:1 comme à plusieurs, y compris quand HFR ne fournit pas le lien d'édition. Au retour, la page est rafraîchie et « Message modifié » s'affiche.
+- **Feuilles** ([#1630](https://github.com/ForumHFR/redface2/pull/1630)) : plus aucune feuille ne s'arrête à mi-hauteur. Les feuilles ouvertes clavier visible prennent leur taille d'après la position finale du clavier.
+- **Visionneuse** ([#1411](https://github.com/ForumHFR/redface2/issues/1411), [#1309](https://github.com/ForumHFR/redface2/issues/1309)) :
+  - Un seul GIF animé est décodé à la fois, ce qui supprime les gels et les ANR sur les appareils à faible mémoire.
+  - Un balayage vertical sur une image zoomée ne fait plus réapparaître la barre d'actions.
+- **Lecture et aperçu** ([#1447](https://github.com/ForumHFR/redface2/issues/1447), [#1452](https://github.com/ForumHFR/redface2/issues/1452)) :
+  - Depuis « cité N fois », un seul Back ramène au post de départ.
+  - Une image placée dans un lien ou un style s'affiche dans l'aperçu comme dans le sujet.
+- **Corrections de la revue de promotion** ([#1651](https://github.com/ForumHFR/redface2/pull/1651)) :
+  - Un brouillon dont l'envoi est resté incertain n'est plus effacé au bout de 30 jours ; il reste jusqu'à ce qu'on le traite. Le défaut existait depuis la 0.68.0 ([#1652](https://github.com/ForumHFR/redface2/pull/1652)).
+  - La modification d'un MP n'écrit plus les images de son aperçu dans le cache disque ([#1652](https://github.com/ForumHFR/redface2/pull/1652)).
+  - Si les brouillons ↺ ne peuvent pas être lus à l'ouverture d'un éditeur, un envoi incertain s'affiche avec son texte au lieu d'être écrasé par la frappe ([#1653](https://github.com/ForumHFR/redface2/pull/1653)).
+- **Technique** :
+  - Material 3 passe en `1.5.0-beta02`, sur la BOM Compose stable. Conséquence visible : après un arrêt du doigt, il faut tirer une feuille au-delà de la moitié pour la fermer. Porte Gm : en dev depuis le 6/11 sans retour bloquant.
+  - KSP est épinglé en 2.3.12, et la CD refuse un build auquel manquent des modules Hilt ([#1581](https://github.com/ForumHFR/redface2/issues/1581)).
+  - Les captures Roborazzi sont comparées à des références versionnées.
+  - La CI est plus rapide ([#1619](https://github.com/ForumHFR/redface2/issues/1619)).
+- Limites connues :
+  - Après le retrait ou le déplacement d'une carte de citation, le focus TalkBack n'est pas encore replacé.
+  - Sur émulateur, un saut reste visible quand le clavier se ferme sous une feuille ouverte.
+
+---
+
+## `0.69.24` — `internal` (dev) — 2026-11-14
+
+Smileys ([#1417](https://github.com/ForumHFR/redface2/issues/1417)) : à la demande de XaTriX, la feuille des smileys reprend la hauteur de chaque onglet, comme avant la 0.69.19 ; la hauteur commune aux trois onglets (PR [#1630](https://github.com/ForumHFR/redface2/pull/1630)) est retirée. Les autres feuilles gardent leur cran unique. Édition MP ([#1625](https://github.com/ForumHFR/redface2/issues/1625), PR [#1647](https://github.com/ForumHFR/redface2/pull/1647)) : quand HFR ne fournit pas le lien d'édition d'un de ses propres messages, le menu « … » propose quand même « Modifier » dans une conversation où l'on peut répondre, sauf sur le message de la page précédente repris en tête de page ; le menu relit le message affiché après un rafraîchissement, et une lecture MPStorage en échec est retentée au rafraîchissement.
+
+## `0.69.23` — `internal` (dev) — 2026-11-14
+
+Brouillons proposés sous ↺ ([#1417](https://github.com/ForumHFR/redface2/issues/1417), PR [#1645](https://github.com/ForumHFR/redface2/pull/1645)) : quand il y en a plusieurs, « Ignorer » en retire un et laisse la feuille ouverte, dans l'éditeur de post, le formulaire de sujet et les deux éditeurs MP. La feuille se ferme quand il n'en reste plus ; « Restaurer » la ferme toujours. Pendant l'enregistrement d'un choix, les boutons sont désactivés un instant. Citations (PR [#1644](https://github.com/ForumHFR/redface2/pull/1644)) : à la fermeture et au « Recharger » de l'éditeur de post, et dans l'éditeur de réponse MP (fermeture, « Ignorer », « Recharger »), une livraison de citations ne vide le panier que si toutes les citations sont encore dans le champ ; sinon le panier reste entier et le texte saisi est enregistré.
+
+## `0.69.22` — `internal` (dev) — 2026-11-14
+
+« Ignorer » une citation ([#1417](https://github.com/ForumHFR/redface2/issues/1417), PR [#1642](https://github.com/ForumHFR/redface2/pull/1642)) : si la citation insérée a été effacée du champ, « Ignorer » ne vide plus le panier, dans la réponse rapide comme dans l'éditeur de post ; le texte saisi est alors enregistré dans le brouillon.
+
+## `0.69.21` — `internal` (dev) — 2026-11-14
+
+Décisions de XaTriX sur l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417), PR [#1640](https://github.com/ForumHFR/redface2/pull/1640)). Réponse rapide : « Ignorer » sur une citation déjà insérée dans le champ la garde dans le texte et vide le panier, comme dans l'éditeur de post. Sans citation insérée, ou si l'enregistrement échoue, le panier reste armé. Édition du premier post d'un sujet : « Restaurer » reprend le titre du brouillon tant que le titre affiché est celui servi par HFR ; un titre modifié à la main reste prioritaire. Édition MP ([#1625](https://github.com/ForumHFR/redface2/issues/1625)) : la réponse de HFR à l'envoi d'une édition est maintenant capturée sur un vrai envoi (PR [#1637](https://github.com/ForumHFR/redface2/pull/1637)) et reconnue comme un succès ; le retour au fil est lié au compte qui a envoyé, et le brouillon d'un message autre que le premier n'enregistre plus le sujet de la conversation (PR [#1639](https://github.com/ForumHFR/redface2/pull/1639)).
+
+## `0.69.20` — `internal` (dev) — 2026-11-14
+
+Éditer son propre message en MP ([#1625](https://github.com/ForumHFR/redface2/issues/1625), PR [#1634](https://github.com/ForumHFR/redface2/pull/1634) et [#1635](https://github.com/ForumHFR/redface2/pull/1635)) : le menu « … » d'un message MP propose « Modifier » sur ses propres messages, en 1:1 comme à plusieurs. L'éditeur de post s'ouvre en mode édition, avec le sujet éditable au premier message ; brouillon, restauration et fermeture suivent les règles de l'éditeur. Au retour, la page éditée est rafraîchie et l'accusé « Message modifié » s'affiche. La réponse de HFR à l'envoi d'une édition MP n'a pas encore été observée : si elle n'est pas reconnue, l'app l'annonce comme incertaine au lieu d'un succès.
+
+## `0.69.19` — `internal` (dev) — 2026-11-14
+
+Remarques de XaTriX sur la 0.69.11 ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), suite. Ton du message (PR [#1626](https://github.com/ForumHFR/redface2/pull/1626)) : deux lignes de 8 à toutes les largeurs, sprites à échelle entière, nets. Envoi dans un sujet ([#1437](https://github.com/ForumHFR/redface2/issues/1437), PR [#1627](https://github.com/ForumHFR/redface2/pull/1627)) : quand la réponse ouvre une nouvelle page, l'accusé porte « Dernière page » dès le premier affichage au lieu de s'afficher deux fois. Réponse rapide ([#1450](https://github.com/ForumHFR/redface2/issues/1450), PR [#1629](https://github.com/ForumHFR/redface2/pull/1629)) : la feuille attend l'enregistrement du brouillon avant de se fermer ; si l'enregistrement échoue, « Rester » ou « Quitter sans enregistrer », comme dans les éditeurs plein écran. Multi-citation ([#1616](https://github.com/ForumHFR/redface2/issues/1616)) : le panier se vide dès que les citations sont enregistrées dans le brouillon, sans attendre l'envoi. Feuilles ([#1417](https://github.com/ForumHFR/redface2/issues/1417), PR [#1630](https://github.com/ForumHFR/redface2/pull/1630)) : plus aucune feuille n'a de cran à mi-hauteur (menus d'un post, d'une image, d'un message MP, participants, profil, sélecteurs de page) ; la feuille des smileys garde la même hauteur quel que soit l'onglet ; la feuille Options des éditeurs MP montre environ cinq formats au lieu de trois. Nouveau sujet et nouveau MP (PR [#1631](https://github.com/ForumHFR/redface2/pull/1631)) : tant qu'un brouillon ↺ est proposé, le titre et les destinataires saisis sont enregistrés, et « Ignorer » ne les efface plus.
+
+## `0.69.18` — `internal` (dev) — 2026-11-13
+
+Feuille Options des éditeurs ([#1417](https://github.com/ForumHFR/redface2/issues/1417), [#1513](https://github.com/ForumHFR/redface2/issues/1513), [#1516](https://github.com/ForumHFR/redface2/issues/1516)) : deux onglets « Options | Formats » à hauteur stable, un seul cran, Retour ferme en un geste. Onglet Options : « Réglages de l'éditeur » en haut, qui nomme le raccourci de la barre, puis le ton du message (réponse, sujet), puis signature, smileys et notification. Onglet Formats : les douze formats avec leur effet, appliqués à la sélection ; Couleur en cinq teintes. La feuille rouvre toujours sur Options. Tagbug DEV #2805926 : les feuilles Options, smileys et ↺ ouvertes clavier visible se dimensionnent sur la position finale du clavier au lieu de suivre son retrait image par image (à confirmer sur appareil : un saut reste visible sur émulateur).
+
+## `0.69.17` — `internal` (dev) — 2026-11-13
+
+Remarques de XaTriX sur la 0.69.11 ([#1417](https://github.com/ForumHFR/redface2/issues/1417)). Aperçu ([#1452](https://github.com/ForumHFR/redface2/issues/1452), PR [#1618](https://github.com/ForumHFR/redface2/pull/1618)) : une image insérée dans un lien ou un style (`[url=…][img]…[/img][/url]`, forme par défaut de l'upload) s'affiche comme dans le sujet ; une image en échec est réessayée à chaque ouverture de l'aperçu. Rangée des formats ([#1513](https://github.com/ForumHFR/redface2/issues/1513), PR [#1620](https://github.com/ForumHFR/redface2/pull/1620)) : Gras, Italique, Souligné, Barré, Lien, Spoiler, Couleur, Puce, Citation, Code, Bloc fixé, E-mail ; Puce et E-mail sont nouveaux, aussi proposés comme raccourci ; la lecture garde les puces des listes HFR. Réglages ([#1516](https://github.com/ForumHFR/redface2/issues/1516), PR [#1621](https://github.com/ForumHFR/redface2/pull/1621)) : la feuille Options des éditeurs plein écran se termine par « Réglages de l'éditeur », qui ouvre Édition et publication ; Retour revient à l'éditeur intact, la barre du bas reste cachée. Ton du message ([#1513](https://github.com/ForumHFR/redface2/issues/1513), PR [#1622](https://github.com/ForumHFR/redface2/pull/1622)) : grille refaite, nom du ton dans l'en-tête, seize noms lus, cases de 48 dp, sprites nets, 6 ou 8 colonnes selon la largeur.
+
+## `0.69.16` — `internal` (dev) — 2026-11-13
+
+Citation visible partout, brouillon sous ↺ ([#1450](https://github.com/ForumHFR/redface2/issues/1450), PR [#1614](https://github.com/ForumHFR/redface2/pull/1614) et [#1615](https://github.com/ForumHFR/redface2/pull/1615)) : « Citer » insère la citation tout de suite, en réponse à un sujet comme en MP, même quand un brouillon non envoyé existe ; ce brouillon reste sous ↺, signalé par un point, jamais restauré d'office, et « Envoyer » n'est plus bloqué par lui. La feuille de ↺ liste les brouillons avec leur date et un extrait de deux lignes. « Restaurer » remet le brouillon, puis les citations dans l'ordre, puis la saisie. Une citation seule, non modifiée, ne devient pas un brouillon. Les brouillons offerts sont désormais durables (gardés après un envoi fait sans ouvrir ↺). Fermeture des quatre éditeurs plein écran : si le brouillon ne peut pas être enregistré (stockage en échec, conflit, saisie pendant l'écriture), l'éditeur reste ouvert et demande « Rester » ou « Quitter sans enregistrer » au lieu de perdre la saisie en silence.
+
+## `0.69.15` — `internal` (dev) — 2026-11-12
+
+Bouton d'envoi de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417), PR [#1612](https://github.com/ForumHFR/redface2/pull/1612)) : la pilule « Envoyer » devient un avion en papier dans un rond de 48 dp (40 dp en paysage avec le clavier), dans les éditeurs plein écran (réponse, nouveau sujet, MP, modification). La barre gagne de la place pour les formats ; armé par « Confirmation avant publication », le bouton passe à une coche ; un appui long affiche « Envoyer » ou « Confirmer l'envoi ». La réponse rapide garde son bouton texte.
+
+## `0.69.14` — `internal` (dev) — 2026-11-12
+
+Icônes de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417), PR [#1610](https://github.com/ForumHFR/redface2/pull/1610)) : le trait passe de 2,5 à 2 dp sur les icônes propres à l'éditeur, B compris, plus proche de la graisse des Material Symbols ; la barre paraît moins grasse et le B se distingue de I, U et S. La flèche retour, les chevrons et le crayon, partagés avec le reste de l'app, restent à 2,5 en attendant une décision sur la portée.
+
+## `0.69.13` — `internal` (dev) — 2026-11-12
+
+Suite du correctif de l'éditeur ([#1450](https://github.com/ForumHFR/redface2/issues/1450), PR [#1608](https://github.com/ForumHFR/redface2/pull/1608)) : l'offre de brouillon ↺ s'ouvre en feuille du bas, et l'information « Brouillon retrouvé, citation en attente » disparaît seule.
+
+- **Offre de brouillon** : dans la réponse et la modification d'un post, le nouveau sujet, la réponse MP et le nouveau MP, ↺ ouvre une feuille du bas avec Restaurer et Ignorer, plus la mention « Citation en attente » quand une citation attend. Elle ne s'ouvre jamais d'elle-même ; la fermer sans choisir garde ↺. Nouvelle icône (symbole Material `restore_page`). La réponse rapide est inchangée.
+- **« Brouillon retrouvé, citation en attente »** : l'information se retire seule après 5 s, davantage si le délai d'accessibilité d'Android est allongé, en ne comptant que le temps où l'éditeur est à l'écran. Un premier tap sur ↺ ouvre directement la feuille.
+
+## `0.69.12` — `internal` (dev) — 2026-11-11
+
+Correctif de l'éditeur de réponse ([#1450](https://github.com/ForumHFR/redface2/issues/1450), PR [#1606](https://github.com/ForumHFR/redface2/pull/1606)) : « Citer » alors qu'un brouillon attend une décision charge de nouveau le formulaire (titre du sujet, favoris HFR, Envoyer). La citation attend Restaurer ou Ignorer, signalée par « Citation en attente », puis s'insère une seule fois.
+
+## `0.69.11` — `internal` (dev) — 2026-11-11
+
+Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)) : le nouveau chrome arrive sur les quatre éditeurs. Lots R1a-1 ([#1513](https://github.com/ForumHFR/redface2/issues/1513)), R1a-2 ([#1450](https://github.com/ForumHFR/redface2/issues/1450)), R1b-1 ([#1451](https://github.com/ForumHFR/redface2/issues/1451)), R1b-2a ([#1514](https://github.com/ForumHFR/redface2/issues/1514)), R1b-2b ([#1515](https://github.com/ForumHFR/redface2/issues/1515)), R2a et R2b ([#1452](https://github.com/ForumHFR/redface2/issues/1452)), R6 ([#1516](https://github.com/ForumHFR/redface2/issues/1516)) ; PR [#1583](https://github.com/ForumHFR/redface2/pull/1583) à [#1603](https://github.com/ForumHFR/redface2/pull/1603).
+
+- **Nouveau chrome** : la réponse et la modification d'un post, la création et la modification d'un sujet, la réponse MP et le nouveau MP passent par le même éditeur. App bar (« Répondre », « Modifier », catégorie du sujet, « Nouveau message »), barre d'action en bas avec les rangées Format, Couleur et Image, panneau d'en-tête (titre et sous-catégorie du sujet, destinataires et sujet du MP). L'ancien chrome est supprimé.
+- **Reprise** : après une rotation ou la fermeture de l'app par le système, l'éditeur reprend le texte, la sélection, le défilement et l'en-tête. Le texte d'un MP ne passe jamais par l'état sauvegardé du système.
+- **Nouveau MP** : destinataires en puces, validées par la virgule, collage d'une liste accepté ; sujet limité à 70 caractères avec compteur ; « Compléter » sur un destinataire inconnu.
+- **Citations** : en mode cartes, les cartes quittent la tête du champ pour le panneau des citations (icône ❝ N de l'app bar), qui annonce ses changements à TalkBack.
+- **Aperçu** : il s'ouvre à côté du texte, dessous en portrait et à droite en paysage, avec un séparateur redimensionnable. Le clavier reste prioritaire : pendant la frappe, l'aperçu est masqué, puis revient à la fermeture du clavier.
+- **Raccourci de la barre d'action** : nouveau réglage dans « Édition et publication », « Aucun » par défaut, pour placer une action dans la barre (lien, image, smiley perso…). « Smiley perso » insère `[:]` ou enrobe la sélection.
+- **Publication** : la CD refuse un APK ou un AAB auquel manquent des modules Hilt ([#1582](https://github.com/ForumHFR/redface2/pull/1582)).
+- Suivi connu : focus TalkBack après le retrait ou le déplacement d'une carte de citation ([#1599](https://github.com/ForumHFR/redface2/issues/1599)).
+
+## `0.69.10` — `internal` (dev) — 2026-11-09
+
+Correctif de la 0.69.9 : le build publié `app-v376` démarrait en crash. Il lui manquait les modules Hilt de `feature:topic`, perdus par une régression de KSP 2.3.13 lors de la génération de code ([google/ksp#3286](https://github.com/google/ksp/issues/3286)). Le code de l'app n'est pas en cause.
+
+- **Build** : retour à KSP 2.3.12 ; Dependabot ignore KSP 2.3.13.
+- Contenu fonctionnel identique à la 0.69.9 (#1574), plus deux changements sans effet visible : captures Roborazzi comparées à des références ([#1575](https://github.com/ForumHFR/redface2/pull/1575)) et annulation du sélecteur d'images sans message d'erreur ([#1578](https://github.com/ForumHFR/redface2/pull/1578)).
+
+## `0.69.9` — `internal` (dev) — 2026-11-09
+
+Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0c ([#1512](https://github.com/ForumHFR/redface2/issues/1512)) : correctif relevé pendant la recette sur appareil ([#1574](https://github.com/ForumHFR/redface2/pull/1574)).
+
+- **Modifier un message** : le texte est verrouillé tant que le message d'origine n'est pas chargé (frappe, insertions et images refusées, envoi impossible) ; un formulaire incomplet est refusé et « Recharger » est proposé. Corrige le remplacement d'un message entier par un texte tapé avant le chargement.
+
+## `0.69.8` — `internal` (dev) — 2026-11-08
+
+Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0c ([#1512](https://github.com/ForumHFR/redface2/issues/1512)) : éditeur de post ([#1567](https://github.com/ForumHFR/redface2/pull/1567)) et deux correctifs ([#1568](https://github.com/ForumHFR/redface2/pull/1568), [#1569](https://github.com/ForumHFR/redface2/pull/1569)).
+
+- **Éditeur de post** : le champ de texte appartient désormais au ViewModel. Chaque action de la barre d'outils ou smiley s'annule en un pas ; une frappe pendant un envoi armé le désarme ; les citations chargées pendant un upload s'insèrent une seule fois, après l'upload.
+- **Modification du premier post** : le corps est verrouillé tant que le texte du serveur n'est pas chargé (frappe, insertions et images refusées, envoi impossible) ; un formulaire incomplet est refusé et « Recharger » est proposé. Corrige l'écrasement du premier post par un texte partiel tapé avant le chargement.
+- **MP** : une offre de brouillon sans corps (destinataire ou sujet seuls) ne touche plus au texte en cours ; « Restaurer » est inactif pendant un envoi, dans le nouveau MP et la réponse MP.
+
+## `0.69.7` — `internal` (dev) — 2026-11-08
+
+Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)) : demande de citation durable ([#1553](https://github.com/ForumHFR/redface2/issues/1553) ; [#1564](https://github.com/ForumHFR/redface2/pull/1564)) et lot R0c, partie 3 ([#1512](https://github.com/ForumHFR/redface2/issues/1512) ; [#1565](https://github.com/ForumHFR/redface2/pull/1565)).
+
+- **Citations** : une demande de citation survit à la mort du processus ; la feuille de réponse rapide propose « Recharger » et « Ignorer la citation » ; l'agrandissement vers l'éditeur complet est inactif tant que l'offre de brouillon n'est pas tranchée.
+- **Éditeur de post, brouillon** : « Restaurer » suit la règle commune aux éditeurs (graine intacte remplacée, texte tapé après elle gardé, sinon ajout à la fin).
+- **Formulaire de sujet** : le champ de texte appartient désormais au ViewModel. Chaque action de la barre d'outils ou smiley s'annule en un pas ; l'aperçu est calculé hors du fil principal ; une frappe pendant un envoi armé le désarme.
+- **Formulaire de sujet, brouillon** : « Restaurer » suit la même règle ; un brouillon réduit au titre ne touche pas au corps ; « Restaurer » est inactif tant que le formulaire charge, pendant un upload et pendant un envoi.
+- Maintenance : materialKolor 6.0.0 sans changement de couleurs ([#1550](https://github.com/ForumHFR/redface2/issues/1550)) ; test de cohérence de la documentation plus robuste ([#1545](https://github.com/ForumHFR/redface2/issues/1545)).
+
+## `0.69.6` — `internal` (dev) — 2026-11-08
+
+Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0c, partie 4 ([#1512](https://github.com/ForumHFR/redface2/issues/1512) ; [#1560](https://github.com/ForumHFR/redface2/pull/1560)).
+
+- **Réponse MP** : le champ de texte appartient désormais au ViewModel, comme pour le nouveau MP. Chaque action de la barre d'outils, chaque smiley ou citation s'annule en un pas ; l'aperçu est calculé hors du fil principal ; une frappe pendant un envoi armé le désarme.
+- **Réponse MP, brouillon** : « Restaurer » tient compte de la citation préremplie. Une citation intacte est remplacée par le brouillon, le texte tapé après elle est gardé après le brouillon, sinon le brouillon est ajouté à la fin ; une seule annulation suffit à revenir en arrière. Tant que le formulaire charge, « Restaurer » est inactif ; hors ligne, le bandeau reste visible au-dessus de l'erreur et le brouillon peut être repris.
+- **Réponse MP, saisie précoce** : un texte tapé avant l'arrivée du formulaire est combiné à la citation, puis sauvegardé dans le brouillon.
+
+## `0.69.5` — `internal` (dev) — 2026-11-07
+
+Deux correctifs de la visionneuse ([#1411](https://github.com/ForumHFR/redface2/issues/1411) ; [#1556](https://github.com/ForumHFR/redface2/pull/1556)), ([#1309](https://github.com/ForumHFR/redface2/issues/1309) ; [#1557](https://github.com/ForumHFR/redface2/pull/1557)) et refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0c, parties 0 et 1 ([#1512](https://github.com/ForumHFR/redface2/issues/1512) ; [#1555](https://github.com/ForumHFR/redface2/pull/1555), [#1558](https://github.com/ForumHFR/redface2/pull/1558)).
+
+- **Visionneuse, GIF** : un seul GIF animé est décodé à la fois. Au retour d'un GIF zoomé, la liste ne relance plus une dizaine de décodages simultanés : fin des gels, des images absentes et des ANR sur les appareils à faible mémoire (émulateur à 256 Mo : 421 → 3 GC bloquants, thread principal bloqué 21 → 0 fois).
+- **Visionneuse, gestes** : un balayage vertical sur une image zoomée qui ne peut pas défiler verticalement ne fait plus réapparaître la barre d'actions comme un tap. Tap, double tap, pincement et défilement inchangés.
+- **Éditeur, sauvegarde** : les insertions de la barre d'outils, des smileys et des citations ne remplacent plus tout le texte. Sur un long message, l'état sauvegardé grossissait à chaque insertion jusqu'à faire planter l'application au passage en arrière-plan (851 ko après 10 insertions sur 20 000 caractères) ; il reste désormais autour de 50 ko.
+- **Nouveau MP** : le champ de texte appartient désormais au ViewModel. Chaque action de la barre d'outils, chaque smiley ou citation s'annule en un pas ; l'aperçu est calculé hors du fil principal et vidé au masquage ; « Restaurer » est désactivé pendant l'envoi d'une image ; une frappe pendant un envoi armé le désarme.
+
+## `0.69.4` — `internal` (dev) — 2026-11-07
+
+Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0b, partie 2 sur 2 ([#1456](https://github.com/ForumHFR/redface2/issues/1456) ; [#1551](https://github.com/ForumHFR/redface2/pull/1551)) : les cinq éditeurs (post, nouveau sujet, réponse rapide, réponse MP, nouveau MP) partagent un type d'erreur commun et ses textes. L'interface ne change pas, hors textes ; la nouvelle barre de l'éditeur arrive avec R1a-1.
+
+- **Erreurs** : textes réécrits (résumé court, détail précis). Une erreur ne disparaît plus à la frappe ni à la sélection ; elle est levée quand l'opération qu'elle concerne réussit, ou par l'utilisateur.
+- **Citation non chargée** : « Envoyer » reste inactif tant qu'une citation demandée manque. Le bouton de la bannière devient « Recharger » (sans rien envoyer), puis « Ignorer la citation » après deux échecs : rien n'est inséré, le texte reste. La demande survit à la fermeture de la réponse rapide, au passage à l'éditeur complet et à un arrêt de l'application ; une citation déjà publiée n'est jamais réinsérée.
+- **Brouillon** : un échec d'enregistrement du brouillon a son propre message et ne remplace jamais un « Envoi incertain ».
+- **Images** : « Sélecteur absent » quand aucun sélecteur n'est installé ; au-delà de dix images, les dix premières sont gardées avec une information ; un lot arrêté garde son compteur `k/N` et les images déjà insérées.
+- **MP** : une réponse refusée comme « sujet verrouillé » est présentée comme envoi incertain (vérifiez la conversation), ce que son texte disait déjà.
+
+## `0.69.3` — `internal` (dev) — 2026-11-07
+
+Offre « Dernière page » après envoi ([#1437](https://github.com/ForumHFR/redface2/issues/1437) ; [#1546](https://github.com/ForumHFR/redface2/pull/1546)) : après une réponse ou une citation depuis une page qui n'est pas la dernière, l'offre apparaît aussi quand le rechargement prend plus d'une seconde.
+
+- La confirmation « Message publié » reste immédiate ; l'offre la complète sans doublon.
+- Régression de `0.67.0` ([#1525](https://github.com/ForumHFR/redface2/pull/1525)), signalée par **nicko** sur le topic DEV (post #2805459).
+
+## `0.69.2` — `internal` (dev) — 2026-11-06
+
+Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0m ([#1509](https://github.com/ForumHFR/redface2/issues/1509) ; [#1524](https://github.com/ForumHFR/redface2/pull/1524)) : `material3` passe en **1.5.0-beta02**, épinglé sur la BOM Compose stable 2026.09.00 (foundation, ui et runtime restent en 1.12.1). Prérequis de la refonte ; l'interface ne change pas, sauf sur un point.
+
+- Fermeture d'une feuille par glissé : relâcher en mouvement ferme toujours ; après un arrêt du doigt, il faut avoir tiré la feuille au-delà de la moitié de sa hauteur (auparavant, 120 à 200 px suffisaient). Changement de material3 1.5, accepté.
+- Les feuilles d'options de l'éditeur, de pagination du sujet et de pagination des MP gardent leur comportement de la 1.4 ; écran des couleurs adapté à la 1.5 (placeholder des champs).
+- Vérifié sur émulateur API 34 et sur Galaxy S10e (API 31) : 15 feuilles sur 17, smileys, menus, navigation ; 140 captures Roborazzi identiques au pixel entre 1.4 et 1.5.
+- Porte Gm : au moins trois jours en dev sans retour bloquant avant toute bêta qui contient ce lot.
+
+## `0.69.1` — `internal` (dev) — 2026-11-06
+
+Retour depuis « cité N fois » ([#1447](https://github.com/ForumHFR/redface2/issues/1447) ; [#1541](https://github.com/ForumHFR/redface2/pull/1541)) : après avoir touché un message citant dans la liste, un seul Back ramène au post de départ. Auparavant, le premier Back ne faisait rien et le second quittait le sujet.
+
+- Le correctif couvre aussi les sauts sur la même page, après une arrivée par lien direct sans défilement et pendant une recherche dans le sujet.
+- Défaut ancien ([#783](https://github.com/ForumHFR/redface2/issues/783)), rendu visible en `0.67.1` par #1447. Merci à **Dintr-un lemn** pour son retour sur le topic DEV (post #2805442).
+
+## `0.69.0` — `internal` (dev) — 2026-11-06
+
+Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0b, partie 1 ([#1456](https://github.com/ForumHFR/redface2/issues/1456) ; [#1539](https://github.com/ForumHFR/redface2/pull/1539)) : les échecs d'envoi sont classés selon le moment de la coupure, sur les cinq surfaces d'envoi et le signalement.
+
+- Une coupure prouvée **avant** le départ du message (pas de réseau, serveur injoignable, connexion refusée ou expirée) affiche l'erreur réseau habituelle : rien n'est parti, on peut renvoyer. Jusqu'ici, toute erreur réseau était présentée comme « Envoi incertain ».
+- Une coupure **après** un départ possible, une réponse HFR inattendue ou une page de connexion reçue après l'envoi restent « Envoi incertain » : vérifier le sujet ou la conversation avant de renvoyer. La page de connexion est désormais traitée ainsi sur toutes les surfaces.
+- Une préparation impossible (citation non récupérée, formulaire vide ou illisible) n'envoie rien et le dit.
+- Une annulation avant l'envoi est enregistrée comme telle ; si l'app est fermée pendant l'envoi, la tentative est restaurée comme incertaine.
+- Les textes affichés ne changent pas (nouveaux messages d'erreur avec la partie 2).
+
 ## `0.68.0` — `open` (bêta) — 2026-11-03
 
 Promotion bêta du lot développé en dev de `0.66.0` à `0.67.2`, complété par le formulaire de signalement, depuis la précédente bêta `0.65.0`. Le détail par version dev figure dans les entrées ci-dessous. Contenu :

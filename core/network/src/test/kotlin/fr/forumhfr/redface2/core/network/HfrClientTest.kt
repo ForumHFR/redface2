@@ -55,6 +55,25 @@ class HfrClientTest {
     }
 
     @Test
+    fun `private edit uses its real page while MPStorage keeps the default first page`() = runTest {
+        server.enqueue(MockResponse().setBody("ok"))
+        server.enqueue(MockResponse().setBody("ok"))
+        client.getPrivateMessageEditForm(threadId = 3000003, numreponse = 1980000302, page = 4)
+        client.getPrivateMessageEditForm(threadId = 3000003, numreponse = 1980000301)
+
+        val edit = server.takeRequest()
+        val storage = server.takeRequest()
+        val prefix = "/message.php?config=hfr.inc&cat=prive&post=3000003&numreponse="
+        val suffix = "&p=1&subcat=0&sondage=0&owntopic=0&new=0"
+        assertEquals("${prefix}1980000302&page=4$suffix", edit.path)
+        assertEquals("${prefix}1980000301&page=1$suffix", storage.path)
+        assertEquals("authenticated", edit.getHeader("X-RF2-Client"))
+        assertEquals("authenticated", storage.getHeader("X-RF2-Client"))
+        assertEquals("GET", edit.method)
+        assertEquals("GET", storage.method)
+    }
+
+    @Test
     fun `Wiki detail encodes the full token and uses the anonymous client`() = runTest {
         val html = sharedParserFixture("smiley_wiki_detail-ticento-6.html")
         server.enqueue(MockResponse().addHeader("Content-Type", "text/html; charset=utf-8").setBody(html))

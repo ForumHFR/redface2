@@ -42,6 +42,7 @@ internal class FakeImageUploadReader : ImageUploadReader {
 /** Fake [UploadRepository] ; only [uploadWithCurrentProvider] matters to the composers. */
 internal class FakeUploadRepository : UploadRepository {
     var uploadException: Throwable? = null
+    var failOnCall: Int = 1
     var uploadGate: CompletableDeferred<Unit>? = null
     var uploadCalls: Int = 0
         private set
@@ -49,7 +50,7 @@ internal class FakeUploadRepository : UploadRepository {
     override suspend fun uploadWithCurrentProvider(image: ImageUpload, userId: String): UploadedImage {
         uploadCalls += 1
         uploadGate?.await()
-        uploadException?.let { throw it }
+        uploadException?.takeIf { uploadCalls >= failOnCall }?.let { throw it }
         return UploadedImage(
             provider = UploadProviderId.DIBERIE,
             imageUrl = "https://rehost.diberie.com/Picture/Get/f/1",

@@ -41,7 +41,7 @@ class SmileyPickerHfrFavoritesTest {
         assertNull(controller.openState().pendingFavoriteToken)
         assertEquals(SmileyFavoriteFeedback.Added, controller.openState().favoriteFeedback)
         controller.dismiss()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertEquals(merged, controller.openState().favoriteSmileys)
         assertNull(controller.openState().favoriteFeedback)
     }
@@ -71,7 +71,7 @@ class SmileyPickerHfrFavoritesTest {
             assertEquals(listOf(accountOne, accountTwo, other), controller.openState().favoriteSmileys)
             assertEquals(SmileyFavoriteAction.ADD, controller.openState().favoriteAction(wiki))
             controller.dismiss()
-            controller.open()
+            controller.open(SmileyPickerOpenIntent.CONSULTATION)
             assertEquals(listOf(accountOne, accountTwo, other), controller.openState().favoriteSmileys)
         }
     }
@@ -99,7 +99,7 @@ class SmileyPickerHfrFavoritesTest {
         assertEquals(listOf(accountOne.token), calls)
 
         controller.dismiss()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertNull(controller.openState().favoriteAction(accountOne))
         controller.refreshFavorites(controller.favoriteFormStamp())
         assertEquals(base, controller.openState().favoriteSmileys)
@@ -165,7 +165,7 @@ class SmileyPickerHfrFavoritesTest {
         controller.onFavoriteClicked(other.copy(source = EditorSmileySource.WIKI))
         advanceUntilIdle()
         base = listOf(favorite, accountTwo)
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertEquals(listOf(favorite, accountTwo, other), controller.openState().favoriteSmileys)
         assertEquals(setOf(accountTwo.token), controller.openState().accountSmileyTokens)
     }
@@ -221,7 +221,7 @@ class SmileyPickerHfrFavoritesTest {
         assertEquals(listOf(other), controller.openState().favoriteSmileys)
         assertEquals(SmileyFavoriteFeedback.Removed, controller.openState().favoriteFeedback)
         controller.dismiss()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertNull(controller.openState().favoriteFeedback)
     }
 
@@ -322,12 +322,12 @@ class SmileyPickerHfrFavoritesTest {
         controller.onFavoriteClicked(wiki)
         form = emptyList()
         controller.refreshFavorites(controller.favoriteFormStamp())
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertEquals(listOf(other, favorite), controller.openState().favoriteSmileys)
         gate.complete(HfrFavoriteSmileyMutationResult.Success(listOf(favorite)))
         advanceUntilIdle()
         controller.dismiss()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertEquals(listOf(favorite), controller.openState().favoriteSmileys)
 
         form = listOf(other)
@@ -336,7 +336,7 @@ class SmileyPickerHfrFavoritesTest {
         controller.dismiss()
         form = emptyList()
         controller.refreshFavorites(controller.favoriteFormStamp())
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertTrue(controller.openState().favoriteSmileys.isEmpty())
     }
 
@@ -390,7 +390,7 @@ class SmileyPickerHfrFavoritesTest {
         controller.onFavoriteClicked(wiki)
         controller.dismiss()
         assertEquals(SmileyPickerState.Hidden, controller.state.value)
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertEquals("fi", controller.openState().query)
         assertEquals(listOf(favorite), controller.openState().favoriteSmileys)
         assertEquals(wiki.token, controller.openState().pendingFavoriteToken)
@@ -410,13 +410,13 @@ class SmileyPickerHfrFavoritesTest {
             advanceUntilIdle()
             assertEquals(SmileyPickerState.Hidden, controller.state.value)
             controller.dismiss()
-            controller.open()
+            controller.open(SmileyPickerOpenIntent.CONSULTATION)
             assertEquals(outcome.favorites, controller.openState().favoriteSmileys)
             assertEquals(outcome.message, controller.openState().favoriteFeedback)
-            controller.open()
+            controller.open(SmileyPickerOpenIntent.CONSULTATION)
             assertEquals(outcome.message, controller.openState().favoriteFeedback)
             controller.dismiss()
-            controller.open()
+            controller.open(SmileyPickerOpenIntent.CONSULTATION)
             assertNull(controller.openState().favoriteFeedback)
         }
     }
@@ -429,7 +429,7 @@ class SmileyPickerHfrFavoritesTest {
             advanceUntilIdle()
             assertEquals(outcome.message, controller.openState().favoriteFeedback)
             controller.dismiss()
-            controller.open()
+            controller.open(SmileyPickerOpenIntent.CONSULTATION)
             assertNull(controller.openState().favoriteFeedback)
         }
     }
@@ -443,7 +443,7 @@ class SmileyPickerHfrFavoritesTest {
             controller.dismiss()
             gate.complete(HfrFavoriteSmileyMutationResult.Success(listOf(other)))
             advanceUntilIdle()
-            controller.open()
+            controller.open(SmileyPickerOpenIntent.CONSULTATION)
             assertEquals(listOf(other), controller.openState().favoriteSmileys)
             assertNull(controller.openState().favoriteFeedback)
         }
@@ -461,11 +461,11 @@ class SmileyPickerHfrFavoritesTest {
         gate.complete(HfrFavoriteSmileyMutationResult.Success(listOf(favorite)))
         advanceUntilIdle()
         assertEquals(SmileyPickerState.Hidden, controller.state.value)
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertEquals(listOf(other, favorite), controller.openState().favoriteSmileys)
         controller.dismiss()
         controller.refreshFavorites(controller.favoriteFormStamp())
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertEquals(form, controller.openState().favoriteSmileys)
     }
 
@@ -553,7 +553,7 @@ class SmileyPickerHfrFavoritesTest {
                 override fun observe() = flowOf(SmileyLocalCollectionSnapshot("tester"))
             },
         ),
-    ).also { scope.runCurrent(); it.open() }
+    ).also { scope.runCurrent(); it.open(SmileyPickerOpenIntent.CONSULTATION) }
 
     private fun SmileyPickerController.openState() = state.value as SmileyPickerState.Open
 }

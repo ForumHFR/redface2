@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.parser.write
 
+import fr.forumhfr.redface2.core.model.write.PrivateMessageEditContext
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.parser.smiley.SmileySearchParser
@@ -22,7 +23,7 @@ import org.jsoup.nodes.Element
  *
  * - `password` is filtered out unconditionally. Even in an authenticated session
  *   HFR injects a (blank) `password` field for the legacy composer fallback; we
- *   never want to re-POST it.
+ *   never forward its value. The private edit repository may emit an empty legacy slot when served.
  * - `pseudo` is filtered out as well when the form is anonymous. When the form is
  *   authenticated the field carries the user's pseudo and we forward it, matching
  *   what HFR's web composer does.
@@ -34,8 +35,23 @@ import org.jsoup.nodes.Element
  */
 class ReplyFormParser {
 
-    @Suppress("ReturnCount") // Two failure guards + the success return — splitting hurts readability.
-    fun parse(html: String): Result<ReplyForm> {
+    fun parse(html: String): Result<ReplyForm> = parseForm(html, editOnly = false)
+
+    /** An edit GET must carry the edited post's body, never a fallback reply composer. */
+    fun parseEditPost(html: String): Result<ReplyForm> = parseForm(html, editOnly = true)
+
+    /** Reuses the edit parser, then rejects a public form or a different private target. */
+    fun parseEditPost(html: String, context: PrivateMessageEditContext): Result<ReplyForm> =
+        parseEditPost(html).mapCatching { form ->
+            check(form.hiddenFields["cat"] == "prive") { "Private edit category mismatch" }
+            check(form.hiddenFields["post"] == context.threadId.toString()) { "Private edit thread mismatch" }
+            check(form.hiddenFields["numreponse"] == context.numreponse.toString()) { "Private edit message mismatch" }
+            check(form.hiddenFields["numrep"] == "") { "Private edit form cannot be a quote" }
+            form
+        }
+
+    @Suppress("ReturnCount") // Fail-safe guards reject incomplete forms before the success return.
+    private fun parseForm(html: String, editOnly: Boolean): Result<ReplyForm> {
         val document = Jsoup.parse(html)
         // HFR ships the reply / quote / create-topic forms with `action="…
         // bddpost.php"` and the edit-post form with `action="…bdd.php"`. The
@@ -43,9 +59,11 @@ class ReplyFormParser {
         // are otherwise identical, so a single parser handles both. We bias
         // toward `bddpost.php` first because four out of five write flows use
         // it ; the `bdd.php` fallback is only reached on an edit form.
-        val replyForm = document.selectFirst("form[action*=bddpost.php]")
-            ?: document.selectFirst("form[action*=bdd.php]")
-            ?: return Result.failure(IllegalStateException("Reply form not found"))
+        val replyForm = if (editOnly) {
+            document.selectFirst("form[action*=bdd.php]")
+        } else {
+            document.selectFirst("form[action*=bddpost.php]") ?: document.selectFirst("form[action*=bdd.php]")
+        } ?: return Result.failure(IllegalStateException("Reply form not found"))
 
         val pseudoInput = replyForm.selectFirst("input[name=pseudo]")
         val pseudoValue = pseudoInput?.attr("value").orEmpty()
@@ -68,9 +86,11 @@ class ReplyFormParser {
         // recomputed client-side. Jsoup's `.text()` would collapse whitespace and HTML-decode
         // entities — we deliberately use `wholeText()` so the user sees the raw BBCode
         // exactly as HFR composed it.
-        val initialContent = replyForm.selectFirst("textarea[name=content_form]")
-            ?.wholeText()
-            .orEmpty()
+        val initialContent = replyForm.selectFirst("textarea[name=content_form]")?.wholeText()
+        // An absent edit body is unknown; a present but empty textarea is a known empty body (#1512).
+        if (replyForm.attr("action").contains("bdd.php") && initialContent == null) {
+            return Result.failure(IllegalStateException("content_form textarea missing from edit form"))
+        }
 
         return Result.success(
             ReplyForm(
@@ -78,12 +98,15 @@ class ReplyFormParser {
                 sujet = sujet,
                 hiddenFields = collection.fields,
                 isAnonymous = isAnonymous,
-                initialContent = initialContent,
+                initialContent = initialContent.orEmpty(),
                 options = parseOptions(replyForm),
                 msgIcon = parseMsgIcon(replyForm),
                 userId = SmileyUserIdExtractor.extract(html),
                 favoriteSmileys = SmileySearchParser().parseFavorites(replyForm),
                 recipientsRoster = parseRecipientsRoster(replyForm, collection.fields["newdest"]),
+                isSubjectEditable = replyForm.selectFirst("input[name=sujet]:not([type=hidden])") != null,
+                submitFieldOrder = replyForm.select("input[name], textarea[name]")
+                    .map { it.attr("name") }.distinct(),
             ),
         )
     }

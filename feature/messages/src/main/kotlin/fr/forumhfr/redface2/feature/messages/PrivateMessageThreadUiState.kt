@@ -58,6 +58,10 @@ data class PrivateMessageThreadUiState(
      * on screen entry) and cached for the life of the screen. See [Roster].
      */
     val roster: Roster = Roster.Hidden,
+    /** Local MPStorage identity checked for this account; no discovery request is permitted. */
+    val editActionsAvailable: Boolean = false,
+    /** Accepted edit, ready for one short snackbar without any navigation action. */
+    val editAcknowledgement: Long? = null,
 ) {
     val canGoPrevious: Boolean get() = page > 1
     val canGoNext: Boolean get() = page < totalPages
@@ -170,6 +174,9 @@ sealed interface PrivateMessageThreadEffect {
      * attempt. Initial loads (nothing on screen yet) keep going through [Mode.Error] + Retry instead.
      */
     data object RefreshFailed : PrivateMessageThreadEffect
+
+    /** ED-132 — the quote request could not be stored; the reply is not opened without it. */
+    data object QuotePreparationFailed : PrivateMessageThreadEffect
 
     /** #831/#1051 — the image was written to the shared Pictures collection. */
     data object ImageSaved : PrivateMessageThreadEffect

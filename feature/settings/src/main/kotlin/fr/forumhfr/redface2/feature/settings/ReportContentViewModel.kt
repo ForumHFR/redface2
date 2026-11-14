@@ -15,6 +15,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDelivery
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionBinding
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionCallbacks
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionEnvironment
@@ -91,11 +92,11 @@ class ReportContentViewModel @AssistedInject constructor(
         errors = EditorSubmissionErrors(
             uncertain = ReportError.UNCERTAIN, draftWriteFailed = ReportError.DRAFT_WRITE_FAILED,
             sessionExpired = ReportError.SESSION_EXPIRED, unknown = ReportError.UNCERTAIN,
-            network = ReportError.NETWORK, sessionExpiredAfterEntry = ReportError.UNCERTAIN,
+            network = ReportError.NETWORK, preparationFailed = ReportError.INVALID_FORM,
         ),
     ).also { it.setPreference(confirmPreference) }
 
-    // Observe successful content writes without changing the shared binding's error callbacks.
+    // Observe content-write results separately: storage and uncertain delivery can both be displayed.
     private fun reportDraftStore(): EditorDraftStore {
         val opening = generation
         return object : EditorDraftStore by dependencies.drafts {
@@ -120,8 +121,8 @@ class ReportContentViewModel @AssistedInject constructor(
     }
 
     private fun draftWritten(result: EditorDraftStore.StoreWriteResult, opening: Int) {
-        if (opening == generation && result is EditorDraftStore.StoreWriteResult.Written) {
-            _state.update { it.copy(draftWriteFailed = false) }
+        if (opening == generation) {
+            _state.update { it.copy(draftWriteFailed = result !is EditorDraftStore.StoreWriteResult.Written) }
         }
     }
 
@@ -352,6 +353,11 @@ class ReportContentViewModel @AssistedInject constructor(
     private fun delivery(result: ReplySubmitResult): EditorDelivery<ReportContentEffect, ReportError> = when (result) {
         is ReplySubmitResult.Success -> EditorDelivery(effect = ReportContentEffect.SubmitSucceeded)
         is ReplySubmitResult.Failure -> EditorDelivery(
+            outcome = if (result.reason == ReplyFailureReason.Unknown) {
+                EditorSendOutcome.UNCERTAIN
+            } else {
+                EditorSendOutcome.CERTAIN_FAILURE
+            },
             error = result.reason.reportError(),
             afterSettled = if (result.reason == ReplyFailureReason.InvalidHashCheck) ({ retryForm() }) else null,
         )

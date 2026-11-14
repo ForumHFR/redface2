@@ -30,6 +30,8 @@ import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorPreviewKey
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
@@ -2397,6 +2399,57 @@ class SettingsViewModelTest {
             )
         }
 
+    @Test
+    fun `shortcut hydrates and re-syncs without writing then persists an explicit pick including NONE`() = runTest {
+        repository.editorShortcut.value = EditorShortcut.PERSONAL_SMILEY
+        val vm = newViewModel()
+        assertEquals(EditorShortcut.PERSONAL_SMILEY, vm.state.value.editorShortcut)
+        assertTrue(repository.editorShortcutWrites.isEmpty())
+        vm.submit(SettingsIntent.SetEditorShortcut(EditorShortcut.RED))
+        assertEquals(EditorShortcut.RED, repository.editorShortcut.value)
+        repository.editorShortcut.value = EditorShortcut.IMAGE_URL
+        assertEquals(EditorShortcut.IMAGE_URL, vm.state.value.editorShortcut)
+        vm.submit(SettingsIntent.SetEditorShortcut(EditorShortcut.NONE))
+        assertEquals(listOf(EditorShortcut.RED, EditorShortcut.NONE), repository.editorShortcutWrites)
+        assertEquals(EditorShortcut.NONE, repository.editorShortcut.value)
+    }
+
+    @Test
+    fun `shortcut read error fallback NONE never overwrites the stored choice`() = runTest {
+        repository.editorShortcut.value = EditorShortcut.BOLD
+        repository.shortcutReadFallback = true // Same terminating fallback as the DataStore read failure (M3).
+        val vm = newViewModel()
+        assertEquals(EditorShortcut.NONE, vm.state.value.editorShortcut)
+        assertTrue(repository.editorShortcutWrites.isEmpty())
+        assertEquals(EditorShortcut.BOLD, repository.editorShortcut.value)
+        // An explicit NONE still clears the preference even though the fallback is already displayed.
+        vm.submit(SettingsIntent.SetEditorShortcut(EditorShortcut.NONE))
+        assertEquals(listOf(EditorShortcut.NONE), repository.editorShortcutWrites)
+        assertEquals(EditorShortcut.NONE, repository.editorShortcut.value)
+    }
+
+    @Test
+    fun `shortcut write failure restores the previous choice visibly and allows retry`() = runTest {
+        repository.editorShortcut.value = EditorShortcut.BLUE
+        repository.failShortcutWrite = true
+        repository.shortcutWriteGate = CompletableDeferred()
+        val vm = newViewModel()
+        vm.submit(SettingsIntent.SetEditorShortcut(EditorShortcut.PERSONAL_SMILEY))
+        assertEquals(EditorShortcut.PERSONAL_SMILEY, vm.state.value.editorShortcut)
+        assertFalse(vm.state.value.canChangeEditorShortcut)
+        vm.submit(SettingsIntent.SetEditorShortcut(EditorShortcut.GREEN))
+        assertEquals(listOf(EditorShortcut.PERSONAL_SMILEY), repository.editorShortcutWrites)
+        repository.shortcutWriteGate!!.complete(Unit)
+        assertEquals(EditorShortcut.BLUE, vm.state.value.editorShortcut)
+        assertTrue(vm.state.value.editorShortcutError)
+        assertTrue(vm.state.value.canChangeEditorShortcut)
+        assertEquals(EditorShortcut.BLUE, repository.editorShortcut.value)
+        repository.failShortcutWrite = false
+        vm.submit(SettingsIntent.SetEditorShortcut(EditorShortcut.RED))
+        assertEquals(EditorShortcut.RED, vm.state.value.editorShortcut)
+        assertFalse(vm.state.value.editorShortcutError)
+    }
+
     private fun newViewModel(): SettingsViewModel =
         SettingsViewModel(
             repository,
@@ -2444,6 +2497,11 @@ class SettingsViewModelTest {
     }
 
     private class FakeUserPreferencesRepository : UserPreferencesRepository {
+        override fun observeEditorPreviewPositions(): Flow<Map<EditorPreviewKey, Float>> =
+            MutableStateFlow(emptyMap())
+
+        override suspend fun setEditorPreviewPosition(key: EditorPreviewKey, sourceDp: Float) = Unit
+
         private val config = MutableStateFlow(ProxyConfig())
         private val ignoreTopicCache = MutableStateFlow(false)
         var saveCalls: Int = 0
@@ -3045,6 +3103,21 @@ class SettingsViewModelTest {
         var failOnImagePickerModeSet: Boolean = false
 
         override fun observeImagePickerMode(): Flow<ImagePickerMode> = imagePickerMode
+
+        val editorShortcut = MutableStateFlow(EditorShortcut.NONE)
+        val editorShortcutWrites = mutableListOf<EditorShortcut>()
+        var failShortcutWrite = false
+        var shortcutReadFallback = false
+        var shortcutWriteGate: CompletableDeferred<Unit>? = null
+        override fun observeEditorShortcut(): Flow<EditorShortcut> =
+            if (shortcutReadFallback) kotlinx.coroutines.flow.flowOf(EditorShortcut.NONE) else editorShortcut
+
+        override suspend fun setEditorShortcut(shortcut: EditorShortcut) {
+            editorShortcutWrites += shortcut
+            shortcutWriteGate?.await()
+            check(!failShortcutWrite) { "shortcut write failed" }
+            editorShortcut.value = shortcut
+        }
 
         override suspend fun setImagePickerMode(mode: ImagePickerMode) {
             imagePickerModeSetCalls += 1

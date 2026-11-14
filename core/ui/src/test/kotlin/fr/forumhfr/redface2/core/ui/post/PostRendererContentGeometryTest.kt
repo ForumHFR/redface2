@@ -25,11 +25,11 @@ import coil3.intercept.Interceptor
 import coil3.request.ImageRequest
 import coil3.request.ImageResult
 import coil3.test.FakeImageLoaderEngine
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
@@ -154,7 +154,7 @@ class PostRendererContentGeometryTest {
         assertEquals(exact, boxes())
         assertEquals(1, requests.count { it.decoderFactory is ProbeMetadataDecoder.Factory })
         assertStableAfterMetadataAndEviction(exact)
-        compose.onRoot().captureRoboImage("build/outputs/roborazzi/lot-b-content-cold-settled.png")
+        compose.onRoot().captureRoboImage("src/test/screenshots/lot-b-content-cold-settled.png")
     }
 
     @Test
@@ -177,7 +177,7 @@ class PostRendererContentGeometryTest {
         awaitPainters(12)
         assertNotEquals(warm, boxes())
         assertEquals(0, requests.count { it.decoderFactory is ProbeMetadataDecoder.Factory })
-        compose.onRoot().captureRoboImage("build/outputs/roborazzi/lot-b-content-warm-resized.png")
+        compose.onRoot().captureRoboImage("src/test/screenshots/lot-b-content-warm-resized.png")
     }
 
     @Test

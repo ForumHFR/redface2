@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.database.dao.MpStorageLocationDao
 import fr.forumhfr.redface2.core.database.dao.PrivateMessageContentDao
 import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.dao.UploadedImageDao
+import fr.forumhfr.redface2.core.database.entities.EditorDraftOfferEntity
 import fr.forumhfr.redface2.core.database.entities.EditorDraftEntity
 import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
 import fr.forumhfr.redface2.core.database.entities.MpReadPositionEntity
@@ -28,12 +29,13 @@ import fr.forumhfr.redface2.core.database.entities.UploadedImageEntity
         FlagTopicEntity::class,
         MpReadPositionEntity::class,
         EditorDraftEntity::class,
+        EditorDraftOfferEntity::class,
         UploadedImageEntity::class,
         MpStorageLocationEntity::class,
         PrivateMessageThreadPageEntity::class,
         PrivateMessageEntity::class,
     ],
-    version = 20,
+    version = 22,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)

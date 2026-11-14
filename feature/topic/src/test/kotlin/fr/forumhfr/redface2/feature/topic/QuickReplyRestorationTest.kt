@@ -7,6 +7,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.SaverScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -19,8 +20,11 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSessionResources
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
@@ -105,6 +109,7 @@ class QuickReplyRestorationTest {
                                     quickReplyFor = null
                                 }
                                 is QuickReplyEffect.EscalateToFullEditor -> Unit
+                                is QuickReplyEffect.CloseCommitted -> quickReplyFor = null
                             }
                         }
                     }
@@ -142,7 +147,7 @@ class QuickReplyRestorationTest {
     }
 
     @Test
-    fun `the saver round-trips a full launch across recreation`() {
+    fun `the saver retains the mount and basket flag but drops every quote preview`() {
         val restorationTester = StateRestorationTester(composeTestRule)
         val launch = QuickReplyLaunch(
             request = REQUEST,
@@ -178,7 +183,34 @@ class QuickReplyRestorationTest {
         restorationTester.emulateSavedInstanceStateRestore()
         composeTestRule.waitForIdle()
 
-        assertEquals(launch, observed)
+        assertEquals(launch.copy(initialQuotes = emptyList()), observed)
+    }
+
+    @Test
+    fun `saving a launch writes metadata and a dropped flag without any quote data`() {
+        val launch = QuickReplyLaunch(
+            REQUEST,
+            initialQuotes = listOf(QuoteSelection(QuoteLocator(3, 101, 7), "alice", "private preview", true)),
+            consumesBasket = true,
+        )
+        val scope = object : SaverScope {
+            override fun canBeSaved(value: Any): Boolean = true
+        }
+        val saved = with(QuickReplyLaunchSaver) { scope.save(launch) }
+        assertEquals(listOf(23, 401, 35421, 3, true, false), saved)
+    }
+
+    @Test
+    fun `legacy saver tails are ignored without decoding quote fields`() {
+        // Both historical layouts are accepted as metadata only, including malformed tails.
+        listOf(
+            listOf<Any>(3, 101, 7, "alice", "preview"),
+            listOf<Any>(3, 101, 7, "alice", "preview", true),
+            listOf<Any>("unreadable old quote fields"),
+        ).forEach { tail ->
+            val restored = QuickReplyLaunchSaver.restore(listOf(23, 401, 35421, 3, true) + tail)
+            assertEquals(QuickReplyLaunch(REQUEST, consumesBasket = true, legacyQuoteRequestDropped = true), restored)
+        }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -194,6 +226,10 @@ class QuickReplyRestorationTest {
                 author = "alice",
                 excerpt = "extrait",
             )
+            val drafts = EditorDraftSession(draftStore, EditorDraftKey.reply(23, 35421))
+            drafts.load()
+            drafts.enqueueInlineQuoteRequest(PendingInlineQuoteRequest(23, 35421,
+                listOf(PendingInlineQuoteRequest.Quote(quote.numreponse, quote.locator.page, quote.locator.ref))))
             var viewModel = restorationViewModel(
                 repository = repository,
                 draftStore = draftStore,
@@ -201,7 +237,7 @@ class QuickReplyRestorationTest {
                 quoteCardsEnabled = false,
             )
 
-            viewModel.onSheetOpened(currentPage = REQUEST.page, initialQuotes = listOf(quote))
+            viewModel.onSheetOpened(currentPage = REQUEST.page)
             advanceTimeBy(AUTOSAVE_DEBOUNCE_PLUS_MS)
             advanceUntilIdle()
 
@@ -211,7 +247,7 @@ class QuickReplyRestorationTest {
                 savedStateHandle = savedStateHandle,
                 quoteCardsEnabled = false,
             )
-            viewModel.onSheetOpened(currentPage = REQUEST.page, initialQuotes = listOf(quote))
+            viewModel.onSheetAttached(REQUEST.page, emptyList(), restored = true)
             advanceUntilIdle()
 
             assertEquals(1, Regex("""\[quotemsg=""").findAll(viewModel.state.value.text.text).count())

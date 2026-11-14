@@ -20,6 +20,7 @@ import java.io.IOException
 import java.io.InterruptedIOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.net.UnknownHostException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.TestScope
@@ -44,9 +45,12 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.junit.runners.Parameterized
 
 /** Real guard, RealCall timeout and binding: neither the refusal witness nor the exception is fabricated. */
-class HfrClientWriteTimeoutTest {
+@RunWith(Parameterized::class)
+class HfrClientWriteTimeoutTest(private val path: HfrClientWriteReplayTest.WritePath) {
     private val server = MockWebServer()
     private val timeout = CallTimeoutGate()
     private val drafts = VersionedEditorDraftStore()
@@ -125,6 +129,23 @@ class HfrClientWriteTimeoutTest {
         assertEquals("body", drafts.entries["key"]?.draft?.body)
     }
 
+    @Test
+    fun `real call timeout during DNS is certain before emission`() = runTest {
+        val transport = mutation.newBuilder().dns {
+            timeout.expireCall()
+            throw UnknownHostException("DNS interrupted by call timeout")
+        }.build()
+        val url = server.url("/").newBuilder().host("dns.test").build()
+        client = HfrClient(transport, transport, transport, url, Dispatchers.IO)
+
+        assertEquals("network", submit())
+
+        assertTimeout(refused = false)
+        assertEquals(0, server.requestCount)
+        assertEquals(EditorSubmissionState.Ready, binding.state)
+        assertNull(drafts.entries["key"]?.attempt)
+    }
+
     private suspend fun TestScope.submit(afterLaunch: suspend () -> Unit = {}): String {
         val settled = CompletableDeferred<String>()
         binding = EditorSubmissionBinding<Unit, String>(
@@ -133,12 +154,12 @@ class HfrClientWriteTimeoutTest {
             EditorSubmissionCallbacks(
                 state = {}, error = { it?.let(settled::complete) }, success = { settled.complete("success") },
             ),
-            EditorSubmissionErrors("uncertain", "draft", "session", "unknown", "network", "after-entry"),
+            EditorSubmissionErrors("uncertain", "draft", "session", "unknown", "network"),
         )
         binding.restore("key")
         binding.setPreference(false)
         binding.launch(binding.request(4_000, true) as SubmissionRequest.Accepted, Draft("body")) {
-            client.submitReply(FormBody.Builder().add("content_form", "body").build())
+            path.submit(client, FormBody.Builder().add("content_form", "body").build())
             EditorDelivery(effect = Unit)
         }
         afterLaunch()
@@ -151,6 +172,7 @@ class HfrClientWriteTimeoutTest {
         assertEquals("timeout", error.message)
         val owner = checkNotNull(timeout.call.request().tag(EditorWriteOwner::class.java))
         assertEquals(refused, owner.rejectedBeforeEmission)
+        assertEquals(server.requestCount == 0, owner.provesNoEmission)
         assertEquals(
             refused,
             generateSequence<Throwable>(error) { it.cause }.any { it is EditorAccountChangedBeforeSendException },
@@ -176,5 +198,11 @@ class HfrClientWriteTimeoutTest {
             timer.enter()
             assertTrue("callTimeout must cancel the call", canceled.await(5, TimeUnit.SECONDS))
         }
+    }
+    companion object {
+        @JvmStatic
+        @Parameterized.Parameters(name = "{0}")
+        fun paths(): List<Array<HfrClientWriteReplayTest.WritePath>> =
+            HfrClientWriteReplayTest.WritePath.entries.map { arrayOf(it) }
     }
 }
