@@ -120,6 +120,11 @@ data class ReplyForm(
 
     /** #606 — true only when HFR served the owner-only `newdest` field (see [manageableRecipients]). */
     val canManageRecipients: Boolean get() = manageableRecipients != null
+
+    // This form also carries MP content and account data; never stringify their values.
+    override fun toString(): String =
+        "ReplyForm(hiddenFieldCount=${hiddenFields.size}, isAnonymous=$isAnonymous, " +
+            "initialContentLength=${initialContent.length}, isSubjectEditable=$isSubjectEditable)"
 }
 
 /**

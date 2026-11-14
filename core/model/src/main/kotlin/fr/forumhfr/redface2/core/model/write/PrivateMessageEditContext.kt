@@ -15,4 +15,7 @@ data class PrivateMessageEditContext(
         require(page >= 1) { "page must be >= 1" }
         require(numreponse > 0) { "numreponse must be > 0" }
     }
+
+    // Private coordinates must not escape through logs, exceptions or assertion messages.
+    override fun toString(): String = "PrivateMessageEditContext([redacted])"
 }
