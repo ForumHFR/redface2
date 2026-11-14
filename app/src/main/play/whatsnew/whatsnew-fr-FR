@@ -1,3 +1,6 @@
-Redface 2 v0.69.24 — dev.
-- Smileys : chaque onglet reprend sa propre hauteur.
-- MP : « Modifier » sur ses messages même sans lien HFR.
+Redface 2 v0.70.0 — bêta.
+- Éditeur refait : barre d'action en bas, formats, aperçu à côté du texte, feuille Options.
+- Brouillons sous ↺ : « Citer » insère tout de suite, le brouillon attend.
+- MP : modifier ses propres messages.
+- Envoi : erreurs plus claires, envoi incertain mieux délimité.
+- Visionneuse : GIF animés plus légers.
