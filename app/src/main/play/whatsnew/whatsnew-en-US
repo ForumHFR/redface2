@@ -1,2 +1,4 @@
-Redface 2 v0.69.20 — dev.
-- PM: "Edit" on your own messages, from the "…" menu.
+Redface 2 v0.69.21 — dev.
+- Quick reply: "Ignore" on an inserted quote clears the basket.
+- First post: "Restore" brings back the draft title.
+- PM: editing verified against HFR.
