@@ -943,6 +943,22 @@ class PostEditorRestorationTest {
     }
 
     @Test
+    fun privateEditBlankOfferedSubjectKeepsTheServedSubject() = runTest(dispatcher) {
+        val mpKey = EditorDraftKey.mpEdit(101)
+        store.preload(mpKey, Draft("edited body", subject = ""))
+        coEvery { edits.fetchEditPostForm(any<PrivateMessageEditContext>()) } returns
+            form("server body").copy(sujet = "Hello", isSubjectEditable = true)
+        val editor = open(request = privateRequest())
+        runCurrent()
+        assertEquals("edited body", editor.state.value.restorableDraft)
+        editor.submit(PostEditorIntent.DraftRestoreRequested)
+        runCurrent()
+        assertEquals("edited body", editor.bodyFieldState.text.toString())
+        assertEquals("Hello", editor.state.value.subject)
+        assertNull(editor.state.value.restorableDraft)
+    }
+
+    @Test
     fun privateEditRetainsTheOfferedSubjectWhenRestoringAfterFormFailure() = runTest(dispatcher) {
         val mpKey = EditorDraftKey.mpEdit(101)
         store.preload(mpKey, Draft("edited body", subject = "Hello v2"))
