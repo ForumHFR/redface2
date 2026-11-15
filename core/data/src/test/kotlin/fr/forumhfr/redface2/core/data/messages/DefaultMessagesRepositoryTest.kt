@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.messages
 
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallIntent
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.LoginError
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
@@ -19,6 +20,7 @@ import io.mockk.mockk
 import java.io.IOException
 import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -38,6 +40,29 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [33])
 class DefaultMessagesRepositoryTest {
+
+    @Test
+    fun `only badge fetches carry mp badge intent while the inbox remains a user read`() = runTest {
+        val intents = mutableListOf<HfrCallIntent.Kind?>()
+        val hfrClient = mockk<HfrClient>()
+        coEvery { hfrClient.getPrivateMessageListPage(page = 1) } coAnswers {
+            intents += currentCoroutineContext()[HfrCallIntent]?.kind
+            FAKE_HTML
+        }
+        val parser = mockk<PrivateMessageListParser>()
+        coEvery { parser.countUnread(FAKE_HTML) } returnsMany listOf(1, 2)
+        coEvery { parser.parseList(FAKE_HTML) } returns PrivateMessageListPage(1, 1, emptyList())
+        val (repo, authStates) = buildRepository(hfrClient = hfrClient, parser = parser)
+        repo.observeUnreadMpCount().test {
+            authStates.emit(AuthState.Authenticated("xaat"))
+            assertEquals(1, awaitItem())
+            repo.requestUnreadRefresh()
+            assertEquals(2, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        repo.getPrivateMessageList(page = 1)
+        assertEquals(listOf(HfrCallIntent.Kind.MP_BADGE, HfrCallIntent.Kind.MP_BADGE, null), intents)
+    }
 
     @Test
     fun `observeUnreadMpCount emits null when auth state is Anonymous`() = runTest {

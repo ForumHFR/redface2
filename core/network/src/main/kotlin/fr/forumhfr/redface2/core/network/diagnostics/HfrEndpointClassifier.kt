@@ -9,7 +9,14 @@ fun classifyHfrEndpoint(url: HttpUrl): HfrEndpoint? {
     val page = url.queryParameter("page")?.toIntOrNull()?.takeIf { it > 0 }
     return when (url.encodedPath) {
         "/webservices/rest_api.php" -> classifyRest(url.queryParameter("uri"), page)
-        "/forum1.php", "/forum1f.php" -> HfrEndpoint(HfrEndpoint.Family.FORUM1, publicCategory(url), page)
+        "/forum1.php", "/forum1f.php" -> {
+            val family = if (url.queryParameter("cat") == "prive") {
+                HfrEndpoint.Family.MP_LIST
+            } else {
+                HfrEndpoint.Family.FORUM1
+            }
+            HfrEndpoint(family, publicCategory(url), page)
+        }
         "/forum2.php" -> HfrEndpoint(HfrEndpoint.Family.FORUM2, publicCategory(url), page)
         else -> if (isImagePath(url)) null else HfrEndpoint(HfrEndpoint.Family.HTML_OTHER)
     }

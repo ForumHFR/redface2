@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallIntent
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.model.AuthState
@@ -136,7 +137,9 @@ class DefaultMessagesRepository @Inject internal constructor(
         markThreadReadEvents.tryEmit(threadId)
     }
 
-    private suspend fun fetchUnreadCount(): Int? = withContext(ioDispatcher) {
+    private suspend fun fetchUnreadCount(): Int? = withContext(
+        ioDispatcher + HfrCallIntent(HfrCallIntent.Kind.MP_BADGE),
+    ) {
         try {
             val html = hfrClient.getPrivateMessageListPage(page = 1)
             parser.countUnread(html)

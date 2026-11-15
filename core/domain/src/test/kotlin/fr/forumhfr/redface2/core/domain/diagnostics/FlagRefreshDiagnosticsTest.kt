@@ -41,6 +41,33 @@ class FlagRefreshDiagnosticsTest {
     }
 
     @Test
+    fun `two application calls and their multiple connection routes remain distinct and shared calls deduplicate`() {
+        val log = DiagnosticsLog()
+        val trace = FlagRefreshDiagnostics(log).begin(FlagRefreshTrigger.PULL, FlagType.entries)
+        val first = FlagFetchTrace(trace.id, FlagType.CYAN)
+        val second = FlagFetchTrace(trace.id, FlagType.RED)
+        val failed = summary(1, 10).copy(
+            outcome = HfrCallOutcome.FAILURE, connectAttempts = 2, connectFailures = 2,
+            connectErrnos = mapOf(HfrConnectErrno.REFUSED to 1, HfrConnectErrno.UNREACHABLE to 1),
+        )
+        val succeeded = summary(2, 20).copy(
+            connectAttempts = 3, connectFailures = 2,
+            connectErrnos = mapOf(HfrConnectErrno.TIMEOUT to 2),
+        )
+        first.call(failed)
+        first.call(succeeded)
+        second.call(succeeded)
+        trace.attach(first, false)
+        trace.attach(second, false)
+        trace.finish()
+        val summary = log.entries.value.last().message
+        listOf("calls=2 ", "connectAttempts=5 ", "callsWithConnectAttempts=2 ", "connectFailures=4 ",
+            "connectErrnos=[refused:1;unreachable:1;timeout:2]").forEach {
+            assertTrue(summary, summary.contains(it))
+        }
+    }
+
+    @Test
     fun `begin captures immutable network and device context once for both refresh lines`() {
         var now = 100_900_000_000L
         val log = DiagnosticsLog()

@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.LinkProperties
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.os.PowerManager
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
@@ -25,6 +26,28 @@ class AndroidNetworkDiagnosticsContextProviderTest {
         every { manager.getNetworkCapabilities(network) } returns capabilities
         every { manager.getLinkProperties(network) } returns properties
         every { properties.isPrivateDnsActive } returns false
+    }
+
+    @Test
+    fun `data saver distinguishes exemption and battery saver is captured independently of connectivity`() {
+        val power = mockk<PowerManager>()
+        every { context.getSystemService(PowerManager::class.java) } returns power
+        every { power.isPowerSaveMode } returns true
+        every { manager.activeNetwork } returns null
+        val cases = listOf(
+            ConnectivityManager.RESTRICT_BACKGROUND_STATUS_DISABLED to "disabled",
+            ConnectivityManager.RESTRICT_BACKGROUND_STATUS_WHITELISTED to "whitelisted",
+            ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED to "enabled",
+            -1 to "unknown",
+        )
+        cases.forEach { (status, label) ->
+            every { manager.restrictBackgroundStatus } returns status
+            assertEquals("dataSaver=$label batterySaver=1", provider.restrictions().line())
+        }
+        every { manager.restrictBackgroundStatus } throws SecurityException("SecretOperator")
+        assertEquals("dataSaver=unknown batterySaver=1", provider.restrictions().line())
+        every { power.isPowerSaveMode } throws IllegalStateException("SecretDevice")
+        assertEquals("dataSaver=unknown batterySaver=?", provider.restrictions().line())
     }
 
     @Test

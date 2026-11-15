@@ -23,6 +23,8 @@ class HfrEndpointClassifierTest {
             "webservices/rest_api.php?uri=forums/hardwarefr/categories/23/topics/35395/" to
                 HfrEndpoint.Family.REST_OTHER,
             "forum1.php?cat=23&pseudo=SecretPseudo" to HfrEndpoint.Family.FORUM1,
+            "forum1.php?cat=prive&pseudo=SecretPseudo&hash_check=SecretHash" to HfrEndpoint.Family.MP_LIST,
+            "forum1f.php?cat=prive" to HfrEndpoint.Family.MP_LIST,
             "forum2.php?cat=23&post=35395&numreponse=987654&hash_check=SecretHash" to HfrEndpoint.Family.FORUM2,
             "user/delflag.php?cat=23&post=35395&hash_check=SecretHash" to HfrEndpoint.Family.HTML_OTHER,
         )

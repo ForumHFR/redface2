@@ -3,6 +3,10 @@ package fr.forumhfr.redface2.core.domain.diagnostics
 /** No platform objects or identifying network data cross this boundary. */
 fun interface NetworkDiagnosticsContextProvider {
     fun snapshot(): NetworkDiagnosticsContext
+
+    fun restrictions(): NetworkDiagnosticsRestrictions = NetworkDiagnosticsRestrictions()
+
+    fun observe(listener: (NetworkDiagnosticsEvent) -> Unit): DiagnosticsSubscription = DiagnosticsSubscription { }
 }
 
 /** Stable ordering keeps VPN visible even when capabilities also expose another transport. */
@@ -20,14 +24,8 @@ class NetworkDiagnosticsContext(
     private val validated: Boolean? = null,
     private val privateDns: Boolean? = null,
 ) {
-    private val transport = when {
-        transports == null -> "unknown"
-        transports.isEmpty() -> "none"
-        else -> NetworkTransport.entries.filter { it in transports }.joinToString("+") { it.label }
-    }
+    private val transport = diagnosticTransportLabel(transports)
 
-    fun line(): String = "transport=$transport metered=${metered.bit()} " +
-        "validated=${validated.bit()} privateDns=${privateDns.bit()}"
-
-    private fun Boolean?.bit(): String = when (this) { true -> "1"; false -> "0"; null -> "?" }
+    fun line(): String = "transport=$transport metered=${metered.diagnosticBit()} " +
+        "validated=${validated.diagnosticBit()} privateDns=${privateDns.diagnosticBit()}"
 }
