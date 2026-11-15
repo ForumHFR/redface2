@@ -3,6 +3,8 @@ package fr.forumhfr.redface2.feature.flags
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
+import fr.forumhfr.redface2.core.domain.flags.FlagCoverage
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.awaitDetached
@@ -1453,6 +1455,9 @@ class FlagsViewModel @Inject constructor(
                 markerStyle = markerStyle,
                 subcategoryNames = subcategoryNames,
             ),
+            coverage = flagsResult.coverage,
+            refreshStatus = flagsResult.refreshStatus,
+            cachedAt = flagsResult.cachedAt,
         )
     }
 
@@ -1660,7 +1665,12 @@ sealed interface FlagsListUiState {
      * Loaded flags, rendered either grouped by category or as a flat list depending on the
      * persisted view preference (cf. [FlagsContent]).
      */
-    data class Success(val content: FlagsContent) : FlagsListUiState
+    data class Success(
+        val content: FlagsContent,
+        val coverage: FlagCoverage = FlagCoverage(),
+        val refreshStatus: FlagRefreshStatus = FlagRefreshStatus.COMPLETE,
+        val cachedAt: Instant? = null,
+    ) : FlagsListUiState
 
     /** A flags fetch failed; [cause] drives the reconnect/retry CTA (e.g. SessionExpiredException). */
     data class Failure(val cause: Throwable) : FlagsListUiState

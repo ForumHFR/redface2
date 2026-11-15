@@ -11,14 +11,15 @@ import fr.forumhfr.redface2.core.database.dao.MpStorageLocationDao
 import fr.forumhfr.redface2.core.database.dao.PrivateMessageContentDao
 import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.dao.UploadedImageDao
-import fr.forumhfr.redface2.core.database.entities.EditorDraftOfferEntity
 import fr.forumhfr.redface2.core.database.entities.EditorDraftEntity
+import fr.forumhfr.redface2.core.database.entities.EditorDraftOfferEntity
+import fr.forumhfr.redface2.core.database.entities.FlagCategoryCoverageEntity
 import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
 import fr.forumhfr.redface2.core.database.entities.MpReadPositionEntity
 import fr.forumhfr.redface2.core.database.entities.MpStorageLocationEntity
+import fr.forumhfr.redface2.core.database.entities.PostEntity
 import fr.forumhfr.redface2.core.database.entities.PrivateMessageEntity
 import fr.forumhfr.redface2.core.database.entities.PrivateMessageThreadPageEntity
-import fr.forumhfr.redface2.core.database.entities.PostEntity
 import fr.forumhfr.redface2.core.database.entities.TopicEntity
 import fr.forumhfr.redface2.core.database.entities.UploadedImageEntity
 
@@ -27,6 +28,7 @@ import fr.forumhfr.redface2.core.database.entities.UploadedImageEntity
         TopicEntity::class,
         PostEntity::class,
         FlagTopicEntity::class,
+        FlagCategoryCoverageEntity::class,
         MpReadPositionEntity::class,
         EditorDraftEntity::class,
         EditorDraftOfferEntity::class,
@@ -35,7 +37,7 @@ import fr.forumhfr.redface2.core.database.entities.UploadedImageEntity
         PrivateMessageThreadPageEntity::class,
         PrivateMessageEntity::class,
     ],
-    version = 22,
+    version = 23,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)

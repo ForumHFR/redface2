@@ -1,0 +1,49 @@
+package fr.forumhfr.redface2.feature.flags
+
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
+import fr.forumhfr.redface2.core.model.FlagFailureKind
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+
+/** Snapshot state, not a consumable effect: filters and Room reloads cannot dismiss this banner. */
+@Composable
+internal fun FlagsRefreshBanner(
+    state: FlagsListUiState.Success,
+    onRetry: () -> Unit,
+    onLogin: () -> Unit,
+) {
+    if (state.refreshStatus == FlagRefreshStatus.COMPLETE) return
+    val failures = state.coverage.categories.filter { it.failure != null }
+    val sessionExpired = failures.any { it.failure == FlagFailureKind.SESSION }
+    val message = when {
+        sessionExpired -> stringResource(R.string.flags_session_expired)
+        failures.any { it.failure == FlagFailureKind.SCHEMA } -> stringResource(R.string.flags_invalid_response)
+        state.refreshStatus == FlagRefreshStatus.FAILED -> {
+            val time = state.cachedAt?.let {
+                DateTimeFormatter.ofPattern("dd/MM à HH:mm").withZone(ZoneId.systemDefault()).format(it)
+            }
+            if (time == null) stringResource(R.string.flags_update_failed)
+            else stringResource(R.string.flags_cached_update_failed, time)
+        }
+        else -> stringResource(R.string.flags_partially_updated, failures.map { it.cat }.distinct().size)
+    }
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Text(message, style = MaterialTheme.typography.bodyMedium)
+            TextButton(onClick = if (sessionExpired) onLogin else onRetry) {
+                Text(stringResource(if (sessionExpired) R.string.flags_login_cta else R.string.flags_retry))
+            }
+        }
+    }
+}

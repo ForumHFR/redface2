@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.database.entities
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
+import fr.forumhfr.redface2.core.model.FlagSource
 import fr.forumhfr.redface2.core.model.FlagType
 import java.time.Instant
 
@@ -76,4 +77,6 @@ data class FlagTopicEntity(
     val lastReplyAt: String,
     val fetchedAt: Instant,
     val authMode: FetchMode,
+    @ColumnInfo(defaultValue = "'LEGACY_UNKNOWN'")
+    val source: FlagSource = FlagSource.LEGACY_UNKNOWN,
 )

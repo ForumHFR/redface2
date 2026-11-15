@@ -41,7 +41,7 @@ class EditorDraftOfferMigrationTest {
         }
         // Room itself runs and validates the migration against generated entities. No handwritten 22.json.
         val database = Room.databaseBuilder(ApplicationProvider.getApplicationContext<Context>(),
-            RedfaceDatabase::class.java, name).addMigrations(MIGRATION_21_22).build()
+            RedfaceDatabase::class.java, name).addMigrations(MIGRATION_21_22, MIGRATION_22_23).build()
         try {
             val dao = database.editorDraftDao()
             listOf(null, "IN_PROGRESS", "UNCERTAIN", "PUBLISHED").forEachIndexed { index, state ->
@@ -59,7 +59,7 @@ class EditorDraftOfferMigrationTest {
                 assertNull(row.bodyProvenance)
                 assertTrue(dao.offers("alice", "mpreply:$index").isEmpty())
             }
-            assertEquals(22, database.openHelper.readableDatabase.version)
+            assertEquals(23, database.openHelper.readableDatabase.version)
         } finally {
             database.close()
         }
@@ -85,7 +85,7 @@ class EditorDraftOfferMigrationTest {
             }
         }
         val database = Room.databaseBuilder(ApplicationProvider.getApplicationContext<Context>(),
-            RedfaceDatabase::class.java, name).addMigrations(MIGRATION_20_21, MIGRATION_21_22).build()
+            RedfaceDatabase::class.java, name).addMigrations(MIGRATION_20_21, MIGRATION_21_22, MIGRATION_22_23).build()
         try {
             val dao = database.editorDraftDao()
             dao.insertOffer(EditorDraftOfferEntity("alice", "reply:23:1", "stale", 7, "offered", null, null,

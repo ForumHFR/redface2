@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
+import fr.forumhfr.redface2.core.database.entities.FlagCategoryCoverageEntity
 import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
 import fr.forumhfr.redface2.core.model.FlagType
 import java.time.Instant
@@ -32,10 +33,16 @@ interface FlagDao {
     )
     suspend fun getFlags(userId: String, type: FlagType): List<FlagTopicEntity>
 
+    @Query("SELECT * FROM flag_category_coverage WHERE userId = :userId AND type = :type")
+    suspend fun getCoverage(userId: String, type: FlagType): List<FlagCategoryCoverageEntity>
+
+    @Transaction
+    suspend fun getSnapshot(userId: String, type: FlagType): FlagCacheSnapshot =
+        FlagCacheSnapshot(getFlags(userId, type), getCoverage(userId, type))
+
     /**
-     * Most recent successful fetch for a (userId, type) pair, or `null` if the
-     * tab has never been hydrated. Drives "is the cache fresh enough to skip
-     * the network" decisions in the repository.
+     * Legacy row timestamp query. Freshness decisions use the complete coverage snapshot,
+     * including empty partitions, rather than MAX(fetchedAt).
      */
     @Query(
         "SELECT MAX(fetchedAt) FROM flag_topics WHERE userId = :userId AND type = :type",
@@ -46,7 +53,19 @@ interface FlagDao {
     suspend fun upsertAll(rows: List<FlagTopicEntity>)
 
     @Query("DELETE FROM flag_topics WHERE userId = :userId AND type = :type")
-    suspend fun deleteForType(userId: String, type: FlagType)
+    suspend fun deleteRowsForType(userId: String, type: FlagType)
+
+    @Query("DELETE FROM flag_category_coverage WHERE userId = :userId AND type = :type")
+    suspend fun deleteCoverageForType(userId: String, type: FlagType)
+
+    @Transaction
+    suspend fun deleteForType(userId: String, type: FlagType) {
+        deleteRowsForType(userId, type)
+        deleteCoverageForType(userId, type)
+    }
+
+    @Upsert
+    suspend fun upsertCoverage(rows: List<FlagCategoryCoverageEntity>)
 
     /**
      * Removes a single cached drapeau row after a successful `delflag.php` (#99). The
@@ -63,12 +82,44 @@ interface FlagDao {
     )
     suspend fun deleteFlag(userId: String, type: FlagType, cat: Int, topicId: Int)
 
+    @Query(
+        "UPDATE flag_topics SET isFavorite = 1 WHERE userId = :userId AND type = :type " +
+            "AND cat = :cat AND topicId = :topicId",
+    )
+    suspend fun markFavorite(userId: String, type: FlagType, cat: Int, topicId: Int)
+
     @Query("DELETE FROM flag_topics WHERE userId = :userId")
-    suspend fun deleteAllForUser(userId: String)
+    suspend fun deleteRowsForUser(userId: String)
+
+    @Query("DELETE FROM flag_category_coverage WHERE userId = :userId")
+    suspend fun deleteCoverageForUser(userId: String)
+
+    @Transaction
+    suspend fun deleteAllForUser(userId: String) {
+        deleteRowsForUser(userId)
+        deleteCoverageForUser(userId)
+    }
 
     /** Used by [fr.forumhfr.redface2.core.data.cache.CacheInvalidator] on logout. */
     @Query("DELETE FROM flag_topics")
-    suspend fun deleteAll()
+    suspend fun deleteAllRows()
+
+    @Query("DELETE FROM flag_category_coverage")
+    suspend fun deleteAllCoverage()
+
+    @Transaction
+    suspend fun deleteAll() {
+        deleteAllRows()
+        deleteAllCoverage()
+    }
+
+    /** One write transaction per refresh; unchanged partitions keep their original row dates. */
+    @Transaction
+    suspend fun replaceSnapshot(userId: String, type: FlagType, snapshot: FlagCacheSnapshot) {
+        deleteForType(userId, type)
+        upsertAll(snapshot.rows)
+        upsertCoverage(snapshot.coverage)
+    }
 
     /**
      * Atomic replace of the cached drapeaux for a tab. The two-statement form
@@ -81,3 +132,8 @@ interface FlagDao {
         if (rows.isNotEmpty()) upsertAll(rows)
     }
 }
+
+data class FlagCacheSnapshot(
+    val rows: List<FlagTopicEntity>,
+    val coverage: List<FlagCategoryCoverageEntity>,
+)

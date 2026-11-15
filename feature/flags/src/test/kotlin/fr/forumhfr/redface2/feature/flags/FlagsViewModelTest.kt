@@ -17,6 +17,11 @@ import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshCategory
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
+import fr.forumhfr.redface2.core.domain.flags.FlagCategoryCoverage
+import fr.forumhfr.redface2.core.domain.flags.FlagCoverage
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
+import fr.forumhfr.redface2.core.model.FlagFailureKind
+import fr.forumhfr.redface2.core.model.FlagSource
 import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
@@ -114,6 +119,25 @@ class FlagsViewModelTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `coverage and failed status survive unread filtering of every retained row - 984`() = runTest {
+        val flags = FakeFlagRepository()
+        val at = Instant.parse("2026-05-03T12:00:00Z")
+        val coverage = FlagCoverage(listOf(FlagCategoryCoverage(13, FlagSource.BUCKET, at, at,
+            FlagFailureKind.NETWORK)))
+        flags.observationResults = mapOf(FlagType.CYAN to FlagsResult.Success(
+            listOf(stubFlag(1, FlagType.CYAN).copy(hasUnread = false)), coverage = coverage,
+            refreshStatus = FlagRefreshStatus.FAILED, cachedAt = at,
+        ))
+        val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
+        advanceUntilIdle()
+        val displayed = vm.flagsState.value as FlagsListUiState.Success
+        assertTrue(flatTopics(displayed).isEmpty())
+        assertEquals(coverage, displayed.coverage)
+        assertEquals(FlagRefreshStatus.FAILED, displayed.refreshStatus)
+        assertEquals(at, displayed.cachedAt)
     }
 
     @Test
