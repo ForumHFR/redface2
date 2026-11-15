@@ -33,14 +33,7 @@ internal class FlagRefreshCollection(private val clock: Clock) {
                 )
             }
         }
-        val effective = if (cats?.isEmpty() == true) {
-            listOf(FlagSource.BUCKET, FlagSource.STICKY).map {
-                CategoryRefreshOutcome(0, it, receivedAt = clock.instant())
-            }
-        } else {
-            completed
-        }
-        return FlagRefreshBatch(cats?.map { it.id }, effective, clock.instant(), failure,
+        return FlagRefreshBatch(cats?.map { it.id }, completed, clock.instant(), failure,
             cats.orEmpty().associate { it.id to it.name })
     }
 }

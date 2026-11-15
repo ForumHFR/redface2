@@ -69,6 +69,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 
 /**
@@ -247,8 +248,8 @@ class DefaultFlagRepository @Inject constructor(
         }
         val cached = synchronized(cachedSuccesses) { cachedSuccesses[type] }
         if (cached != null) {
+            // Tab subscriptions reuse even stale/partial memory; the ViewModel owns auto-refresh policy.
             send(cached)
-            revalidateMemorySnapshot(type, cached) { send(it) }
         } else {
             val userId = currentUserId()
             if (userId == null) {
@@ -301,15 +302,6 @@ class DefaultFlagRepository @Inject constructor(
             }
         }
         refreshJob.join()
-    }
-
-    private suspend fun revalidateMemorySnapshot(
-        type: FlagType,
-        cached: FlagsResult.Success,
-        publish: suspend (FlagsResult) -> Unit,
-    ) {
-        val userId = currentUserId()
-        if (userId != null && !flagCacheStore.isFresh(cached)) fetchObserved(type, userId, publish)
     }
 
     override suspend fun refresh(type: FlagType): FlagsResult = diagnoseRefresh(
@@ -690,7 +682,7 @@ class DefaultFlagRepository @Inject constructor(
      * but it says nothing about the other types : the Drapeaux screen warms one tab at a time, so
      * « CYAN warm + miss » must still check a never-loaded FAVORITE bucket (review finding : the
      * earlier any-bucket-warm short-circuit made a FAVORITE-only topic unremovable from the topic
-     * screen until its tab had been visited). All three covered + miss → null with zero network. An
+     * screen until its tab had been visited). All three buckets covered + miss → null with zero network. An
      * anonymous session holds no drapeaux, so it short-circuits to null before any round-trip.
      *
      * When a topic carries several drapeaux (e.g. participated AND favori), the [FlagType] iteration
@@ -700,10 +692,10 @@ class DefaultFlagRepository @Inject constructor(
     override suspend fun findFlag(cat: Int, topicId: Int): Flag? {
         val (cachedMatch, warmTypes) = synchronized(cachedSuccesses) {
             scanCachedFlags(cat = cat, topicId = topicId) to
-                cachedSuccesses.filterValues { it.coverage.covers(cat) }.keys.toSet()
+                cachedSuccesses.filterValues { it.coverage.covers(cat, FlagSource.BUCKET) }.keys.toSet()
         }
         if (cachedMatch != null) return cachedMatch
-        // Only types covering this category can certify absence; recheck cold or uncovered ones.
+        // A successful bucket keeps this type warm even if its sticky supplement failed.
         val coldTypes = FlagType.entries.filterNot { it in warmTypes }
         val userId = currentUserId()
         if (coldTypes.isNotEmpty() && userId != null) {
@@ -1238,7 +1230,9 @@ class DefaultFlagRepository @Inject constructor(
             }
             ForumResult.Loading -> error("getCategories never emits Loading")
         }
-        return all.filter { it.id > 0 }
+        return all.filter { it.id > 0 }.ifEmpty {
+            throw SerializationException("Missing public flags catalogue")
+        }
     }
 
     /**

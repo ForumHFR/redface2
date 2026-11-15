@@ -9,12 +9,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
 import fr.forumhfr.redface2.core.model.FlagFailureKind
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+
+internal val FlagsListUiState.Success.hasRefreshBanner: Boolean
+    get() = refreshStatus == FlagRefreshStatus.PARTIAL || refreshStatus == FlagRefreshStatus.FAILED
 
 /** Snapshot state, not a consumable effect: filters and Room reloads cannot dismiss this banner. */
 @Composable
@@ -23,7 +27,7 @@ internal fun FlagsRefreshBanner(
     onRetry: () -> Unit,
     onLogin: () -> Unit,
 ) {
-    if (state.refreshStatus == FlagRefreshStatus.COMPLETE) return
+    if (!state.hasRefreshBanner) return
     val failures = state.coverage.categories.filter { it.failure != null }
     val sessionExpired = failures.any { it.failure == FlagFailureKind.SESSION }
     val message = when {
@@ -36,7 +40,10 @@ internal fun FlagsRefreshBanner(
             if (time == null) stringResource(R.string.flags_update_failed)
             else stringResource(R.string.flags_cached_update_failed, time)
         }
-        else -> stringResource(R.string.flags_partially_updated, failures.map { it.cat }.distinct().size)
+        else -> {
+            val count = failures.map { it.cat }.distinct().size
+            pluralStringResource(R.plurals.flags_partially_updated, count, count)
+        }
     }
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {

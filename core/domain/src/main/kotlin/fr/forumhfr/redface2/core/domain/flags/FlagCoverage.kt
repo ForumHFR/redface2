@@ -20,11 +20,15 @@ data class FlagCoverage(val categories: List<FlagCategoryCoverage> = emptyList()
 
     /** A missing bucket or sticky source cannot certify absence for this category. */
     fun covers(cat: Int): Boolean = listOf(FlagSource.BUCKET, FlagSource.STICKY).all { source ->
-        categories.any { it.cat == cat && it.source == source && it.failure == null && it.lastSuccessAt != null }
+        covers(cat, source)
+    }
+
+    fun covers(cat: Int, source: FlagSource): Boolean = categories.any {
+        it.cat == cat && it.source == source && it.failure == null && it.lastSuccessAt != null
     }
 
     val oldestSuccessAt: Instant? get() = categories.mapNotNull { it.lastSuccessAt }.minOrNull()
     val lastAttemptAt: Instant? get() = categories.maxOfOrNull { it.lastAttemptAt }
 }
 
-enum class FlagRefreshStatus { COMPLETE, PARTIAL, FAILED }
+enum class FlagRefreshStatus { UNVERIFIED, COMPLETE, PARTIAL, FAILED }

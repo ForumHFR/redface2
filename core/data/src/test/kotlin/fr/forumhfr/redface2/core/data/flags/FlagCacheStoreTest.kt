@@ -61,6 +61,20 @@ class FlagCacheStoreTest {
     }
 
     @Test
+    fun `migrated rows without coverage stay unverified and stale after reopening Room`() = runTest {
+        database.flagDao().replaceSnapshot("alice", FlagType.CYAN, FlagCacheSnapshot(
+            listOf(row(13).copy(source = FlagSource.LEGACY_UNKNOWN)), emptyList(),
+        ))
+        database.close()
+        open()
+        val loaded = requireNotNull(store.load(FlagType.CYAN, "alice"))
+        assertEquals(FlagRefreshStatus.UNVERIFIED, loaded.result.refreshStatus)
+        assertTrue(loaded.result.coverage.categories.isEmpty())
+        assertNull(loaded.result.issue)
+        assertFalse(loaded.isFresh)
+    }
+
+    @Test
     fun `failed category and successful empty category survive closing and reopening Room`() = runTest {
         database.flagDao().replaceSnapshot("alice", FlagType.CYAN, FlagCacheSnapshot(
             listOf(row(13), row(23)), coverage(listOf(13, 23)),

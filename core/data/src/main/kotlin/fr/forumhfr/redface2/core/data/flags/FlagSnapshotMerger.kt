@@ -79,6 +79,7 @@ internal fun FlagCacheSnapshot.toResult(): FlagsResult.Success {
         it.source == FlagSource.BUCKET && it.failure == null
     }
     val status = when {
+        coverage.isEmpty() -> FlagRefreshStatus.UNVERIFIED
         domainCoverage.isComplete -> FlagRefreshStatus.COMPLETE
         bucketsSucceeded -> FlagRefreshStatus.PARTIAL
         else -> FlagRefreshStatus.FAILED

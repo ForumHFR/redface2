@@ -122,6 +122,40 @@ class FlagsViewModelTest {
     }
 
     @Test
+    fun `tab resubscriptions keep stale or partial snapshots behind the auto refresh preference - 984`() = runTest {
+        for (incomplete in listOf(false, true)) {
+            for (enabled in listOf(false, true)) {
+                val snapshot = incompleteSuccess().copy(
+                    issue = if (incomplete) incompleteSuccess().issue else null,
+                    cachedAt = fixedClock.instant().minusSeconds(if (incomplete) 0 else 120),
+                    refreshStatus = if (incomplete) FlagRefreshStatus.PARTIAL else FlagRefreshStatus.COMPLETE,
+                )
+                val flags = FakeFlagRepository().apply {
+                    observationResults = mapOf(FlagType.CYAN to snapshot, FlagType.RED to snapshot)
+                    refreshResults = observationResults
+                }
+                val prefs = FakeUserPreferencesRepository().apply { flagsAutoRefresh.value = enabled }
+                val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags,
+                    FakeForumRepository(), prefs)
+                advanceUntilIdle()
+                vm.maybeAutoRefresh()
+                advanceUntilIdle()
+                vm.selectTab(FlagTab.Red)
+                advanceUntilIdle()
+                vm.maybeAutoRefresh()
+                advanceUntilIdle()
+                vm.selectTab(FlagTab.Cyan)
+                advanceUntilIdle()
+                val beforeLanding = flags.refreshCalls
+                vm.maybeAutoRefresh()
+                advanceUntilIdle()
+                assertEquals(if (enabled) listOf(FlagType.CYAN, FlagType.RED) else emptyList<FlagType>(), beforeLanding)
+                assertEquals(beforeLanding, flags.refreshCalls)
+            }
+        }
+    }
+
+    @Test
     fun `coverage and failed status survive unread filtering of every retained row - 984`() = runTest {
         val flags = FakeFlagRepository()
         val at = Instant.parse("2026-05-03T12:00:00Z")

@@ -101,7 +101,6 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
-import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
@@ -269,6 +268,7 @@ fun FlagsRoute(
         host = snackbarHostState,
         onConsumed = viewModel::consumeRefreshWarning,
         onRetry = viewModel::retryRefreshWarning,
+        hasRefreshBanner = (flagsState as? FlagsListUiState.Success)?.hasRefreshBanner == true,
     )
 
     // #385 — hoisted list state + scroll-to-top when the unread filter flips (cf.
@@ -1604,7 +1604,7 @@ internal fun FlagListBody(
     val settling = rememberPullSettling(pullState, state.isRefreshing)
     val pushRelease = pullPushReleaseFactor(state.isRefreshing, settling)
     val snapshot = (state.flagsState as? FlagsListUiState.Success)
-        ?.takeIf { it.refreshStatus != FlagRefreshStatus.COMPLETE }
+        ?.takeIf { it.hasRefreshBanner }
     val contentTopPadding = LocalFlagsContentTopPadding.current
     PullToRefreshBox(
         isRefreshing = state.isRefreshing,

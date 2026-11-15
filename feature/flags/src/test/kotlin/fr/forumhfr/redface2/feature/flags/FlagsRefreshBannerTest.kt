@@ -24,6 +24,27 @@ class FlagsRefreshBannerTest {
     val compose = createComposeRule()
 
     @Test
+    fun `unverified migrated snapshot has no failure banner`() {
+        mount(state(FlagRefreshStatus.UNVERIFIED).copy(coverage = FlagCoverage()))
+        compose.onNodeWithText("Actualisation impossible.", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Réessayer").assertDoesNotExist()
+    }
+
+    @Test
+    fun `one failed category uses the singular form`() {
+        mount(state(FlagRefreshStatus.PARTIAL))
+        compose.onNodeWithText("Liste partiellement actualisée : 1 catégorie non actualisée.").assertExists()
+    }
+
+    @Test
+    fun `multiple failed categories use the plural form`() {
+        val initial = state(FlagRefreshStatus.PARTIAL)
+        val failed = initial.coverage.categories.single()
+        mount(initial.copy(coverage = FlagCoverage(listOf(failed, failed.copy(cat = 23)))))
+        compose.onNodeWithText("Liste partiellement actualisée : 2 catégories non actualisées.").assertExists()
+    }
+
+    @Test
     fun `partial warning stays visible with no displayed rows and offers retry`() {
         var retries = 0
         mount(state(FlagRefreshStatus.PARTIAL), onRetry = { retries++ })

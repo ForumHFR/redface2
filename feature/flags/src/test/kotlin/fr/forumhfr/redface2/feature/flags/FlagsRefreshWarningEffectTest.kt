@@ -26,6 +26,27 @@ class FlagsRefreshWarningEffectTest {
     val compose = createComposeRule()
 
     @Test
+    fun `a durable banner consumes the warning without showing a second signal`() {
+        val host = SnackbarHostState()
+        val warning = mutableStateOf<FlagsRefreshWarning?>(warning())
+        var consumed = 0
+        compose.setContent {
+            FlagsRefreshWarningEffect(
+                warning = warning.value,
+                authSessionKey = "old",
+                selectedTab = FlagTab.Cyan,
+                host = host,
+                onConsumed = { consumed++; warning.value = null },
+                onRetry = { error("Retry belongs to the banner") },
+                hasRefreshBanner = true,
+            )
+        }
+        compose.waitForIdle()
+        assertNull(host.currentSnackbarData)
+        assertEquals(1, consumed)
+    }
+
+    @Test
     fun `retry is consumed once and remounting cannot replay the warning`() {
         val host = SnackbarHostState()
         val warning = mutableStateOf<FlagsRefreshWarning?>(warning())

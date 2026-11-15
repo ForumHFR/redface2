@@ -146,7 +146,10 @@
     <string name="flags_no_unread_category_subtitle">Appuyez sur la pilule de l\'onglet pour afficher aussi les sujets lus (« +lus »), ou désactivez « Masquer les catégories sans non-lu » pour voir les catégories vides.</string>
     <string name="flags_error">Impossible de récupérer les drapeaux. Vérifiez votre connexion ou réessayez.</string>
     <string name="flags_session_expired">Session HFR expirée. Reconnectez-vous pour actualiser vos drapeaux.</string>
-    <string name="flags_partially_updated">Liste partiellement actualisée : %1$d catégories non actualisées.</string>
+    <plurals name="flags_partially_updated">
+        <item quantity="one">Liste partiellement actualisée : %1$d catégorie non actualisée.</item>
+        <item quantity="other">Liste partiellement actualisée : %1$d catégories non actualisées.</item>
+    </plurals>
     <string name="flags_cached_update_failed">Liste du %1$s. Actualisation impossible.</string>
     <string name="flags_update_failed">Actualisation impossible. Les données disponibles sont affichées.</string>
     <string name="flags_invalid_response">Réponse HFR non reconnue. Les données disponibles sont affichées.</string>
