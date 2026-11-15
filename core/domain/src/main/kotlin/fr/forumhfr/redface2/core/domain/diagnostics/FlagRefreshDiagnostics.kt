@@ -33,6 +33,9 @@ class FlagRefreshDiagnostics @Inject constructor(
 ) {
     private val sequence = AtomicLong()
 
+    /** Holds admission through the actual detached transport, independently of UI trace lifetime. */
+    suspend fun <T> withRefresh(block: suspend () -> T): T = activity.withRefresh(block)
+
     /** An unowned fetch gets a source identity from the same sequence, without beginning a refresh. */
     fun fetch(type: FlagType, refreshId: Long?): FlagFetchTrace =
         FlagFetchTrace(refreshId ?: sequence.incrementAndGet(), type)

@@ -255,4 +255,19 @@
          rafraîchir, c'est le seul retour que le lecteur obtient. -->
     <string name="flags_post_submit_confirmed">Message publié</string>
     <string name="flags_post_edit_confirmed">Message modifié</string>
+    <string name="diagnostics_empty">Aucun log pour l’instant. Connectez-vous pour voir les événements.</string>
+    <string name="diagnostics_probe_start">Tester la connexion</string>
+    <string name="diagnostics_probe_cancel">Annuler</string>
+    <string name="diagnostics_probe_explanation">Envoie 36 requêtes anonymes au forum, par vagues de 1, 5, 10 et 20, pour mesurer votre connexion. Aucune donnée de compte n’est envoyée.</string>
+    <string name="diagnostics_probe_running">Test en cours — vague de %1$d requêtes…</string>
+    <string name="diagnostics_probe_cooldown">Test disponible dans %1$d s</string>
+    <string name="diagnostics_probe_wave">Vague de %1$d : %2$d réussites / %3$d échecs · connexion médiane : %4$s</string>
+    <string name="diagnostics_probe_milliseconds">%1$d ms</string>
+    <string name="diagnostics_probe_no_measurement">indisponible</string>
+    <string name="diagnostics_probe_disturbed">Mesure perturbée : une autre activité HFR a eu lieu pendant le test.</string>
+    <string name="diagnostics_probe_complete">Test terminé.</string>
+    <string name="diagnostics_probe_cancelled">Test annulé.</string>
+    <string name="diagnostics_probe_refresh_active">Veuillez attendre la fin du rafraîchissement des drapeaux.</string>
+    <string name="diagnostics_probe_storage_error">Impossible d’enregistrer le départ du test. Réessayez plus tard.</string>
+    <string name="diagnostics_probe_failed">Le test n’a pas pu se terminer. Réessayez plus tard.</string>
 </resources>

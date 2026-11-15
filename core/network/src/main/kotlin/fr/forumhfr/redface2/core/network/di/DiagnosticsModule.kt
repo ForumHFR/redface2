@@ -9,10 +9,16 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsContextProvider
 import fr.forumhfr.redface2.core.network.diagnostics.AndroidNetworkDiagnosticsContextProvider
 import javax.inject.Singleton
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeRunner
+import fr.forumhfr.redface2.core.network.diagnostics.OkHttpNetworkProbeRunner
 
 @Module
 @InstallIn(SingletonComponent::class)
 object DiagnosticsModule {
+    @Provides
+    @Singleton
+    fun provideNetworkProbeRunner(runner: OkHttpNetworkProbeRunner): NetworkProbeRunner = runner
+
     @Provides
     @Singleton
     fun provideDiagnosticsClock(): DiagnosticsClock = DiagnosticsClock(SystemClock::elapsedRealtimeNanos)

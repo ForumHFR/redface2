@@ -17,6 +17,7 @@ import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import javax.inject.Singleton
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeReservationStore
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -36,6 +37,12 @@ object UserPreferencesModule {
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class UserPreferencesBindingsModule {
+
+    @Binds
+    @Singleton
+    abstract fun bindNetworkProbeReservationStore(
+        impl: DataStoreNetworkProbeReservationStore,
+    ): NetworkProbeReservationStore
 
     @Binds
     @Singleton

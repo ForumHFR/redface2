@@ -988,7 +988,7 @@ class DefaultFlagRepository @Inject constructor(
                     trace.readCounters = admission::counters
                     val deferred = fetchScope.async(trace + admission + HfrRequestQueued(),
                         start = CoroutineStart.LAZY) {
-                        fetch(key)
+                        refreshDiagnostics.withRefresh { fetch(key) }
                     }
                     ObservedFetch(deferred, trace, admission)
                 }.also { started ->
@@ -1496,15 +1496,17 @@ class DefaultFlagRepository @Inject constructor(
         }
         val bodies = mutableMapOf<Int, Result<String>>()
         val deferred = fetchScope.async((trace ?: kotlin.coroutines.EmptyCoroutineContext) + session) {
-            withTimeoutOrNull(session.remainingMillis().coerceAtLeast(1)) {
-                coroutineScope {
-                    val expired = AtomicBoolean(false)
-                    cats.map { category ->
-                        async(HfrRequestQueued()) {
-                            val body = fetchStickyBody(category.id, expired, trace)
-                            synchronized(bodies) { bodies[category.id] = body }
-                        }
-                    }.awaitAll()
+            refreshDiagnostics.withRefresh {
+                withTimeoutOrNull(session.remainingMillis().coerceAtLeast(1)) {
+                    coroutineScope {
+                        val expired = AtomicBoolean(false)
+                        cats.map { category ->
+                            async(HfrRequestQueued()) {
+                                val body = fetchStickyBody(category.id, expired, trace)
+                                synchronized(bodies) { bodies[category.id] = body }
+                            }
+                        }.awaitAll()
+                    }
                 }
             }
             synchronized(bodies) { bodies.toMap() }
