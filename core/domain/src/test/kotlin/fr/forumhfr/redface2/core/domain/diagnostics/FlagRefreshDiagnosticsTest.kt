@@ -12,6 +12,35 @@ import org.junit.Test
 
 class FlagRefreshDiagnosticsTest {
     @Test
+    fun `read policy counters are logged once for a fetch shared by callers - 984`() {
+        val log = DiagnosticsLog()
+        val diagnostics = FlagRefreshDiagnostics(log)
+        val trace = diagnostics.begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN))
+        val counterOwner = Any()
+        val fetch = diagnostics.fetch(FlagType.CYAN, trace.id).apply {
+            readLimit = 5
+            readCounterOwner = counterOwner
+            readCounters = { mapOf("logicalOperations" to 9L, "applicationCalls" to 11L,
+                "retriesAttempted" to 2L, "retriesSucceeded" to 1L, "permitWaitMs" to 125L,
+                "deadlineCategories" to 3L) }
+        }
+        trace.attach(fetch, wasJoined = false)
+        trace.attach(fetch, wasJoined = true)
+        val replacement = diagnostics.fetch(FlagType.CYAN, trace.id).apply {
+            readLimit = 5
+            readCounterOwner = counterOwner
+            readCounters = fetch.readCounters
+        }
+        trace.attach(replacement, wasJoined = false)
+        trace.finish()
+        val summary = log.entries.value.last().message
+        listOf("readLimit=5", "logicalOperations=9", "applicationCalls=11", "retriesAttempted=2",
+            "retriesSucceeded=1", "permitWaitMs=125", "deadlineCategories=3").forEach {
+            assertTrue(summary, summary.contains(it))
+        }
+    }
+
+    @Test
     fun `begin captures immutable network and device context once for both refresh lines`() {
         var now = 100_900_000_000L
         val log = DiagnosticsLog()

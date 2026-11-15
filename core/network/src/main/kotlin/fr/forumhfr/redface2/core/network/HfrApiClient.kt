@@ -48,10 +48,11 @@ class HfrApiClient @Inject constructor(
     @param:AnonymousClient private val anonymous: OkHttpClient,
     @param:HfrBaseUrl private val baseUrl: HttpUrl,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    private val flagReadExecutor: FlagReadExecutor = FlagReadExecutor(FlagReadLimiter(), FlagReadJitter()),
 ) {
 
     suspend fun getCategories(useAuth: Boolean = false): String =
-        get(uri = CATEGORIES_URI, useAuth = useAuth)
+        get(uri = CATEGORIES_URI, useAuth = useAuth, flagOperation = FlagReadOperation.CATALOGUE)
 
     suspend fun getSubcategories(cat: Int): String =
         get(uri = "${CATEGORIES_URI}$cat/subcategories/", useAuth = false)
@@ -84,6 +85,7 @@ class HfrApiClient @Inject constructor(
         return get(
             uri = uri,
             useAuth = useAuth,
+            flagOperation = FlagReadOperation.STICKY_LAST,
             extraParams = mapOf(
                 PARAM_PAGE to page.toString(),
                 PARAM_RESULTS_PER_PAGE to resultsPerPage.toString(),
@@ -142,6 +144,7 @@ class HfrApiClient @Inject constructor(
         return get(
             uri = uri,
             useAuth = useAuth,
+            flagOperation = FlagReadOperation.CATEGORY_BUCKET,
             extraParams = mapOf(
                 PARAM_PAGE to page.toString(),
                 PARAM_RESULTS_PER_PAGE to resultsPerPage.toString(),
@@ -197,6 +200,7 @@ class HfrApiClient @Inject constructor(
         uri: String,
         useAuth: Boolean,
         extraParams: Map<String, String> = emptyMap(),
+        flagOperation: FlagReadOperation? = null,
     ): String {
         val builder = baseUrl.newBuilder()
             .encodedPath(REST_API_PATH)
@@ -205,20 +209,26 @@ class HfrApiClient @Inject constructor(
         val url = builder.build()
         val request = Request.Builder().url(url).get().build().withHfrDiagnostics(currentCoroutineContext())
         val client = if (useAuth) authenticated else anonymous
-        return if (useAuth) {
-            client.newCall(request).executeAuthenticatedJson()
+        val session = currentCoroutineContext()[FlagReadSession]
+        return if (session == null || flagOperation == null) {
+            executeJson(client.newCall(request), useAuth)
         } else {
-            client.newCall(request).executeCancellable { response ->
-                if (!response.isSuccessful) {
-                    // #324 — typed (status code) while keeping the richer REST diagnostic line.
-                    throw HfrServerException(
-                        code = response.code,
-                        url = url.toString(),
-                        detailMessage = failureMessage(response.code, url, response.body.string()),
-                    )
-                }
-                response.body.string()
+            flagReadExecutor.execute(client, request, flagOperation, session) { executeJson(it, useAuth) }
+        }
+    }
+
+    private suspend fun executeJson(call: Call, useAuth: Boolean): String = if (useAuth) {
+        call.executeAuthenticatedJson()
+    } else {
+        call.executeCancellable { response ->
+            if (!response.isSuccessful) {
+                throw HfrServerException(
+                    code = response.code,
+                    url = response.request.url.toString(),
+                    detailMessage = failureMessage(response.code, response.request.url, response.body.string()),
+                )
             }
+            response.body.string()
         }
     }
 

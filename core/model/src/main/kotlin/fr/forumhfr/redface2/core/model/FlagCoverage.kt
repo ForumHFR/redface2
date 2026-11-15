@@ -4,4 +4,4 @@ package fr.forumhfr.redface2.core.model
 enum class FlagSource { BUCKET, STICKY, LEGACY_UNKNOWN }
 
 /** Closed failure vocabulary; server bodies and exception messages never enter the cache. */
-enum class FlagFailureKind { NETWORK, SERVER, SESSION, SCHEMA, PAGE_CAP, UNKNOWN }
+enum class FlagFailureKind { NETWORK, SERVER, SESSION, SCHEMA, PAGE_CAP, UNKNOWN, DEADLINE }

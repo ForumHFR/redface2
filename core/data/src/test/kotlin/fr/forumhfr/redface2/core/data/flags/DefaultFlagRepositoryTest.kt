@@ -29,6 +29,8 @@ import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
+import fr.forumhfr.redface2.core.network.FlagReadClock
+import fr.forumhfr.redface2.core.network.FlagReadSession
 import fr.forumhfr.redface2.core.network.HfrApiClient
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
@@ -44,10 +46,12 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.first
@@ -55,6 +59,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -3106,6 +3111,207 @@ class DefaultFlagRepositoryTest {
         ))
     }
 
+    @Test
+    fun `collection publishes complete buckets at twelve seconds and retains unfinished cached categories - 984`() =
+        runTest {
+            val (api, forum) = wireDeps {
+                stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+                stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+            }
+            val monotonic = mockk<FlagReadClock>()
+            every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+            val repo = buildRepository(api, forum, flagReadClock = monotonic,
+                testDispatcher = UnconfinedTestDispatcher(testScheduler))
+            val old = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+            coEvery {
+                api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
+                    page = any(), resultsPerPage = any(), useAuth = true)
+            } coAnswers { awaitCancellation() }
+            val refresh = async { repo.refresh(FlagType.CYAN) }
+            advanceTimeBy(11_999)
+            assertFalse(refresh.isCompleted)
+            advanceTimeBy(1)
+            runCurrent()
+            assertTrue(refresh.isCompleted)
+            val result = refresh.await() as FlagsResult.Success
+            assertEquals(12_000L, testScheduler.currentTime)
+            assertEquals(old.flags, result.flags)
+            assertEquals(FlagRefreshStatus.PARTIAL, result.refreshStatus)
+            assertEquals(null, result.coverage.categories.single {
+                it.cat == 13 && it.source == FlagSource.BUCKET
+            }.failure)
+            assertTrue(result.coverage.categories.filter { it.cat == 23 }
+                .all { it.failure == FlagFailureKind.DEADLINE })
+        }
+
+    @Test
+    fun `sticky sweep is cancelled at the deadline while completed sticky partitions survive - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val monotonic = mockk<FlagReadClock>()
+        every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+        val repo = buildRepository(api, forum, flagReadClock = monotonic,
+                testDispatcher = UnconfinedTestDispatcher(testScheduler))
+        repo.refresh(FlagType.CYAN)
+        var cancelled = false
+        coEvery {
+            api.getTopicList(23, null, page = 1, resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            try { awaitCancellation() } finally { cancelled = true }
+        }
+        val refresh = async { repo.refresh(FlagType.CYAN) }
+        advanceTimeBy(12_000)
+        runCurrent()
+        assertTrue(refresh.isCompleted)
+        val result = refresh.await() as FlagsResult.Success
+        assertTrue(cancelled)
+        assertEquals(FlagFailureKind.DEADLINE, result.coverage.categories.single {
+            it.cat == 23 && it.source == FlagSource.STICKY
+        }.failure)
+        assertEquals(null, result.coverage.categories.single {
+            it.cat == 13 && it.source == FlagSource.STICKY
+        }.failure)
+        assertEquals(FlagRefreshStatus.PARTIAL, result.refreshStatus)
+    }
+
+    @Test
+    fun `catalogue deadline retains the whole previous snapshot and marks its categories - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val monotonic = mockk<FlagReadClock>()
+        every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+        val repo = buildRepository(api, forum, flagReadClock = monotonic,
+            testDispatcher = UnconfinedTestDispatcher(testScheduler))
+        val old = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        coEvery { forum.getCategories(any()) } coAnswers { awaitCancellation() }
+        val refresh = async { repo.refresh(FlagType.CYAN) }
+        advanceTimeBy(12_000)
+        runCurrent()
+        assertTrue(refresh.isCompleted)
+        val result = refresh.await() as FlagsResult.Success
+        assertEquals(old.flags, result.flags)
+        assertTrue(result.coverage.categories.all { it.failure == FlagFailureKind.DEADLINE })
+        assertEquals(FlagRefreshStatus.FAILED, result.refreshStatus)
+    }
+
+    @Test
+    fun `last consumer cancellation stops detached sticky sweep without publishing a failure - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        var started = 0
+        var cancelled = 0
+        coEvery {
+            api.getTopicList(any(), null, page = 1, resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            started++
+            try { awaitCancellation() } finally { cancelled++ }
+        }
+        val repo = buildRepository(api, forum, testDispatcher = UnconfinedTestDispatcher(testScheduler))
+        val first = async { repo.refresh(FlagType.CYAN) }
+        val second = async { repo.refresh(FlagType.CYAN) }
+        runCurrent()
+        assertEquals(2, started)
+        first.cancel()
+        runCurrent()
+        assertEquals(0, cancelled)
+        second.cancel()
+        runCurrent()
+        assertEquals(2, cancelled)
+    }
+
+    @Test
+    fun `joined caller cannot extend admitted collection deadline - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val monotonic = mockk<FlagReadClock>()
+        every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+        val repo = buildRepository(api, forum, flagReadClock = monotonic,
+                testDispatcher = UnconfinedTestDispatcher(testScheduler))
+        coEvery {
+            api.getTopicList(any(), null, page = 1, resultsPerPage = any(), useAuth = true)
+        } coAnswers { awaitCancellation() }
+        val first = async { repo.refresh(FlagType.CYAN) }
+        advanceTimeBy(10_000)
+        val joined = async { repo.refresh(FlagType.CYAN) }
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertTrue(first.isCompleted)
+        assertTrue(joined.isCompleted)
+        assertEquals(12_000L, testScheduler.currentTime)
+        assertEquals((first.await() as FlagsResult.Success).coverage,
+            (joined.await() as FlagsResult.Success).coverage)
+    }
+
+    @Test
+    fun `joined caller keeps original budget when its predecessor leaves and generation changes - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+            stubFlagsCall(13, HfrRestFlagBucket.READ, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.READ, EMPTY_PAGE)
+        }
+        val monotonic = mockk<FlagReadClock>()
+        every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+        val repo = buildRepository(api, forum, flagReadClock = monotonic,
+            testDispatcher = UnconfinedTestDispatcher(testScheduler))
+        repo.refresh(FlagType.CYAN)
+        coEvery {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } coAnswers { awaitCancellation() }
+        val first = async { repo.refresh(FlagType.CYAN) }
+        advanceTimeBy(5_000)
+        val joined = async { repo.refresh(FlagType.CYAN) }
+        runCurrent()
+        first.cancel()
+        runCurrent()
+        advanceTimeBy(5_000)
+        repo.refresh(FlagType.RED) // Fences CYAN; its remaining caller must retain the original 12 s.
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertTrue(joined.isCompleted)
+        assertEquals(12_000L, testScheduler.currentTime)
+        assertEquals(FlagRefreshStatus.PARTIAL, (joined.await() as FlagsResult.Success).refreshStatus)
+    }
+
+    @Test
+    fun `catalogue owner inherits read session while resolveFavorite stays outside - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+            stubFlagsCall(23, HfrRestFlagBucket.FAVORITES, EMPTY_PAGE)
+        }
+        coEvery { forum.getCategories(any()) } coAnswers {
+            assertTrue(currentCoroutineContext()[FlagReadSession] != null)
+            ForumResult.Success(sampleCategories)
+        }
+        coEvery {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.FAVORITES,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            assertNull(currentCoroutineContext()[FlagReadSession])
+            EMPTY_PAGE
+        }
+        val repo = buildRepository(api, forum)
+        repo.refresh(FlagType.CYAN)
+        coEvery {
+            api.getTopicList(23, null, page = 1, resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            assertNull(currentCoroutineContext()[FlagReadSession])
+            EMPTY_PAGE
+        }
+        val menuRepo = buildRepository(api, forum)
+        assertEquals(false, menuRepo.resolveFavorite(23, 999).getOrThrow())
+    }
+
     private fun sampleFlag(type: FlagType = FlagType.CYAN, topicId: Int = 35395): Flag = Flag(
         cat = 23,
         subcat = 550,
@@ -3165,6 +3371,8 @@ class DefaultFlagRepositoryTest {
         clock: Clock = Clock.fixed(Instant.parse("2026-05-03T12:00:00Z"), ZoneOffset.UTC),
         hfrClient: HfrClient = mockk(relaxed = true),
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
+        flagReadClock: FlagReadClock = FlagReadClock(),
+        testDispatcher: CoroutineDispatcher = UnconfinedTestDispatcher(),
     ): DefaultFlagRepository = DefaultFlagRepository(
         apiClient = apiClient,
         hfrClient = hfrClient,
@@ -3175,13 +3383,14 @@ class DefaultFlagRepositoryTest {
         flagCacheStore = FlagCacheStore(
             flagDao = flagDao,
             clock = clock,
-            ioDispatcher = UnconfinedTestDispatcher(),
+            ioDispatcher = testDispatcher,
         ),
         json = json,
-        ioDispatcher = UnconfinedTestDispatcher(),
+        ioDispatcher = testDispatcher,
         clock = clock,
         diagnostics = diagnostics,
         refreshDiagnostics = FlagRefreshDiagnostics(diagnostics),
+        flagReadClock = flagReadClock,
     )
 
     private fun stubAuthRepository(pseudo: String = "XaT"): AuthRepository {

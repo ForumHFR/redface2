@@ -27,6 +27,10 @@ import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.model.write.FlagAddResult
 import fr.forumhfr.redface2.core.model.write.FlagDeleteResult
+import fr.forumhfr.redface2.core.network.FlagReadClock
+import fr.forumhfr.redface2.core.network.FlagReadDeadlineException
+import fr.forumhfr.redface2.core.network.FlagReadLimiter
+import fr.forumhfr.redface2.core.network.FlagReadSession
 import fr.forumhfr.redface2.core.network.HfrApiClient
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
@@ -43,7 +47,9 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.BufferOverflow
@@ -62,6 +68,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 
 /**
@@ -115,6 +122,7 @@ class DefaultFlagRepository @Inject constructor(
     // mirroring what `DefaultDeletePostRepository` already does for a deletion.
     private val diagnostics: DiagnosticsLog,
     private val refreshDiagnostics: FlagRefreshDiagnostics,
+    private val flagReadClock: FlagReadClock = FlagReadClock(),
 ) : FlagRepository {
 
     private val cachedSuccesses: MutableMap<FlagType, FlagsResult.Success> = EnumMap(FlagType::class.java)
@@ -192,7 +200,11 @@ class DefaultFlagRepository @Inject constructor(
     // Accessed under cachedSuccesses; only active explicit pulls may reuse a refresh barrier.
     private val activeRefreshes = mutableMapOf<FlagType, ActiveRefresh>()
 
-    private class ObservedFetch(val deferred: Deferred<FlagsResult>, val trace: FlagFetchTrace) {
+    private class ObservedFetch(
+        val deferred: Deferred<FlagsResult>,
+        val trace: FlagFetchTrace,
+        val session: FlagReadSession,
+    ) {
         // Under inFlightFetches; a caller retains its reference through acceptance/publication.
         var callers = 0
     }
@@ -912,12 +924,15 @@ class DefaultFlagRepository @Inject constructor(
         publish: (suspend (FlagsResult) -> Unit)? = null,
     ): FlagsResult {
         val caller = currentCoroutineContext()[FlagRefreshTrace]
+        // Retain the original admission budget across generation replacements as well as joins.
+        var admission = FlagReadSession(flagReadClock::nowNanos)
         while (true) {
             val (key, observed) = generationMutex.withLock {
                 val key = synchronized(cachedSuccesses) { fetchKey(type, userId) }
-                val observed = joinOrStartFetch(key, caller)
+                val observed = joinOrStartFetch(key, caller, admission)
                 key to observed
             }
+            if (observed.session.remainingNanos() < admission.remainingNanos()) admission = observed.session
             try {
                 val result = awaitFetchResult(observed, userId)
                 val ownedResult = cacheWriteMutexes.getValue(type).withLock {
@@ -941,7 +956,11 @@ class DefaultFlagRepository @Inject constructor(
     }
 
     /** Called under generationMutex: a barrier cannot change between key capture and joining. */
-    private fun joinOrStartFetch(key: FetchKey, caller: FlagRefreshTrace?): ObservedFetch {
+    private fun joinOrStartFetch(
+        key: FetchKey,
+        caller: FlagRefreshTrace?,
+        admission: FlagReadSession,
+    ): ObservedFetch {
         val active = synchronized(cachedSuccesses) { activeRefreshes[key.type]?.takeIf { it.key == key } }
         var joined = false
         val observed = synchronized(inFlightFetches) {
@@ -952,10 +971,14 @@ class DefaultFlagRepository @Inject constructor(
                         // Register publication before a detached fetch can complete its first call.
                         caller?.attach(it, wasJoined = false)
                     }
-                    val deferred = fetchScope.async(trace + HfrRequestQueued(), start = CoroutineStart.LAZY) {
+                    trace.readLimit = FlagReadLimiter.MAX_CALLS
+                    trace.readCounterOwner = admission
+                    trace.readCounters = admission::counters
+                    val deferred = fetchScope.async(trace + admission + HfrRequestQueued(),
+                        start = CoroutineStart.LAZY) {
                         fetch(key)
                     }
-                    ObservedFetch(deferred, trace)
+                    ObservedFetch(deferred, trace, admission)
                 }.also { started ->
                     inFlightFetches[key] = started
                     started.deferred.invokeOnCompletion {
@@ -1057,52 +1080,63 @@ class DefaultFlagRepository @Inject constructor(
     }
 
     private suspend fun collectRefresh(key: FetchKey): FlagRefreshBatch {
-        val cats = measured(FlagRefreshPhase.CATALOGUE) { loadCategories() }
-        currentCoroutineContext()[FlagFetchTrace]?.categoryCount = cats.size
-        val expired = AtomicBoolean(false)
-        var firstFailure: Throwable? = null
-        val buckets = measured(FlagRefreshPhase.BUCKETS) {
-            coroutineScope {
-                cats.map { category ->
-                    async(HfrRequestQueued()) {
-                        try {
-                            val flags = fetchAllPages(category.id, key.type.toBucket(), key.type,
-                                failOnTruncation = true, sessionExpired = expired)
-                            CategoryRefreshOutcome(category.id, FlagSource.BUCKET, flags, clock.instant())
-                        } catch (cancellation: CancellationException) {
-                            throw cancellation
-                        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
-                            val failure = error.toFlagFailureKind()
-                            if (failure == FlagFailureKind.SESSION) expired.set(true)
-                            synchronized(expired) {
-                                if (firstFailure == null || failure == FlagFailureKind.SESSION) firstFailure = error
-                            }
-                            CategoryRefreshOutcome(category.id, FlagSource.BUCKET, receivedAt = clock.instant(),
-                                failure = failure)
-                        }
+        val session = checkNotNull(currentCoroutineContext()[FlagReadSession])
+        val collection = FlagRefreshCollection(clock)
+        val completed = try {
+            withTimeoutOrNull(session.remainingMillis().coerceAtLeast(1)) {
+                session.checkBudget()
+                val cats = measured(FlagRefreshPhase.CATALOGUE) { loadCategories() }
+                collection.categories = cats
+                currentCoroutineContext()[FlagFetchTrace]?.categoryCount = cats.size
+                val expired = AtomicBoolean(false)
+                val buckets = measured(FlagRefreshPhase.BUCKETS) {
+                    collectBuckets(cats, key.type, expired, collection)
+                }
+                if (!expired.get() && buckets.any { it.failure == null }) {
+                    measured(FlagRefreshPhase.STICKIES) {
+                        fetchStickyFlagSupplement(cats, key.type, buckets.flatMap { it.flags }, key,
+                            collection::record)
                     }
-                }.awaitAll()
-            }
+                }
+                true
+            } ?: false
+        } catch (_: FlagReadDeadlineException) {
+            false
         }
-        // Keep the shared best-effort supplement in its existing phase, after all buckets.
-        val stickies = if (!expired.get() && buckets.any { it.failure == null }) {
-            measured(FlagRefreshPhase.STICKIES) {
-                fetchStickyFlagSupplement(cats, key.type, buckets.flatMap { it.flags },
-                    key.userId, key.sessionGeneration, key.sweepGeneration)
-            }
-        } else {
-            cats.map { CategoryRefreshOutcome(it.id, FlagSource.STICKY, receivedAt = clock.instant(),
-                failure = firstFailure?.toFlagFailureKind() ?: FlagFailureKind.UNKNOWN) }
+        val batch = collection.finish(deadline = !completed)
+        if (!completed || batch.outcomes.any { it.failure == FlagFailureKind.DEADLINE }) {
+            currentCoroutineContext()[FlagFetchTrace]?.gap(FlagRefreshGap.COLLECTION_DEADLINE)
         }
-        // A valid empty catalogue still certifies an empty cache. Category 0 is a local marker,
-        // never an HFR request; it disappears when a later catalogue contains public categories.
-        val outcomes = (buckets + stickies).ifEmpty {
-            listOf(FlagSource.BUCKET, FlagSource.STICKY).map {
-                CategoryRefreshOutcome(0, it, receivedAt = clock.instant())
+        session.expiredCategories(batch.outcomes.filter { it.failure == FlagFailureKind.DEADLINE }
+            .map { it.cat }.distinct().size)
+        return batch
+    }
+
+    private suspend fun collectBuckets(
+        cats: List<Category>,
+        type: FlagType,
+        expired: AtomicBoolean,
+        collection: FlagRefreshCollection,
+    ): List<CategoryRefreshOutcome> = coroutineScope {
+        cats.map { category ->
+            async(HfrRequestQueued()) {
+                val outcome = try {
+                    val flags = fetchAllPages(category.id, type.toBucket(), type,
+                        failOnTruncation = true, sessionExpired = expired)
+                    currentCoroutineContext()[FlagReadSession]?.checkBudget()
+                    CategoryRefreshOutcome(category.id, FlagSource.BUCKET, flags, clock.instant())
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+                    val failure = error.toFlagFailureKind()
+                    if (failure == FlagFailureKind.SESSION) expired.set(true)
+                    collection.failed(error)
+                    CategoryRefreshOutcome(category.id, FlagSource.BUCKET, receivedAt = clock.instant(),
+                        failure = failure)
+                }
+                outcome.also(collection::record)
             }
-        }
-        return FlagRefreshBatch(cats.map { it.id }, outcomes, clock.instant(), firstFailure,
-            cats.associate { it.id to it.name })
+        }.awaitAll()
     }
 
     /** The mutation lock and generation barrier cover the read/merge, ONE Room write and publication. */
@@ -1121,6 +1155,9 @@ class DefaultFlagRepository @Inject constructor(
                     return@commit null
                 }
                 val snapshot = flagCacheStore.merge(key.userId, type, batch)
+                currentCoroutineContext()[FlagReadSession]?.expiredCategories(
+                    snapshot.coverage.filter { it.failure == FlagFailureKind.DEADLINE }.map { it.cat }.distinct().size,
+                )
                 val hasContent = snapshot.rows.isNotEmpty() || snapshot.coverage.any { it.lastSuccessAt != null }
                 if (!hasContent) return@commit FlagsResult.Failure(
                     batch.cause ?: IllegalStateException("Flags refresh produced no available snapshot"),
@@ -1297,15 +1334,16 @@ class DefaultFlagRepository @Inject constructor(
      * #862 widened the scope from no-subcategory cats to ALL cats (~19 parallel GETs per refresh,
      * same order of magnitude as the bucket fan-out itself) — the drop was proven category-wide.
      */
-    @Suppress("LongParameterList") // generation guards ride the fetch context — a holder would obscure them
     private suspend fun fetchStickyFlagSupplement(
         cats: List<Category>,
         type: FlagType,
         alreadyPresent: List<Flag>,
-        userId: String,
-        sessionGen: Int,
-        sweepGen: Int,
-    ): List<CategoryRefreshOutcome> {
+        key: FetchKey,
+        record: (CategoryRefreshOutcome) -> Unit,
+    ) {
+        val userId = key.userId
+        val sessionGen = key.sessionGeneration
+        val sweepGen = key.sweepGeneration
         // A stale generation (post-clearSessionCache caller, or a fetch that started under an
         // older refresh burst) or an empty catalogue all degrade to « no supplement » — never
         // create a sweep for a logged-out account, never join a newer burst's sweep.
@@ -1313,32 +1351,52 @@ class DefaultFlagRepository @Inject constructor(
         val sweep = if (cats.isEmpty()) null else stickySweep(cats, userId, sessionGen, sweepGen, trace)
         if (sweep == null) {
             if (cats.isNotEmpty()) trace?.gap(FlagRefreshGap.STICKY_GENERATION)
-            return cats.map { CategoryRefreshOutcome(it.id, FlagSource.STICKY, receivedAt = clock.instant(),
-                failure = FlagFailureKind.UNKNOWN) }
+            cats.forEach { record(CategoryRefreshOutcome(it.id, FlagSource.STICKY,
+                receivedAt = clock.instant(), failure = FlagFailureKind.UNKNOWN)) }
+            return
         }
         val present = alreadyPresent.mapTo(mutableSetOf()) { it.cat to it.topicId }
-        val bodies = try {
+        var deadline = false
+        try {
             sweep.deferred.await()
+        } catch (timeout: TimeoutCancellationException) {
+            deadline = true
+            throw timeout
         } catch (cancellation: CancellationException) {
-            // Only a superseded account's shared sweep may degrade. An active account's REST
-            // cancellation must propagate even when this detached caller itself remains active.
             currentCoroutineContext().ensureActive()
             val sameSession = synchronized(cachedSuccesses) { sessionGeneration == sessionGen }
             if (sameSession && currentUserId() == userId) throw cancellation
             trace?.gap(FlagRefreshGap.STICKY_CANCELLED)
-            Log.w(LOG_TAG, "Sticky sweep cancelled (session change) — empty supplement", cancellation)
-            emptyMap()
+        } finally {
+            // Record completed categories even when the collection deadline interrupts await().
+            try {
+                stickyOutcomes(cats, type, present, sweep, trace).forEach(record)
+                sweep.trace?.let { trace?.absorbSticky(it) }
+            } finally {
+                releaseSweep(sweep, deadline)
+            }
         }
-        sweep.trace?.let { trace?.absorbSticky(it) }
-        return cats.map { category ->
-            val body = bodies[category.id] ?: Result.failure(IllegalStateException("Sticky sweep unavailable"))
+    }
+
+    private fun stickyOutcomes(
+        cats: List<Category>,
+        type: FlagType,
+        present: Set<Pair<Int, Int>>,
+        sweep: ObservedSweep,
+        trace: FlagFetchTrace?,
+    ): List<CategoryRefreshOutcome> {
+        val bodies = synchronized(sweep.bodies) { sweep.bodies.toMap() }
+        return cats.mapNotNull { category ->
+            val body = bodies[category.id] ?: if (sweep.deferred.isCompleted) {
+                Result.failure(FlagReadDeadlineException())
+            } else {
+                return@mapNotNull null
+            }
             try {
                 val envelope = decodeFlagPage(json, body.getOrThrow())
                 val flags = RestFlagMappers.toStickyFlags(envelope, type, category.id)
                     .filter { (it.cat to it.topicId) !in present }
                 CategoryRefreshOutcome(category.id, FlagSource.STICKY, flags, clock.instant())
-            } catch (cancellation: CancellationException) {
-                throw cancellation
             } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
                 if (body.isSuccess) {
                     trace?.gap(FlagRefreshGap.STICKY_DECODE, stickyCategory = category.id)
@@ -1348,6 +1406,20 @@ class DefaultFlagRepository @Inject constructor(
                     failure = error.toFlagFailureKind())
             }
         }
+    }
+
+    private suspend fun releaseSweep(sweep: ObservedSweep, deadline: Boolean) {
+        val drain = synchronized(stickySweeps) {
+            sweep.callers--
+            val stop = (sweep.callers == 0 || deadline) && !sweep.deferred.isCompleted
+            if (stop) {
+                stickySweeps.entries.removeAll { it.value === sweep }
+                sweep.deferred.cancel()
+            }
+            stop
+        }
+        // Await real Call cancellation and response closure before publishing the partial snapshot.
+        if (drain) withContext(NonCancellable) { sweep.deferred.join() }
     }
 
     /**
@@ -1364,67 +1436,78 @@ class DefaultFlagRepository @Inject constructor(
      * drops everything. Per-cat failures carry a failed Result (best-effort, #251). Older
      * generations are cancelled at their barrier: none of their callers can publish those results.
      */
-    private fun stickySweep(
+    private suspend fun stickySweep(
         cats: List<Category>,
         userId: String,
         sessionGen: Int,
         sweepGen: Int,
         parentTrace: FlagFetchTrace?,
-    ): ObservedSweep? = synchronized(stickySweeps) {
-        val ownsSweep = synchronized(cachedSuccesses) {
-            sessionGen == sessionGeneration && sweepGen == sweepGeneration
-        }
-        if (!ownsSweep) return@synchronized null
-        val key = SweepKey(
-            sessionGeneration = sessionGen,
-            sweepGeneration = sweepGen,
-            userId = userId,
-            catIds = cats.map { it.id },
-        )
-        val existing = stickySweeps[key]
-        if (existing != null) {
-            parentTrace?.joinedStickySweep()
-            existing.trace?.let { parentTrace?.sticky(it) }
-            existing
-        } else {
-            val trace = parentTrace?.let { parent ->
-                FlagFetchTrace(parent.refreshId, parent.type).also { parent.sticky(it) }
+    ): ObservedSweep? {
+        val session = checkNotNull(currentCoroutineContext()[FlagReadSession])
+        return synchronized(stickySweeps) {
+            val ownsSweep = synchronized(cachedSuccesses) {
+                sessionGen == sessionGeneration && sweepGen == sweepGeneration
             }
-            val deferred = fetchScope.async(trace ?: kotlin.coroutines.EmptyCoroutineContext) {
+            if (!ownsSweep) return@synchronized null
+            val key = SweepKey(
+                sessionGeneration = sessionGen,
+                sweepGeneration = sweepGen,
+                userId = userId,
+                catIds = cats.map { it.id },
+            )
+            val existing = stickySweeps[key]
+            if (existing != null && !existing.deferred.isCancelled) {
+                existing.callers++
+                parentTrace?.joinedStickySweep()
+                existing.trace?.let { parentTrace?.sticky(it) }
+                existing
+            } else {
+                startStickySweep(cats, parentTrace, session).also { stickySweeps[key] = it }
+            }
+        }
+    }
+
+    private fun startStickySweep(
+        cats: List<Category>,
+        parentTrace: FlagFetchTrace?,
+        session: FlagReadSession,
+    ): ObservedSweep {
+        val trace = parentTrace?.let { parent ->
+            FlagFetchTrace(parent.refreshId, parent.type).also { parent.sticky(it) }
+        }
+        val bodies = mutableMapOf<Int, Result<String>>()
+        val deferred = fetchScope.async((trace ?: kotlin.coroutines.EmptyCoroutineContext) + session) {
+            withTimeoutOrNull(session.remainingMillis().coerceAtLeast(1)) {
                 coroutineScope {
                     val expired = AtomicBoolean(false)
                     cats.map { category ->
                         async(HfrRequestQueued()) {
-                            category.id to runCatching {
-                                if (expired.get()) throw SessionExpiredException("[redacted]")
-                                trace?.page(sticky = true)
-                                apiClient.getTopicList(
-                                    cat = category.id,
-                                    subcat = null,
-                                    page = 1,
-                                    resultsPerPage = DEFAULT_RESULTS_PER_PAGE,
-                                    useAuth = true,
-                                )
-                            }.onFailure { throwable ->
-                                if (throwable is SessionExpiredException) expired.set(true)
-                                // Never swallow a coroutine cancellation as a best-effort
-                                // "miss" — rethrow it so structured concurrency stays intact
-                                // (#251 Codex review). Other failures retain this source's cache.
-                                if (throwable is CancellationException) throw throwable
-                                trace?.gap(FlagRefreshGap.STICKY_REQUEST, stickyCategory = category.id)
-                                trace?.failed(FlagRefreshPhase.STICKIES, throwable, fatal = false)
-                                Log.w(
-                                    LOG_TAG,
-                                    "Sticky sweep failed for cat=${category.id} (best-effort)",
-                                    throwable,
-                                )
-                            }
+                            val body = fetchStickyBody(category.id, expired, trace)
+                            synchronized(bodies) { bodies[category.id] = body }
                         }
-                    }.awaitAll().toMap()
+                    }.awaitAll()
                 }
             }
-            ObservedSweep(deferred, trace).also { stickySweeps[key] = it }
+            synchronized(bodies) { bodies.toMap() }
         }
+        return ObservedSweep(deferred, trace, bodies)
+    }
+
+    private suspend fun fetchStickyBody(
+        cat: Int,
+        expired: AtomicBoolean,
+        trace: FlagFetchTrace?,
+    ): Result<String> = runCatching {
+        checkFlagSession(expired)
+        trace?.page(sticky = true)
+        apiClient.getTopicList(cat = cat, subcat = null, page = 1,
+            resultsPerPage = DEFAULT_RESULTS_PER_PAGE, useAuth = true)
+    }.onFailure { throwable ->
+        if (throwable is SessionExpiredException) expired.set(true)
+        if (throwable is CancellationException) throw throwable
+        trace?.gap(FlagRefreshGap.STICKY_REQUEST, stickyCategory = cat)
+        trace?.failed(FlagRefreshPhase.STICKIES, throwable, fatal = false)
+        Log.w(LOG_TAG, "Sticky sweep failed for cat=$cat (best-effort)", throwable)
     }
 
     /** #862 — identity of one shared sweep : session + refresh burst + account + category set. */
@@ -1435,7 +1518,13 @@ class DefaultFlagRepository @Inject constructor(
         val catIds: List<Int>,
     )
 
-    private data class ObservedSweep(val deferred: Deferred<Map<Int, Result<String>>>, val trace: FlagFetchTrace?)
+    private class ObservedSweep(
+        val deferred: Deferred<Map<Int, Result<String>>>,
+        val trace: FlagFetchTrace?,
+        val bodies: MutableMap<Int, Result<String>>,
+    ) {
+        var callers = 1 // Under stickySweeps; released even when await is cancelled.
+    }
 
     private val stickySweeps: MutableMap<SweepKey, ObservedSweep> = mutableMapOf()
 

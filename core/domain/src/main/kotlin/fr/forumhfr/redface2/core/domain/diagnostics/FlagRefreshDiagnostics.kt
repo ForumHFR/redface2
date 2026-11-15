@@ -18,7 +18,7 @@ enum class FlagRefreshTrigger(val label: String) {
 
 enum class FlagRefreshGap {
     CATALOGUE_FALLBACK, EMPTY_BUCKET_PAGE, PAGE_CAP, STICKY_GENERATION, STICKY_CANCELLED, STICKY_REQUEST,
-    STICKY_DECODE, ROOM_WRITE, CACHE_GENERATION,
+    STICKY_DECODE, ROOM_WRITE, CACHE_GENERATION, COLLECTION_DEADLINE,
 }
 
 /** Injected process-local identity owner; no UUID, account or global mutable singleton. */
@@ -118,7 +118,8 @@ class FlagRefreshTrace internal constructor(
         // Write the summary last; details of this refresh cannot evict its trigger or summary.
         log.record(DiagnosticsLog.Level.INFO, FlagRefreshDiagnostics.TAG,
             "refresh=$id types=${types.joinToString { it.name }} ${resultLine(gaps)} " +
-                "${fetchLine()} ${callLine(calls, omitted)} ${transportLine(calls)} ${phaseLine(calls)} " +
+                "${fetchLine()} ${readLine()} ${callLine(calls, omitted)} " +
+                "${transportLine(calls)} ${phaseLine(calls)} " +
                 "triggerToBeginMs=$triggerToBeginMs firstFreshPublicationMs=${publicationMs ?: "-"} " +
                 "totalMs=${elapsedDiagnosticMs(started)} slowest=[${slowestLine(calls)}] $contextLine")
     }
@@ -157,6 +158,14 @@ class FlagRefreshTrace internal constructor(
             "catalogue=${if (fetches.any { it.joinedCatalogue() }) "joined" else "local"} " +
             "stickyGenerationRefused=${fetches.sumOf { it.stickyGenerationRefused }} " +
             "stickySweepsJoined=${fetches.sumOf { it.stickySweepsJoined }}"
+
+    private fun readLine(): String {
+        val counters = fetches.distinctBy { it.readCounterOwner ?: it }.map { it.readCounters() }
+        val totals = counters.flatMap { it.keys }.distinct().joinToString(" ") { key ->
+            "$key=${counters.sumOf { it[key] ?: 0L }}"
+        }
+        return "readLimit=${fetches.maxOfOrNull { it.readLimit } ?: 0} $totals"
+    }
 
     private fun callLine(calls: List<HfrCallSummary>, omitted: Int): String {
         val durations = calls.map { it.totalMs }.sorted()
@@ -210,6 +219,9 @@ class FlagFetchTrace(val refreshId: Long, val type: FlagType) : AbstractCoroutin
     private val phases = mutableMapOf<FlagRefreshPhase, Long>()
     private val phaseFailures = mutableMapOf<FlagRefreshPhase, Int>()
     private var finished = false
+    @Volatile var readLimit: Int = 0
+    @Volatile var readCounterOwner: Any? = null
+    @Volatile var readCounters: () -> Map<String, Long> = { emptyMap() }
     var categoryCount: Int = 0
     var bucketPages: Int = 0
         private set

@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.data.forum.RestTopic
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.model.FlagFailureKind
+import fr.forumhfr.redface2.core.network.FlagReadDeadlineException
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.serialization.SerializationException
@@ -32,6 +33,7 @@ internal fun Throwable.toFlagFailureKind(): FlagFailureKind = when (this) {
     is HfrServerException -> FlagFailureKind.SERVER
     is SerializationException -> FlagFailureKind.SCHEMA
     is FlagPageCapException -> FlagFailureKind.PAGE_CAP
+    is FlagReadDeadlineException -> FlagFailureKind.DEADLINE
     is IOException -> FlagFailureKind.NETWORK
     else -> FlagFailureKind.UNKNOWN
 }
