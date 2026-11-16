@@ -286,6 +286,7 @@
     <string name="diagnostics_probe_storage_error">Impossible d’enregistrer le départ du test. Réessayez plus tard.</string>
     <string name="diagnostics_probe_failed">Le test n’a pas pu se terminer. Réessayez plus tard.</string>
     <string name="diagnostics_flags_experimental">Actualisation expérimentale des drapeaux</string>
+    <string name="diagnostics_flags_experimental_title">Actualisation expérimentale</string>
     <string name="diagnostics_flags_experimental_help">Pour vos essais : choisissez une stratégie. Les données non actualisées sont conservées.</string>
     <string name="diagnostics_flags_baseline">Socle (par défaut)</string>
     <string name="diagnostics_flags_legacy">Ancien</string>
@@ -298,6 +299,7 @@
     <string name="diagnostics_flags_n">N choisi : %1$d</string>
     <string name="diagnostics_flags_effective_n">N effectif : %1$d</string>
     <string name="diagnostics_flags_unbounded">N effectif : sans borne</string>
+    <string name="diagnostics_flags_n_ignored">N est ignoré avec la stratégie Ancien.</string>
     <string name="diagnostics_flags_decrease">Diminuer N</string>
     <string name="diagnostics_flags_increase">Augmenter N</string>
     <string name="diagnostics_flags_retry">Reprise applicative (hors reprises internes du réseau)</string>
