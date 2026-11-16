@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallSummary
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCatalogueTrace
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrEndpoint
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrProbeTraffic
 import fr.forumhfr.redface2.core.model.FlagType
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
@@ -24,8 +25,17 @@ import org.junit.Test
 class HfrNetworkDiagnosticsTest {
     private val log = DiagnosticsLog()
     private var now = 0L
-    private val collector = HfrNetworkDiagnostics(log) { now }
+    private val probeTraffic = HfrProbeTraffic()
+    private val collector = HfrNetworkDiagnostics(log, probeTraffic = probeTraffic) { now }
     private val diagnostics = FlagRefreshDiagnostics(log)
+
+    @Test
+    fun `ordinary completed calls disturb a probe without leaving active traffic`() {
+        val before = probeTraffic.snapshot()
+        complete(duration = 10)
+        assertTrue(probeTraffic.disturbed(before))
+        org.junit.Assert.assertFalse(probeTraffic.snapshot().alreadyActive)
+    }
 
     @Test
     fun `fetch without a refresh samples fast successes and immediately publishes slow failed and cancelled calls`() {

@@ -31,6 +31,26 @@ import org.junit.Test
 
 class DiagnosticsExportTest {
     @Test
+    fun `probe structured waves and summary survive export allowlist`() {
+        val log = DiagnosticsLog()
+        val result = fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeRequestResult(
+            tcpMs = 12, tlsMs = 34, headersReceivedMs = 56, firstBodyByteMs = 78, totalMs = 90,
+        )
+        log.record(DiagnosticsLog.Level.INFO,
+            fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeService.TAG,
+            "wave size=1 disturbed=true results=[${result.line()}]")
+        log.record(DiagnosticsLog.Level.INFO,
+            fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeService.TAG,
+            "summary outcome=complete waves=1 requests=1 disturbed=true")
+        val exported = formatDiagnosticsExport(log.entries.value, SimpleDateFormat("HH:mm:ss.SSS", Locale.US),
+            DiagnosticsEnvironment("0.70.0", 1, "dev", 37, "Google", "Test"))
+        assertTrue(exported.contains("wave size=1 disturbed=true results=[tcpMs=12 tlsMs=34"))
+        assertTrue(exported.contains("headersReceivedMs=56 firstBodyByteMs=78 totalMs=90"))
+        assertTrue(exported.contains("summary outcome=complete waves=1 requests=1 disturbed=true"))
+        assertTrue(exported.endsWith("0 entrées locales non exportées"))
+    }
+
+    @Test
     fun `new refresh and call fields survive export with bounded timelines details and no identifying data`() {
         val log = DiagnosticsLog()
         var now = 0L

@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.flags
 
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerDiagnostics
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeService
 import java.text.SimpleDateFormat
 import java.util.Date
 
@@ -19,7 +20,9 @@ internal data class DiagnosticsEnvironment(
 // Entire messages of these tags are exported. New fields must use closed values/numbers only,
 // including refresh timelines, saver states, errno categories, intent and IP family (never its address).
 // Legacy producers remain visible only in the local viewer.
-private val diagnosticsExportTags = setOf("FlagsRefresh", "HfrCall", "AppForeground", SmileyPickerDiagnostics.TAG)
+private val diagnosticsExportTags = setOf(
+    "FlagsRefresh", "HfrCall", "AppForeground", SmileyPickerDiagnostics.TAG, NetworkProbeService.TAG,
+)
 
 internal fun formatDiagnosticsExport(
     entries: List<DiagnosticsLog.Entry>,

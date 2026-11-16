@@ -7,19 +7,24 @@ import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallOutcome
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallSummary
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCatalogueTrace
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrRefreshActivity
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrProbeTraffic
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** Shared by all HFR client factories, while image calls bypass it entirely. */
+/** Shared by HFR client factories; images contribute only to probe interference. */
 @Singleton
 class HfrNetworkDiagnostics internal constructor(
     private val log: DiagnosticsLog,
     private val refreshActivity: HfrRefreshActivity = HfrRefreshActivity(),
+    private val probeTraffic: HfrProbeTraffic = HfrProbeTraffic(),
     private val nanoTime: () -> Long,
 ) {
-    @Inject constructor(log: DiagnosticsLog, refreshActivity: HfrRefreshActivity = HfrRefreshActivity()) :
-        this(log, refreshActivity, System::nanoTime)
+    @Inject constructor(
+        log: DiagnosticsLog,
+        refreshActivity: HfrRefreshActivity = HfrRefreshActivity(),
+        probeTraffic: HfrProbeTraffic = HfrProbeTraffic(),
+    ) : this(log, refreshActivity, probeTraffic, System::nanoTime)
     private val sequence = AtomicLong()
     private val inFlight = linkedMapOf<Long, CallIsolation>()
     private val isolatedSamples = ArrayDeque<Long>()
@@ -28,8 +33,12 @@ class HfrNetworkDiagnostics internal constructor(
 
     fun nextId(): Long = sequence.incrementAndGet()
 
+    internal fun imageStarted() { probeTraffic.started() }
+    internal fun imageFinished() { probeTraffic.finished() }
+
     @Synchronized
     fun started(id: Long): Int {
+        probeTraffic.started()
         val overlapped = inFlight.isNotEmpty()
         inFlight.values.forEach { it.overlapped = true }
         inFlight[id] = CallIsolation(refreshActivity.idleGeneration(), overlapped)
@@ -54,6 +63,7 @@ class HfrNetworkDiagnostics internal constructor(
     @Synchronized
     private fun finishIsolation(summary: HfrCallSummary): Boolean {
         val call = inFlight.remove(summary.id)
+        if (call != null) probeTraffic.finished()
         return call != null && !call.overlapped && call.idleGeneration != null &&
             call.idleGeneration == refreshActivity.idleGeneration()
     }
