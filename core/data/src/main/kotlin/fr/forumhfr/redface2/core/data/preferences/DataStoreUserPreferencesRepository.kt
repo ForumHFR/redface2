@@ -17,6 +17,8 @@ import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshPolicy
+import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshStrategy
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
@@ -537,6 +539,28 @@ class DataStoreUserPreferencesRepository @Inject constructor(
         persist {
             dataStore.edit { prefs ->
                 prefs[KEY_AVATAR_BORDER] = enabled
+            }
+        }
+    }
+
+    override fun observeFlagsRefreshPolicy(): Flow<FlagsRefreshPolicy> = dataStore.data
+        .map { prefs ->
+            FlagsRefreshPolicy(
+                strategy = FlagsRefreshStrategy.fromId(prefs[KEY_FLAGS_REFRESH_STRATEGY]),
+                concurrency = (prefs[KEY_FLAGS_REFRESH_CONCURRENCY] ?: FlagsRefreshPolicy.DEFAULT_CONCURRENCY)
+                    .coerceIn(FlagsRefreshPolicy.MIN_CONCURRENCY, FlagsRefreshPolicy.MAX_CONCURRENCY),
+                applicationRetry = prefs[KEY_FLAGS_REFRESH_RETRY] ?: true,
+            )
+        }
+        .distinctUntilChanged()
+        .catch { emit(FlagsRefreshPolicy()) }
+
+    override suspend fun setFlagsRefreshPolicy(policy: FlagsRefreshPolicy) {
+        persist {
+            dataStore.edit { prefs ->
+                prefs[KEY_FLAGS_REFRESH_STRATEGY] = policy.strategy.id
+                prefs[KEY_FLAGS_REFRESH_CONCURRENCY] = policy.concurrency
+                prefs[KEY_FLAGS_REFRESH_RETRY] = policy.applicationRetry
             }
         }
     }
@@ -1465,6 +1489,9 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             booleanPreferencesKey("sync_private_messages_write_enabled")
 
         // #378 — auto-refresh of the flags lists on landing (default ON; Settings opt-out).
+        private val KEY_FLAGS_REFRESH_STRATEGY = stringPreferencesKey("flags_refresh_strategy")
+        private val KEY_FLAGS_REFRESH_CONCURRENCY = intPreferencesKey("flags_refresh_concurrency")
+        private val KEY_FLAGS_REFRESH_RETRY = booleanPreferencesKey("flags_refresh_retry")
         val KEY_FLAGS_AUTO_REFRESH = booleanPreferencesKey("flags_auto_refresh")
         val KEY_TOPIC_PAGE_FABS = booleanPreferencesKey("topic_page_fabs")
         val KEY_MP_UNREAD_BADGE = booleanPreferencesKey("mp_unread_badge")

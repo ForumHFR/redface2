@@ -14,8 +14,11 @@ data class FlagCategoryCoverage(
 )
 
 data class FlagCoverage(val categories: List<FlagCategoryCoverage> = emptyList()) {
+    val isGlobalObservation: Boolean get() = categories.any { it.source == FlagSource.GLOBAL }
+
     val isComplete: Boolean
-        get() = categories.isNotEmpty() && categories.all { it.failure == null && it.lastSuccessAt != null } &&
+        get() = !isGlobalObservation && categories.isNotEmpty() &&
+            categories.all { it.failure == null && it.lastSuccessAt != null } &&
             categories.map { it.cat }.distinct().all(::covers)
 
     /** A missing bucket or sticky source cannot certify absence for this category. */

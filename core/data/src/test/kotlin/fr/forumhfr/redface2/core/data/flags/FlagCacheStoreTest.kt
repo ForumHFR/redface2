@@ -61,6 +61,26 @@ class FlagCacheStoreTest {
     }
 
     @Test
+    fun `global empty coverage and received rows remain limited after reopening Room - P2c`() = runTest {
+        val initial = FlagCacheSnapshot(listOf(row(13).copy(source = FlagSource.STICKY)), coverage(listOf(13)))
+        database.flagDao().replaceSnapshot("alice", FlagType.CYAN, initial)
+        val observation = row(23).toFlag()
+        val batch = FlagRefreshBatch(null, emptyList(), now, globalOnly = true, observations = listOf(observation))
+        store.save("alice", FlagType.CYAN, store.merge("alice", FlagType.CYAN, batch))
+        database.close()
+        open()
+        val loaded = requireNotNull(store.load(FlagType.CYAN, "alice"))
+        assertTrue(loaded.result.coverage.isGlobalObservation)
+        assertFalse(loaded.isFresh)
+        val disk = database.flagDao().getSnapshot("alice", FlagType.CYAN)
+        assertEquals(initial.rows.single(), disk.rows.single { it.cat == 13 })
+        assertEquals(FlagSource.GLOBAL, disk.rows.single { it.cat == 23 }.source)
+        store.save("alice", FlagType.CYAN, store.merge("alice", FlagType.CYAN,
+            FlagRefreshBatch(null, emptyList(), now.plusSeconds(1), globalOnly = true)))
+        assertEquals(disk.rows, database.flagDao().getSnapshot("alice", FlagType.CYAN).rows)
+    }
+
+    @Test
     fun `migrated rows without coverage stay unverified and stale after reopening Room`() = runTest {
         database.flagDao().replaceSnapshot("alice", FlagType.CYAN, FlagCacheSnapshot(
             listOf(row(13).copy(source = FlagSource.LEGACY_UNKNOWN)), emptyList(),

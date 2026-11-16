@@ -14,6 +14,7 @@ import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
+import fr.forumhfr.redface2.core.domain.flags.FlagLookup
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
@@ -3408,7 +3409,7 @@ class TopicViewModelTest {
         viewModel.send(TopicIntent.RequestRemoveTopicFlag)
 
         viewModel.effects.test {
-            assertEquals(TopicEffect.TopicFlagNotFound, awaitItem())
+            assertEquals(TopicEffect.TopicFlagUnavailable, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals(RemoveTopicFlagState.Idle, viewModel.removeTopicFlagState.value)
@@ -9268,11 +9269,11 @@ private class FakeFlagRepository(
 
     override fun clearSessionCache() = error("TopicViewModel must not clear the flags cache")
 
-    override suspend fun findFlag(cat: Int, topicId: Int): Flag? {
+    override suspend fun findFlag(cat: Int, topicId: Int): FlagLookup {
         findFlagCalls++
         findFlagGate?.await()
         findFlagError?.let { throw it }
-        return flagToFind
+        return flagToFind?.let(FlagLookup::Found) ?: FlagLookup.Absent
     }
 
     override suspend fun resolveFavorite(cat: Int, topicId: Int): Result<Boolean> {

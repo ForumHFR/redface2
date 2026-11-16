@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.data.flags
 
 import fr.forumhfr.redface2.core.database.dao.FlagCacheSnapshot
 import fr.forumhfr.redface2.core.database.entities.FlagCategoryCoverageEntity
+import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
 import fr.forumhfr.redface2.core.domain.flags.FlagCategoryCoverage
 import fr.forumhfr.redface2.core.domain.flags.FlagCoverage
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshCategory
@@ -29,6 +30,8 @@ internal data class FlagRefreshBatch(
     val attemptedAt: Instant,
     val cause: Throwable? = null,
     val categoryNames: Map<Int, String> = emptyMap(),
+    val globalOnly: Boolean = false,
+    val observations: List<Flag> = emptyList(),
 )
 
 internal fun mergeFlagSnapshot(
@@ -37,8 +40,9 @@ internal fun mergeFlagSnapshot(
     type: FlagType,
     batch: FlagRefreshBatch,
 ): FlagCacheSnapshot {
+    if (batch.globalOnly) return mergeGlobalFlagSnapshot(old, userId, type, batch)
     val outcomes = batch.outcomes.ifEmpty {
-        val cats = (old.rows.map { it.cat } + old.coverage.map { it.cat }).distinct()
+        val cats = (old.rows.map { it.cat } + old.coverage.map { it.cat }).distinct().filter { it > 0 }
         cats.flatMap { cat ->
             listOf(FlagSource.BUCKET, FlagSource.STICKY).map { source ->
                 CategoryRefreshOutcome(cat, source, receivedAt = batch.attemptedAt,
@@ -46,7 +50,11 @@ internal fun mergeFlagSnapshot(
             }
         }
     }
-    val coverage = outcomes.map { outcome ->
+    val coverage = old.coverage.filter { previous ->
+        (batch.categoryIds == null || previous.cat in batch.categoryIds) &&
+            (previous.source != FlagSource.GLOBAL || batch.categoryIds == null) &&
+            outcomes.none { it.cat == previous.cat && it.source == previous.source }
+    } + outcomes.map { outcome ->
         val previous = old.coverage.find { it.cat == outcome.cat && it.source == outcome.source }
         FlagCategoryCoverageEntity(userId, type, outcome.cat, outcome.source,
             if (outcome.failure == null) outcome.receivedAt else previous?.lastSuccessAt,
@@ -54,7 +62,7 @@ internal fun mergeFlagSnapshot(
     }
     val successful = outcomes.filter { it.failure == null }.map { it.cat to it.source }.toSet()
     val retained = old.rows.filter { row ->
-        (batch.categoryIds == null || row.cat in batch.categoryIds) && (row.cat to row.source) !in successful
+        belongsToCatalogue(row.cat, batch.categoryIds) && !row.wasReconciled(successful)
     }
     val incoming = outcomes.filter { it.failure == null }.flatMap { outcome ->
         outcome.flags.map { it.toEntity(userId, outcome.receivedAt, outcome.source) }
@@ -79,6 +87,7 @@ internal fun FlagCacheSnapshot.toResult(): FlagsResult.Success {
         it.source == FlagSource.BUCKET && it.failure == null
     }
     val status = when {
+        coverage.any { it.source == FlagSource.GLOBAL } -> FlagRefreshStatus.PARTIAL
         coverage.isEmpty() -> FlagRefreshStatus.UNVERIFIED
         domainCoverage.isComplete -> FlagRefreshStatus.COMPLETE
         bucketsSucceeded -> FlagRefreshStatus.PARTIAL
@@ -95,3 +104,8 @@ internal fun FlagCacheSnapshot.toResult(): FlagsResult.Success {
         cachedAt = (rows.map { it.fetchedAt } + coverage.mapNotNull { it.lastSuccessAt }).minOrNull(),
     )
 }
+
+private fun belongsToCatalogue(cat: Int, categoryIds: List<Int>?): Boolean = categoryIds == null || cat in categoryIds
+
+private fun FlagTopicEntity.wasReconciled(successful: Set<Pair<Int, FlagSource>>): Boolean =
+    (cat to source) in successful || (source == FlagSource.GLOBAL && (cat to FlagSource.BUCKET) in successful)

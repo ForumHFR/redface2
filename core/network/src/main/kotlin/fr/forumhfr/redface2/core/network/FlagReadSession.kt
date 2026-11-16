@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.network
 
+import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshPolicy
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -12,7 +13,7 @@ class FlagReadClock @Inject constructor() {
     fun nowNanos(): Long = System.nanoTime()
 }
 
-/** Closed intent list. GLOBAL_BUCKET is reserved until its response contract is implemented. */
+/** Closed read intent list; mutations never enter the flags executor. */
 enum class FlagReadOperation { CATALOGUE, CATEGORY_BUCKET, STICKY_LAST, GLOBAL_BUCKET }
 
 class FlagReadDeadlineException : IOException("Flags collection deadline reached")
@@ -20,8 +21,12 @@ class FlagReadDeadlineException : IOException("Flags collection deadline reached
 /** One admitted type refresh. Joiners inherit this instance and can never extend its deadline. */
 class FlagReadSession(
     private val nanoTime: () -> Long = System::nanoTime,
+    val policy: FlagsRefreshPolicy = FlagsRefreshPolicy(),
+    private val deadline: Long = nanoTime() + COLLECTION_TIMEOUT_MS * NANOS_PER_MS,
 ) : AbstractCoroutineContextElement(Key) {
-    private val deadline = nanoTime() + COLLECTION_TIMEOUT_MS * NANOS_PER_MS
+    constructor(nanoTime: () -> Long) : this(nanoTime, FlagsRefreshPolicy())
+
+    fun withPolicy(policy: FlagsRefreshPolicy): FlagReadSession = FlagReadSession(nanoTime, policy, deadline)
     private var successfulCalls = 0
     private var logicalOperations = 0
     private var applicationCalls = 0
@@ -46,7 +51,7 @@ class FlagReadSession(
         if (retry) retriesSucceeded++
     }
     @Synchronized fun reserveRetry(): Boolean {
-        val allowed = successfulCalls > 0 && reservedRetries < MAX_RETRIES
+        val allowed = policy.applicationRetry && successfulCalls > 0 && reservedRetries < MAX_RETRIES
         if (allowed) reservedRetries++
         return allowed
     }

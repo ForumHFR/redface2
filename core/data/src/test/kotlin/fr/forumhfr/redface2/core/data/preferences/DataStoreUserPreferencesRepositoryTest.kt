@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.data.preferences
 
+import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshStrategy
+import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshPolicy
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
@@ -72,6 +74,31 @@ import org.junit.rules.TemporaryFolder
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DataStoreUserPreferencesRepositoryTest {
+
+    @Test
+    fun `refresh policy unknown ID falls back to baseline and N is bounded`() = runTest(dispatcher) {
+        dataStore.edit {
+            it[stringPreferencesKey("flags_refresh_strategy")] = "future"
+            it[intPreferencesKey("flags_refresh_concurrency")] = 99
+        }
+        val policy = repository.observeFlagsRefreshPolicy().first()
+        assertEquals(FlagsRefreshStrategy.BASELINE, policy.strategy)
+        assertEquals(20, policy.concurrency)
+        assertTrue(policy.applicationRetry)
+    }
+
+    @Test
+    fun `refresh policy defaults and every strategy survive repository recreation`() = runTest(dispatcher) {
+        assertEquals(FlagsRefreshPolicy(),
+            repository.observeFlagsRefreshPolicy().first())
+        FlagsRefreshStrategy.entries.forEach { strategy ->
+            val policy = FlagsRefreshPolicy(strategy, 1, false)
+            repository.setFlagsRefreshPolicy(policy)
+            assertEquals(policy, repositoryWith(dataStore).observeFlagsRefreshPolicy().first())
+        }
+        dataStore.edit { it[intPreferencesKey("flags_refresh_concurrency")] = 0 }
+        assertEquals(1, repository.observeFlagsRefreshPolicy().first().concurrency)
+    }
 
     @Test
     fun `editor shortcut defaults to None for absent and unknown IDs`() = runTest(dispatcher) {

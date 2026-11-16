@@ -20,6 +20,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
+import fr.forumhfr.redface2.core.domain.flags.FlagLookup
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.search.SearchRepository
@@ -2544,13 +2545,14 @@ class TopicViewModel @AssistedInject constructor(
 
     /**
      * #809 — user long-pressed the title : resolve THIS topic's drapeau, then either raise the
-     * confirmation dialog ([RemoveTopicFlagState.Confirming]) or emit [TopicEffect.TopicFlagNotFound]
-     * (topic not flagged, anonymous, or an unresolvable lookup — see below). The outcome rides the
+     * confirmation dialog ([RemoveTopicFlagState.Confirming]) or distinguish a certified absence
+     * ([TopicEffect.TopicFlagNotFound]) from an unavailable lookup ([TopicEffect.TopicFlagUnavailable]).
+     * The outcome rides the
      * screen's single [effects] channel like every other one-shot Toast (review finding : no parallel
      * consumable StateFlow). No-op while a lookup or a removal is already running, so a second
      * long-press during the (possibly network-bound) resolve cannot launch a duplicate.
      */
-    @Suppress("TooGenericExceptionCaught") // gate #809 — any resolve failure folds to NotFound below;
+    @Suppress("TooGenericExceptionCaught") // Any resolve failure is unavailable, never certified absent;
     // cancellation is rethrown after releasing the state.
     fun requestRemoveTopicFlag() {
         val current = _removeTopicFlagState.value
@@ -2558,7 +2560,7 @@ class TopicViewModel @AssistedInject constructor(
         _removeTopicFlagState.value = RemoveTopicFlagState.Resolving
         viewModelScope.launch {
             // Gate Codex #809 — findFlag can die mid-resolve (an in-flight fetch cancelled by an
-            // account switch, an unexpected runtime failure) : fold it to « unresolvable » instead of
+            // account switch, an unexpected runtime failure): report an unavailable lookup instead of
             // leaving the state wedged in Resolving with no event — the long-press would otherwise be
             // dead until the VM is recreated. CancellationException is rethrown (the scope is going
             // away) AFTER releasing the state.
@@ -2568,13 +2570,15 @@ class TopicViewModel @AssistedInject constructor(
                 _removeTopicFlagState.value = RemoveTopicFlagState.Idle
                 throw cancelled
             } catch (_: Exception) {
-                null
+                FlagLookup.Unavailable
             }
-            if (flag != null) {
-                _removeTopicFlagState.value = RemoveTopicFlagState.Confirming(flag)
-            } else {
-                _effects.trySend(TopicEffect.TopicFlagNotFound)
-                _removeTopicFlagState.value = RemoveTopicFlagState.Idle
+            when (flag) {
+                is FlagLookup.Found -> _removeTopicFlagState.value = RemoveTopicFlagState.Confirming(flag.flag)
+                FlagLookup.Absent, FlagLookup.Unavailable -> {
+                    _effects.trySend(if (flag == FlagLookup.Absent) TopicEffect.TopicFlagNotFound
+                        else TopicEffect.TopicFlagUnavailable)
+                    _removeTopicFlagState.value = RemoveTopicFlagState.Idle
+                }
             }
         }
     }

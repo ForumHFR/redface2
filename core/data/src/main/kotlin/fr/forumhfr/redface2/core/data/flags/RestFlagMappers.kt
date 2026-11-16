@@ -14,13 +14,9 @@ import kotlin.math.max
  * The envelope shape is [RestListEnvelope] / [RestTopic], proven by the captured
  * fixture `core/data/src/test/resources/fixtures/rest_cat23_participated.json`.
  *
- * The mapper also handles a hypothetical "global" payload via [fallbackCat] = null —
- * the cat would then come from each row's `links.category.href`. This is **not**
- * exercised by Phase 1D-1 production code : `HfrApiClient` does not expose a global
- * helper today (no fixture has been captured for the grouped-by-cat shape advertised
- * by HFR's docs). The `fallbackCat = null` branch is kept here under direct test
- * coverage so a follow-up that captures the global fixture can wire the helper
- * without re-deriving the parsing.
+ * The grouped global endpoint is decoded by `decodeGlobalFlags`, which validates category
+ * groups before passing their topic rows here. With no [fallbackCat], a row's category is
+ * read from its own link; the grouped response itself is never treated as a topic.
  *
  * Mapping rules :
  * - [Flag.type] is the **requested bucket** ([type]), never derived from `flag_owntopic`.

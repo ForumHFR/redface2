@@ -293,13 +293,13 @@ class FlagReadExecutorTest {
     }
 
     @Test
-    fun `reserved global operation cannot issue a Call`() = runTest {
-        val error = runCatching {
-            executor.execute(client, request, FlagReadOperation.GLOBAL_BUCKET, FlagReadSession()) {
-                error("reserved operation must not execute")
-            }
-        }.exceptionOrNull()
-        assertTrue(error is IllegalArgumentException)
+    fun `captured global operation uses the same read permit`() = runTest {
+        var called = false
+        executor.execute(client, request, FlagReadOperation.GLOBAL_BUCKET, FlagReadSession()) {
+            assertEquals(1, limiter.heldPermits)
+            called = true
+        }
+        assertTrue(called)
         assertEquals(0, limiter.heldPermits)
     }
 

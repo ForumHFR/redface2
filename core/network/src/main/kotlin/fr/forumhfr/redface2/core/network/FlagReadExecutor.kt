@@ -29,7 +29,7 @@ class FlagReadExecutor @Inject constructor(
     private val limiter: FlagReadLimiter,
     private val jitter: FlagReadJitter,
 ) {
-    /** Only HfrApiClient's three explicit read intents enter here; mutations have no entry point. */
+    /** Only HfrApiClient's explicit read intents enter here; mutations have no entry point. */
     internal suspend fun <T> execute(
         client: OkHttpClient,
         request: Request,
@@ -38,7 +38,7 @@ class FlagReadExecutor @Inject constructor(
         executeCall: suspend (Call) -> T,
     ): T {
         require(request.method == "GET")
-        require(operation != FlagReadOperation.GLOBAL_BUCKET) { "Global flags contract is not implemented" }
+        require(operation in ALLOWED_OPERATIONS)
         session.logicalOperation()
         session.checkBudget()
         val result = withTimeoutOrNull(session.remainingMillis().coerceAtLeast(1)) {
@@ -94,5 +94,9 @@ class FlagReadExecutor @Inject constructor(
         }
     }
 
-    private companion object { const val CONNECT_TIMEOUT_SECONDS = 5L }
+    private companion object {
+        const val CONNECT_TIMEOUT_SECONDS = 5L
+        val ALLOWED_OPERATIONS = setOf(FlagReadOperation.CATALOGUE, FlagReadOperation.CATEGORY_BUCKET,
+            FlagReadOperation.STICKY_LAST, FlagReadOperation.GLOBAL_BUCKET)
+    }
 }

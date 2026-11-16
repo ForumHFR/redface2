@@ -654,10 +654,13 @@ sealed interface TopicEffect {
     data object PostFavoriteAddFailed : TopicEffect
 
     /**
-     * #809 — the long-press resolved to no removable drapeau : topic not flagged, anonymous
-     * session, or an unresolvable lookup (resolve failure folds here — cf. TopicViewModel).
+     * The long-press certified no removable flag, or the session is anonymous.
+     * Failed/incomplete lookups use [TopicFlagUnavailable].
      */
     data object TopicFlagNotFound : TopicEffect
+
+    /** The category could not certify absence; retry remains possible. */
+    data object TopicFlagUnavailable : TopicEffect
 
     /**
      * #1201 — `close_sondage.php` confirmed the closure. One-shot feedback ; a page refresh to the

@@ -51,6 +51,9 @@ interface FlagRepository {
     fun observeCacheUpdates(types: Set<FlagType>): Flow<FlagType> = emptyFlow()
 
     /** Drop all per-tab in-memory results tied to the current auth session. */
+    /** Cache-only coverage for Super enrichment; never starts a read. */
+    suspend fun cachedCoverage(): FlagCoverage = FlagCoverage()
+
     fun clearSessionCache()
 
     /**
@@ -109,17 +112,11 @@ interface FlagRepository {
      * `lastReadPage` form the `delflag.php` key), so a partial [Flag] must never be fabricated : this
      * lookup returns the real cached/fetched row or nothing.
      *
-     * Resolution order (per-bucket) :
-     * - Scans the in-memory per-type success caches first ; a hit returns without any network.
-     * - A warm bucket is authoritative **for its own type and covered categories only**.
-     *   On a miss, the **cold or uncovered** buckets — and only those —
-     *   are fetched so the lookup can still resolve a type whose tab was never opened ; then a
-     *   re-scan decides. All three warm + miss → null with zero network.
-     * - An anonymous session (no HFR user) can hold no drapeaux : null with no round-trip.
-     *
-     * Returns the matching [Flag], or null when the topic is not flagged / unresolvable / anonymous.
+     * Present cached rows are usable. Missing rows require both bucket and sticky coverage for
+     * every type; uncovered types resolve only this category, even under a global-only policy.
+     * Anonymous sessions are absent. Failed/incomplete resolution is unavailable, never absent.
      */
-    suspend fun findFlag(cat: Int, topicId: Int): Flag?
+    suspend fun findFlag(cat: Int, topicId: Int): FlagLookup
 
     /**
      * Cache-only best-effort lookup for legacy callers that only know `topicId` (not `cat`). Never
@@ -159,3 +156,10 @@ data class FlagRefreshIssue(
 
 /** The catalogue already supplies the name; no extra request is made for warning labels. */
 data class FlagRefreshCategory(val id: Int, val name: String?)
+
+/** Absence is certified separately from an incomplete or failed lookup. */
+sealed interface FlagLookup {
+    data class Found(val flag: Flag) : FlagLookup
+    data object Absent : FlagLookup
+    data object Unavailable : FlagLookup
+}
