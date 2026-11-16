@@ -87,6 +87,46 @@ class FlagCacheStoreTest {
     }
 
     @Test
+    fun `Room global observations survive failed buckets despite historical complete coverage - P2c fix2`() = runTest {
+        for (historicalSuccess in listOf(old, now)) {
+            for (catalogueAvailable in listOf(true, false)) {
+                database.flagDao().replaceSnapshot("alice", FlagType.CYAN, FlagCacheSnapshot(
+                    listOf(row(13), row(23)), coverage(listOf(13, 23), historicalSuccess),
+                ))
+                val observation = row(23).copy(topicId = 99).toFlag()
+                store.save("alice", FlagType.CYAN, store.merge("alice", FlagType.CYAN,
+                    FlagRefreshBatch(null, emptyList(), now, globalOnly = true,
+                        observations = listOf(observation))))
+                database.close()
+                open()
+                val persisted = database.flagDao().getFlags("alice", FlagType.CYAN).single { it.topicId == 99 }
+                assertEquals(FlagSource.LEGACY_UNKNOWN, persisted.source)
+                assertEquals(now, persisted.fetchedAt)
+                val failed = if (catalogueAvailable) FlagRefreshBatch(listOf(13, 23), listOf(
+                    outcome(13, FlagSource.BUCKET), outcome(13, FlagSource.STICKY),
+                    outcome(23, FlagSource.BUCKET, FlagFailureKind.DEADLINE),
+                    outcome(23, FlagSource.STICKY, FlagFailureKind.DEADLINE),
+                ), now.plusSeconds(1)) else FlagRefreshBatch(null, emptyList(), now.plusSeconds(1),
+                    cause = java.io.IOException("catalogue offline"))
+                store.save("alice", FlagType.CYAN, store.merge("alice", FlagType.CYAN, failed))
+                database.close()
+                open()
+                assertEquals(persisted, database.flagDao().getFlags("alice", FlagType.CYAN)
+                    .single { it.topicId == 99 })
+                assertFalse(requireNotNull(store.load(FlagType.CYAN, "alice")).isFresh)
+                val success = FlagRefreshBatch(listOf(13, 23), listOf(
+                    outcome(13, FlagSource.BUCKET), outcome(13, FlagSource.STICKY),
+                    outcome(23, FlagSource.BUCKET), outcome(23, FlagSource.STICKY),
+                ), now.plusSeconds(2))
+                store.save("alice", FlagType.CYAN, store.merge("alice", FlagType.CYAN, success))
+                assertTrue(database.flagDao().getFlags("alice", FlagType.CYAN).isEmpty())
+                assertEquals(FlagRefreshStatus.COMPLETE,
+                    requireNotNull(store.load(FlagType.CYAN, "alice")).result.refreshStatus)
+            }
+        }
+    }
+
+    @Test
     fun `migrated rows without coverage stay unverified and stale after reopening Room`() = runTest {
         database.flagDao().replaceSnapshot("alice", FlagType.CYAN, FlagCacheSnapshot(
             listOf(row(13).copy(source = FlagSource.LEGACY_UNKNOWN)), emptyList(),

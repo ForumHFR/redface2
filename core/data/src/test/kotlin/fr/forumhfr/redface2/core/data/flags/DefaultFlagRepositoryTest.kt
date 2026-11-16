@@ -135,15 +135,81 @@ class DefaultFlagRepositoryTest {
         val policy = MutableStateFlow(FlagsRefreshPolicy(strategy = FlagsRefreshStrategy.GLOBAL_ONLY))
         val dao = stubFlagDao()
         val repo = buildRepository(api, forum, flagDao = dao, policy = policy)
-        val cold = repo.refresh(FlagType.CYAN) as FlagsResult.Success
-        assertTrue(cold.flags.isEmpty())
-        assertTrue(cold.coverage.categories.isEmpty())
+        assertTrue(repo.refresh(FlagType.CYAN) is FlagsResult.Failure)
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            assertTrue(awaitItem() is FlagsResult.Failure)
+            cancelAndIgnoreRemainingEvents()
+        }
         coVerify(exactly = 0) { dao.replaceSnapshot(any(), any(), any()) }
         policy.value = FlagsRefreshPolicy()
         val baseline = repo.refresh(FlagType.CYAN) as FlagsResult.Success
         policy.value = policy.value.copy(strategy = FlagsRefreshStrategy.GLOBAL_ONLY)
         assertEquals(baseline, repo.refresh(FlagType.CYAN))
         coVerify(exactly = 1) { dao.replaceSnapshot(any(), any(), any()) }
+    }
+
+    @Test
+    fun `cold empty global before category failure stays visible on reobservation - P2c fix2`() = runTest {
+        val (api, forum) = wireDeps {}
+        coEvery { api.getGlobalFlagTopics(any()) } returns EMPTY_PAGE
+        coEvery { api.getCategoryFlagTopics(any(), any(), page = any(),
+            resultsPerPage = any(), useAuth = true) } throws IOException("buckets offline")
+        val dao = stubFlagDao()
+        val policy = MutableStateFlow(FlagsRefreshPolicy(strategy = FlagsRefreshStrategy.GLOBAL_FIRST))
+        val repo = buildRepository(api, forum, flagDao = dao, policy = policy,
+            testDispatcher = UnconfinedTestDispatcher(testScheduler))
+        assertTrue(repo.refresh(FlagType.CYAN) is FlagsResult.Failure)
+        repeat(2) {
+            repo.observe(FlagType.CYAN).test {
+                assertEquals(FlagsResult.Loading, awaitItem())
+                assertTrue(awaitItem() is FlagsResult.Failure)
+                runCurrent()
+                expectNoEvents()
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+        coVerify(exactly = 0) { dao.replaceSnapshot(any(), any(), any()) }
+        assertNull(FlagCacheStore(dao, Clock.systemUTC(), UnconfinedTestDispatcher(testScheduler))
+            .load(FlagType.CYAN, "xat"))
+    }
+
+    @Test
+    fun `targeted lookup keeps global marker until an inventory refresh - P2c fix2`() = runTest {
+        val observed = decodeGlobalFlags(json, fixture("rest_global_participated.json"), FlagType.CYAN)
+        val categories = sampleCategories + observed.map { Category(it.cat, "Observed category", false, 0) }
+        val (api, forum) = wireDeps {
+            categories.forEach { cat ->
+                HfrRestFlagBucket.entries.forEach { stubFlagsCall(cat.id, it, EMPTY_PAGE) }
+            }
+        }
+        coEvery { forum.getCategories(any()) } returns ForumResult.Success(categories)
+        coEvery { api.getGlobalFlagTopics(any()) } returns fixture("rest_global_participated.json")
+        val dao = stubFlagDao()
+        val at = Instant.parse("2026-05-03T11:00:00Z")
+        val coverage = categories.flatMap { cat ->
+            listOf(FlagSource.BUCKET, FlagSource.STICKY).map { source ->
+                FlagCategoryCoverageEntity("xat", FlagType.CYAN, cat.id, source, at, at, null)
+            }
+        }
+        dao.replaceSnapshot("xat", FlagType.CYAN, FlagCacheSnapshot(emptyList(), coverage))
+        val policy = MutableStateFlow(FlagsRefreshPolicy(strategy = FlagsRefreshStrategy.GLOBAL_ONLY))
+        val repo = buildRepository(api, forum, flagDao = dao, policy = policy)
+        repo.refresh(FlagType.CYAN)
+        assertEquals(FlagLookup.Absent, repo.findFlag(23, 999))
+        val limited = repo.observe(FlagType.CYAN).first() as FlagsResult.Success
+        assertTrue(limited.coverage.isGlobalObservation)
+        assertEquals(FlagRefreshStatus.PARTIAL, limited.refreshStatus)
+        assertEquals(observed.toSet(), limited.flags.toSet())
+        val disk = requireNotNull(FlagCacheStore(dao, Clock.systemUTC(),
+            UnconfinedTestDispatcher(testScheduler)).load(FlagType.CYAN, "xat"))
+        assertTrue(disk.result.coverage.isGlobalObservation)
+        assertFalse(disk.isFresh)
+        policy.value = FlagsRefreshPolicy()
+        val complete = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertFalse(complete.coverage.isGlobalObservation)
+        assertEquals(FlagRefreshStatus.COMPLETE, complete.refreshStatus)
+        assertTrue(complete.flags.isEmpty())
     }
 
     @Test
@@ -197,7 +263,10 @@ class DefaultFlagRepositoryTest {
             stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
         }
         val finish = CompletableDeferred<Unit>()
-        coEvery { api.getGlobalFlagTopics(any()) } coAnswers { finish.await(); EMPTY_PAGE }
+        coEvery { api.getGlobalFlagTopics(any()) } coAnswers {
+            finish.await()
+            fixture("rest_global_participated.json")
+        }
         val log = DiagnosticsLog()
         val policy = MutableStateFlow(FlagsRefreshPolicy(
             strategy = FlagsRefreshStrategy.GLOBAL_ONLY, concurrency = 2))
@@ -3943,7 +4012,16 @@ class DefaultFlagRepositoryTest {
             FlagCacheSnapshot(dao.getFlags(firstArg(), secondArg()), dao.getCoverage(firstArg(), secondArg()))
         }
         coEvery { dao.replaceSnapshot(any(), any(), any()) } coAnswers {
-            snapshots[firstArg<String>() to secondArg<FlagType>()] = thirdArg()
+            val snapshot = thirdArg<FlagCacheSnapshot>()
+            // Match Room's rollback-compatible source encoding, exercised by FlagCacheStoreTest.
+            snapshots[firstArg<String>() to secondArg<FlagType>()] = snapshot.copy(
+                rows = snapshot.rows.map {
+                    it.copy(source = if (it.source == FlagSource.GLOBAL) FlagSource.LEGACY_UNKNOWN else it.source)
+                },
+                coverage = snapshot.coverage.map {
+                    it.copy(source = if (it.source == FlagSource.GLOBAL) FlagSource.LEGACY_UNKNOWN else it.source)
+                },
+            )
         }
         coEvery { dao.deleteForType(any(), any()) } coAnswers {
             snapshots.remove(firstArg<String>() to secondArg<FlagType>())

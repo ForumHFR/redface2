@@ -34,6 +34,8 @@ internal data class FlagRefreshBatch(
     val observations: List<Flag> = emptyList(),
     // A targeted lookup sees the catalogue but does not read its other categories.
     val unverifiedCategoryIds: List<Int> = emptyList(),
+    // Only inventory-wide batches may retire the global coverage marker.
+    val resolutionCat: Int? = null,
 ) {
     val isEmptyGlobalSuccess: Boolean get() = globalOnly && observations.isEmpty() && cause == null
 }
@@ -56,7 +58,7 @@ internal fun mergeFlagSnapshot(
     }
     val coverage = old.coverage.filter { previous ->
         (batch.categoryIds == null || previous.cat in batch.categoryIds) &&
-            !previous.isGlobalMarker() &&
+            (!previous.isGlobalMarker() || batch.resolutionCat != null) &&
             outcomes.none { it.cat == previous.cat && it.source == previous.source }
     } + outcomes.map { outcome ->
         val previous = old.coverage.find { it.cat == outcome.cat && it.source == outcome.source }
@@ -72,19 +74,12 @@ internal fun mergeFlagSnapshot(
     }
     val successful = outcomes.filter { it.failure == null }.map { it.cat to it.source }.toSet()
     val retained = old.rows.filter { row ->
-        belongsToCatalogue(row.cat, batch.categoryIds) && !row.wasReconciled(successful)
+        belongsToCatalogue(row.cat, batch.categoryIds) && !row.wasReconciled(successful, coverage)
     }
     val incoming = outcomes.filter { it.failure == null }.flatMap { outcome ->
         outcome.flags.map { it.toEntity(userId, outcome.receivedAt, outcome.source) }
     }
-    // LEGACY_UNKNOWN is retired only after BOTH sources succeeded at least once since migration.
-    // A later failure preserves lastSuccessAt and does not revoke that historical reconciliation.
-    val reconciled = coverage.groupBy { it.cat }.filterValues { sources ->
-        listOf(FlagSource.BUCKET, FlagSource.STICKY).all { source ->
-            sources.any { it.source == source && it.lastSuccessAt != null }
-        }
-    }.keys
-    val rows = (retained.filterNot { it.source == FlagSource.LEGACY_UNKNOWN && it.cat in reconciled } + incoming)
+    val rows = (retained + incoming)
         .associateBy { it.cat to it.topicId }.values.toList()
     return FlagCacheSnapshot(rows, coverage + unverified)
 }
@@ -122,5 +117,20 @@ private fun FlagCacheSnapshot.refreshStatus(domainCoverage: FlagCoverage): FlagR
 
 private fun belongsToCatalogue(cat: Int, categoryIds: List<Int>?): Boolean = categoryIds == null || cat in categoryIds
 
-private fun FlagTopicEntity.wasReconciled(successful: Set<Pair<Int, FlagSource>>): Boolean =
-    (cat to source) in successful || (source == FlagSource.GLOBAL && (cat to FlagSource.BUCKET) in successful)
+private fun FlagTopicEntity.wasReconciled(
+    successful: Set<Pair<Int, FlagSource>>,
+    coverage: List<FlagCategoryCoverageEntity>,
+): Boolean {
+    if (source == FlagSource.LEGACY_UNKNOWN) {
+        // Both sources must have succeeded since migration. Room also encodes global observations
+        // as LEGACY_UNKNOWN: historical success cannot retire an observation received at or after it.
+        val bucketSuccess = coverage.firstOrNull { it.cat == cat && it.source == FlagSource.BUCKET }
+            ?.lastSuccessAt
+        val stickySucceeded = coverage.any {
+            it.cat == cat && it.source == FlagSource.STICKY && it.lastSuccessAt != null
+        }
+        return stickySucceeded && bucketSuccess != null &&
+            ((cat to FlagSource.BUCKET) in successful || fetchedAt.isBefore(bucketSuccess))
+    }
+    return (cat to source) in successful || (source == FlagSource.GLOBAL && (cat to FlagSource.BUCKET) in successful)
+}

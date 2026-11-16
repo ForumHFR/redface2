@@ -1118,7 +1118,7 @@ class DefaultFlagRepository @Inject constructor(
                     return@withContext commitFetchedSuccess(key, global) ?: FlagsResult.Loading
                 }
                 val positive = commitFetchedSuccess(key, global)
-                if (positive != null) publishIntermediate(key, positive)
+                if (positive is FlagsResult.Success) publishIntermediate(key, positive)
             }
             collectRefresh(key)
         } catch (cancellation: CancellationException) {
@@ -1127,7 +1127,7 @@ class DefaultFlagRepository @Inject constructor(
             Log.w(LOG_TAG, "Flags REST fetch failed for ${key.type}", error)
             FlagRefreshBatch(null, emptyList(), clock.instant(), error)
         }
-        commitFetchedSuccess(key, batch) ?: FlagsResult.Loading
+        commitFetchedSuccess(key, batch.copy(resolutionCat = key.resolutionCat)) ?: FlagsResult.Loading
     }
 
     private suspend fun publishIntermediate(key: FetchKey, result: FlagsResult) {
@@ -1243,7 +1243,7 @@ class DefaultFlagRepository @Inject constructor(
                     snapshot.coverage.filter { it.failure == FlagFailureKind.DEADLINE }.map { it.cat }.distinct().size,
                 )
                 val emptyGlobal = batch.isEmptyGlobalSuccess
-                val hasContent = emptyGlobal || snapshot.rows.isNotEmpty() ||
+                val hasContent = snapshot.rows.isNotEmpty() ||
                     snapshot.coverage.any { it.lastSuccessAt != null }
                 if (!hasContent) return@commit FlagsResult.Failure(
                     batch.cause ?: IllegalStateException("Flags refresh produced no available snapshot"),

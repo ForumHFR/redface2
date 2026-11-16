@@ -71,22 +71,6 @@ class GlobalFlagResponseTest {
     }
 
     @Test
-    fun `global positives preserve stickies while a successful bucket reconciles global rows only in its category`() {
-        val flags = decodeGlobalFlags(json, fixture("participated"), FlagType.CYAN)
-        val sticky = flags.first().toEntity("agent", now.minusSeconds(30), FlagSource.STICKY)
-        val global = mergeFlagSnapshot(FlagCacheSnapshot(listOf(sticky), emptyList()), "agent", FlagType.CYAN,
-            FlagRefreshBatch(null, emptyList(), now, globalOnly = true, observations = flags))
-        assertEquals(sticky, global.rows.first { it.topicId == sticky.topicId })
-        val cat = flags.last().cat
-        val reconciled = mergeFlagSnapshot(global, "agent", FlagType.CYAN,
-            FlagRefreshBatch(null, listOf(CategoryRefreshOutcome(cat, FlagSource.BUCKET,
-                receivedAt = now.plusSeconds(1))), now.plusSeconds(1)))
-        assertTrue(reconciled.rows.none { it.cat == cat && it.source == FlagSource.GLOBAL })
-        assertTrue(reconciled.rows.contains(sticky))
-        assertEquals(global.rows.filter { it.cat != cat }, reconciled.rows.filter { it.cat != cat })
-    }
-
-    @Test
     fun `contradictory subcategory category or posts subcategory rejects the whole global batch`() {
         val original = "categories/1/subcategories/109/"
         for (replacement in listOf("categories/23/subcategories/484/", "categories/1/subcategories/484/")) {
