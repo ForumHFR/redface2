@@ -18,6 +18,7 @@ data class HfrEndpoint(
         SUBCATEGORIES("rest:subcategories"),
         REST_OTHER("rest:other"),
         FORUM1("html:forum1"),
+        MP_LIST("html:mp-list"),
         FORUM2("html:forum2"),
         HTML_OTHER("html:other"),
     }
@@ -61,6 +62,8 @@ data class HfrCallSummary(
     val failedTlsMs: Long = 0,
     val maxFailedTlsMs: Long = 0,
     val ipFamily: HfrIpFamily = HfrIpFamily.UNKNOWN,
+    val connectErrnos: Map<HfrConnectErrno, Int> = emptyMap(),
+    val intent: HfrCallIntent.Kind? = null,
     // Copies retain this call-local claim, including catalogue ownership and late attachment.
     private val detailPublished: AtomicBoolean = AtomicBoolean(),
 ) {
@@ -70,6 +73,7 @@ data class HfrCallSummary(
 
     fun line(): String =
         "refresh=${refreshId ?: "-"} ${endpoint.label()} role=${role.name.lowercase()} " +
+            "intent=${intent?.label ?: "-"} connectErrnos=[${connectErrnos.diagnosticLine()}] " +
             "type=${flagType?.name ?: "-"} phase=${phase?.name?.lowercase() ?: "-"} " +
             "waitMs=${waitMs ?: "-"} dnsMs=$dnsMs " +
             "connectMs=$connectMs tlsMs=$tlsMs connectAttempts=$connectAttempts connectFailures=$connectFailures " +

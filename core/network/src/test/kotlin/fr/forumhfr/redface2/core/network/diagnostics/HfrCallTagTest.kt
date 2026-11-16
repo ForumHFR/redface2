@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.network.diagnostics
 
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagFetchTrace
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrRequestQueued
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallIntent
 import fr.forumhfr.redface2.core.model.FlagType
 import kotlin.coroutines.EmptyCoroutineContext
 import okhttp3.Request
@@ -12,6 +13,14 @@ import org.junit.Assert.assertSame
 import org.junit.Test
 
 class HfrCallTagTest {
+    @Test
+    fun `badge intent is explicit and does not label a user opened private message list`() {
+        val request = Request.Builder().url("https://forum.hardware.fr/forum1.php?cat=prive&page=1").build()
+        val badge = request.withHfrDiagnostics(HfrCallIntent(HfrCallIntent.Kind.MP_BADGE))
+        assertEquals(HfrCallIntent.Kind.MP_BADGE, badge.tag(HfrCallTag::class.java)?.intent)
+        assertNull(request.withHfrDiagnostics(EmptyCoroutineContext).tag(HfrCallTag::class.java)?.intent)
+    }
+
     @Test
     fun `request tag transports fetch correlation and consumes queue time only on the first page`() {
         val fetch = FlagFetchTrace(7, FlagType.RED)

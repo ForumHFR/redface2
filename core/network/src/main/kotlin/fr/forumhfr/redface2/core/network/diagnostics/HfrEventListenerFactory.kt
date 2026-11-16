@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshPhase
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallOutcome
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallSummary
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrConnectErrno
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrEndpoint
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrIpFamily
 import fr.forumhfr.redface2.core.domain.diagnostics.diagnosticClassName
@@ -57,6 +58,7 @@ private class HfrTimingListener(
     private var connectAttempts = 0
     private var connectFailures = 0
     private var connectAbandoned = 0
+    private val connectErrnos = mutableMapOf<HfrConnectErrno, Int>()
     private var headersStart: Long? = null
     private var bodyStart: Long? = null
     private var dnsMs = 0L
@@ -77,7 +79,7 @@ private class HfrTimingListener(
     @Synchronized
     override fun callStart(call: Call) {
         started = nanoTime()
-        inFlight = diagnostics.started()
+        inFlight = diagnostics.started(id)
     }
 
     @Synchronized
@@ -124,10 +126,15 @@ private class HfrTimingListener(
         protocol: Protocol?,
         ioe: IOException,
     ) {
-        finishConnect(inetSocketAddress, proxy, successful = false)
+        finishConnect(inetSocketAddress, proxy, successful = false, failure = ioe)
     }
 
-    private fun finishConnect(address: InetSocketAddress, proxy: Proxy, successful: Boolean) {
+    private fun finishConnect(
+        address: InetSocketAddress,
+        proxy: Proxy,
+        successful: Boolean,
+        failure: IOException? = null,
+    ) {
         if (ended.get()) return
         val attempt = connections.firstOrNull { it.address == address && it.proxy == proxy } ?: return
         connections.remove(attempt)
@@ -138,6 +145,8 @@ private class HfrTimingListener(
             successfulConnections += attempt
         } else {
             connectFailures++
+            val errno = failure?.let(::classifyConnectErrno) ?: HfrConnectErrno.OTHER
+            connectErrnos[errno] = (connectErrnos[errno] ?: 0) + 1
             recordFailedConnect(attempt.durationMs)
             if (failedNegotiatingRoute(attempt) || connections.isEmpty()) finishFailedTls(end)
         }
@@ -270,6 +279,7 @@ private class HfrTimingListener(
             connectAbandoned = connectAbandoned, failedConnectMs = failedConnectMs,
             maxFailedConnectMs = maxFailedConnectMs, failedTlsMs = failedTlsMs, maxFailedTlsMs = maxFailedTlsMs,
             ipFamily = ipFamily,
+            connectErrnos = connectErrnos.toMap(), intent = tag?.intent,
         ), tag?.fetch, tag?.catalogue)
         connections.clear()
         successfulConnections.clear()

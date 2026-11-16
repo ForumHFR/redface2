@@ -3,11 +3,23 @@ package fr.forumhfr.redface2.feature.flags
 import fr.forumhfr.redface2.core.domain.diagnostics.AppForegroundDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsDataSaver
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsSubscription
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsContext
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsContextProvider
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkTransport
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsEvent
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsEventKind
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsRestrictions
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagFetchTrace
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallIntent
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallOutcome
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallSummary
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrConnectErrno
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrEndpoint
 import fr.forumhfr.redface2.core.model.FlagType
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -18,6 +30,61 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DiagnosticsExportTest {
+    @Test
+    fun `new refresh and call fields survive export with bounded timelines details and no identifying data`() {
+        val log = DiagnosticsLog()
+        var now = 0L
+        val clock = DiagnosticsClock { now }
+        val foreground = AppForegroundDiagnostics(log, clock)
+        foreground.foregrounded()
+        lateinit var emit: (NetworkDiagnosticsEvent) -> Unit
+        val provider = object : NetworkDiagnosticsContextProvider {
+            override fun snapshot(): NetworkDiagnosticsContext = error("SecretSSID SecretOperator 192.0.2.1")
+            override fun restrictions(): NetworkDiagnosticsRestrictions =
+                NetworkDiagnosticsRestrictions(DiagnosticsDataSaver.WHITELISTED, true)
+            override fun observe(listener: (NetworkDiagnosticsEvent) -> Unit): DiagnosticsSubscription {
+                emit = listener
+                return DiagnosticsSubscription { }
+            }
+        }
+        val trace = FlagRefreshDiagnostics(log, provider, foreground, clock)
+            .begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN))
+        val fetch = FlagFetchTrace(trace.id, FlagType.CYAN)
+        trace.attach(fetch, false)
+        repeat(20) {
+            now += 1_000_000L
+            emit(NetworkDiagnosticsEvent(NetworkDiagnosticsEventKind.VALIDATED, setOf(NetworkTransport.WIFI), false))
+            fetch.call(safeCall(it.toLong(), trace.id))
+        }
+        foreground.backgrounded()
+        trace.finish()
+        log.record(DiagnosticsLog.Level.INFO, "UnapprovedTag", "SecretCookie https://secret/?hash_check=SecretHash")
+        val exported = formatDiagnosticsExport(log.entries.value, SimpleDateFormat("HH:mm:ss.SSS", Locale.US),
+            DiagnosticsEnvironment("0.70.0", 1, "dev", 37, "Google", "Test"))
+        listOf("foregroundStart=foreground foregroundEnd=background", "foregroundTransitions=[20:background]",
+            "networkEvents=[1:validated transport=wifi validated=0", "networkEventsOmitted=4",
+            "dataSaver=whitelisted batterySaver=1", "html:mp-list", "intent=mp-badge",
+            "connectErrnos=[refused:20]", "details-omitted=8").forEach {
+            assertTrue(exported, exported.contains(it))
+        }
+        assertEquals(12, exported.lines().count { it.contains("  HfrCall  ") })
+        assertEquals("1 entrées locales non exportées", exported.lines().last())
+        listOf("Secret", "192.0.2.1", "hash_check", "https://").forEach {
+            assertFalse(exported, exported.contains(it))
+        }
+        repeat(250) { log.record(DiagnosticsLog.Level.INFO, "HfrCall", safeCall(it.toLong(), null).line()) }
+        assertEquals(200, log.entries.value.size)
+    }
+
+    private fun safeCall(id: Long, refreshId: Long?): HfrCallSummary = HfrCallSummary(
+        id = id, endpoint = HfrEndpoint(HfrEndpoint.Family.MP_LIST, page = 1), role = HfrClientRole.AUTH,
+        refreshId = refreshId, phase = null, waitMs = 0, dnsMs = 0, connectMs = 0, tlsMs = 0,
+        headersSentToReceivedMs = null, bodyMs = 0, totalMs = 10, status = null, protocol = null,
+        reusedConnection = false, inFlightAtStart = 1, outcome = HfrCallOutcome.FAILURE,
+        connectAttempts = 1, connectFailures = 1, connectErrnos = mapOf(HfrConnectErrno.REFUSED to 1),
+        intent = HfrCallIntent.Kind.MP_BADGE,
+    )
+
     @Test
     fun `export retains closed network snapshots and capture times even when copied after resume`() {
         val contexts = listOf(

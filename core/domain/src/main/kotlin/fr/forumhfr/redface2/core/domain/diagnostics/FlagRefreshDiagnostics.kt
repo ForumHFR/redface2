@@ -28,6 +28,8 @@ class FlagRefreshDiagnostics @Inject constructor(
     private val networkContext: NetworkDiagnosticsContextProvider =
         NetworkDiagnosticsContextProvider { NetworkDiagnosticsContext() },
     private val foreground: AppForegroundDiagnostics = AppForegroundDiagnostics(log),
+    private val clock: DiagnosticsClock = DiagnosticsClock(System::nanoTime),
+    private val activity: HfrRefreshActivity = HfrRefreshActivity(),
 ) {
     private val sequence = AtomicLong()
 
@@ -40,12 +42,16 @@ class FlagRefreshDiagnostics @Inject constructor(
         types: List<FlagType>,
         startedNanos: Long = System.nanoTime(),
     ): FlagRefreshTrace {
+        val environment = FlagRefreshEnvironment(foreground, networkContext, clock, activity.begin())
         val timing = foreground.snapshot()
         val network = runCatching { networkContext.snapshot() }.getOrElse { NetworkDiagnosticsContext() }
-        val contextLine = "${network.line()} ${timing.line()}"
-        val trace = FlagRefreshTrace(sequence.incrementAndGet(), types, log, startedNanos, contextLine)
+        val restrictions = runCatching { networkContext.restrictions() }
+            .getOrElse { NetworkDiagnosticsRestrictions() }
+        val contextLine = "${restrictions.line()} ${network.line()} ${timing.line()}"
+        val trace = FlagRefreshTrace(sequence.incrementAndGet(), types, log, startedNanos, contextLine, environment)
         log.record(DiagnosticsLog.Level.INFO, TAG,
-            "refresh=${trace.id} trigger=${trigger.label} types=${types.joinToString { it.name }} begin $contextLine")
+            "refresh=${trace.id} trigger=${trigger.label} types=${types.joinToString { it.name }} " +
+                "begin ${environment.beginLine()} $contextLine")
         return trace
     }
 
@@ -71,6 +77,7 @@ class FlagRefreshTrace internal constructor(
     private val log: DiagnosticsLog,
     private val started: Long,
     private val contextLine: String,
+    private val environment: FlagRefreshEnvironment,
 ) : AbstractCoroutineContextElement(Key) {
     private val triggerToBeginMs = elapsedDiagnosticMs(started)
     private val fetches = linkedSetOf<FlagFetchTrace>()
@@ -113,6 +120,7 @@ class FlagRefreshTrace internal constructor(
         // Closing and taking the accepted calls is atomic with network completion. A late call
         // either belongs to this snapshot or uses the immediate quota, never a stale owner.
         val calls = publication.finish() ?: return
+        val environmentLine = environment.finish()
         val gaps = resultFetches.values.filterNotNull().flatMap { it.gapSnapshot() }.distinct()
         val omitted = publishDetails(calls)
         // Write the summary last; details of this refresh cannot evict its trigger or summary.
@@ -121,7 +129,7 @@ class FlagRefreshTrace internal constructor(
                 "${fetchLine()} ${readLine()} ${callLine(calls, omitted)} " +
                 "${transportLine(calls)} ${phaseLine(calls)} " +
                 "triggerToBeginMs=$triggerToBeginMs firstFreshPublicationMs=${publicationMs ?: "-"} " +
-                "totalMs=${elapsedDiagnosticMs(started)} slowest=[${slowestLine(calls)}] $contextLine")
+                "totalMs=${elapsedDiagnosticMs(started)} slowest=[${slowestLine(calls)}] $environmentLine $contextLine")
     }
 
     private fun publishDetails(calls: List<HfrCallSummary>): Int {
@@ -171,12 +179,18 @@ class FlagRefreshTrace internal constructor(
         val durations = calls.map { it.totalMs }.sorted()
         return "calls=${calls.size} callRefreshIds=${calls.mapNotNull { it.refreshId }.distinct()} " +
             "details-omitted=$omitted connectAttempts=${calls.sumOf { it.connectAttempts }} " +
+            "callsWithConnectAttempts=${calls.count { it.connectAttempts > 0 }} " +
             "connectFailures=${calls.sumOf { it.connectFailures }} " +
+            "connectErrnos=[${connectionErrnos(calls)}] " +
             "connectAbandoned=${calls.sumOf { it.connectAbandoned }} " +
             "callFailures=${calls.count { it.outcome != HfrCallOutcome.OK }} " +
             "reused=${calls.count { it.reusedConnection }} maxMs=${durations.lastOrNull() ?: 0} " +
             "medianMs=${durations.getOrNull(durations.size / 2) ?: 0}"
     }
+
+    private fun connectionErrnos(calls: List<HfrCallSummary>): String = HfrConnectErrno.entries.associateWith { errno ->
+        calls.sumOf { it.connectErrnos[errno] ?: 0 }
+    }.diagnosticLine()
 
     private fun phaseLine(calls: List<HfrCallSummary>): String =
         FlagRefreshPhase.entries.joinToString { phase ->

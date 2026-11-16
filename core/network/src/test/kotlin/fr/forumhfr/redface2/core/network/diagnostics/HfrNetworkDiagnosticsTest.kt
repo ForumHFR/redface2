@@ -28,16 +28,16 @@ class HfrNetworkDiagnosticsTest {
     private val diagnostics = FlagRefreshDiagnostics(log)
 
     @Test
-    fun `fetch without a refresh immediately publishes slow failed and cancelled calls`() {
+    fun `fetch without a refresh samples fast successes and immediately publishes slow failed and cancelled calls`() {
         // findFlag and detached mutation refreshes own a fetch, without a UI refresh trace.
         val fetch = diagnostics.fetch(FlagType.CYAN, refreshId = null)
-        complete(fetch, duration = 10)
-        assertTrue(log.entries.value.isEmpty())
+        val fast = complete(fetch, duration = 10)
+        assertEquals(listOf(fast.copy(refreshId = null).line() + " sample=isolated"), details())
         val slow = complete(fetch)
         val failed = complete(fetch, duration = 10, outcome = HfrCallOutcome.FAILURE)
         val cancelled = complete(fetch, duration = 10, outcome = HfrCallOutcome.CANCELLED)
 
-        assertEquals(listOf(slow, failed, cancelled).map { it.copy(refreshId = null).line() }, details())
+        assertEquals(listOf(slow, failed, cancelled).map { it.copy(refreshId = null).line() }, details().drop(1))
         assertEquals(4, fetch.callSnapshot().size)
     }
 
@@ -111,12 +111,13 @@ class HfrNetworkDiagnosticsTest {
         val original = diagnostics.fetch(FlagType.CYAN, refresh.id)
         refresh.attach(original, false)
         val replacement = diagnostics.fetch(FlagType.CYAN, refreshId = null)
+        val id = collector.nextId()
         val call = HfrCallSummary(
-            id = collector.nextId(), endpoint = HfrEndpoint(HfrEndpoint.Family.PARTICIPATED, 23, 1),
+            id = id, endpoint = HfrEndpoint(HfrEndpoint.Family.PARTICIPATED, 23, 1),
             role = HfrClientRole.AUTH, refreshId = replacement.refreshId, flagType = replacement.type,
             phase = FlagRefreshPhase.BUCKETS, waitMs = 50, dnsMs = 10, connectMs = 100, tlsMs = 70,
             headersSentToReceivedMs = 1_000, bodyMs = 20, totalMs = 1_500, status = 200, protocol = "h2",
-            reusedConnection = false, inFlightAtStart = collector.started(), outcome = HfrCallOutcome.OK,
+            reusedConnection = false, inFlightAtStart = collector.started(id), outcome = HfrCallOutcome.OK,
         )
         collector.completed(call, replacement)
         // The network already published N1 before the original refresh receives addFlag's result.
@@ -141,13 +142,14 @@ class HfrNetworkDiagnosticsTest {
     @Test
     fun `catalogue published immediately retains all timings for a late owner without replay`() {
         val catalogue = HfrCatalogueTrace()
+        val id = collector.nextId()
         val call = HfrCallSummary(
-            id = collector.nextId(), endpoint = HfrEndpoint(HfrEndpoint.Family.CATEGORIES),
+            id = id, endpoint = HfrEndpoint(HfrEndpoint.Family.CATEGORIES),
             role = HfrClientRole.ANON, refreshId = null, phase = FlagRefreshPhase.CATALOGUE,
             waitMs = 11, dnsMs = 23, connectMs = 37, tlsMs = 17,
             headersSentToReceivedMs = 1_401, bodyMs = 29, totalMs = 1_501,
             status = 200, protocol = "h2", reusedConnection = false,
-            inFlightAtStart = collector.started(), outcome = HfrCallOutcome.OK,
+            inFlightAtStart = collector.started(id), outcome = HfrCallOutcome.OK,
         )
         collector.completed(call, fetch = null, catalogue = catalogue)
         val refresh = diagnostics.begin(FlagRefreshTrigger.PULL, listOf(FlagType.RED))
@@ -322,12 +324,13 @@ class HfrNetworkDiagnosticsTest {
         duration: Long = 1_500,
         outcome: HfrCallOutcome = HfrCallOutcome.OK,
     ): HfrCallSummary {
+        val id = collector.nextId()
         val summary = HfrCallSummary(
-            id = collector.nextId(), endpoint = HfrEndpoint(HfrEndpoint.Family.PARTICIPATED, 23, 1),
+            id = id, endpoint = HfrEndpoint(HfrEndpoint.Family.PARTICIPATED, 23, 1),
             role = HfrClientRole.AUTH, refreshId = fetch?.refreshId, flagType = fetch?.type,
             phase = FlagRefreshPhase.BUCKETS, waitMs = 0, dnsMs = 0, connectMs = 0, tlsMs = 0,
             headersSentToReceivedMs = duration, bodyMs = 0, totalMs = duration, status = 200, protocol = "h2",
-            reusedConnection = true, inFlightAtStart = collector.started(), outcome = outcome,
+            reusedConnection = true, inFlightAtStart = collector.started(id), outcome = outcome,
         )
         collector.completed(summary, fetch, catalogue)
         return summary

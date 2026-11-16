@@ -3,6 +3,8 @@ package fr.forumhfr.redface2.core.network.diagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagFetchTrace
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallOutcome
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallIntent
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrConnectErrno
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
@@ -15,6 +17,7 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.util.concurrent.Executors
 import okhttp3.Address
 import okhttp3.Call
@@ -41,6 +44,43 @@ class HfrEventListenerFactoryTest {
     private val factory = HfrEventListenerFactory(collector, HfrClientRole.AUTH) { now }
     private val address = InetSocketAddress.createUnresolved("unused", 443)
     private var activeRefresh: FlagRefreshTrace? = null
+
+    @Test
+    fun `connection errno counts include failed routes of a successful call and ignore duplicate failure callbacks`() {
+        val (call, listener) = newCall()
+        listener.callStart(call)
+        listener.connectStart(call, address, Proxy.NO_PROXY)
+        val timeout = IOException("SecretCookie", SocketTimeoutException("SecretAddress"))
+        listener.connectFailed(call, address, Proxy.NO_PROXY, null, timeout)
+        listener.connectFailed(call, address, Proxy.NO_PROXY, null, timeout)
+        listener.connectStart(call, address, Proxy.NO_PROXY)
+        listener.connectFailed(call, address, Proxy.NO_PROXY, null, IOException("ECONNREFUSED SecretHost"))
+        listener.connectStart(call, address, Proxy.NO_PROXY)
+        listener.connectEnd(call, address, Proxy.NO_PROXY, Protocol.HTTP_2)
+        listener.connectionAcquired(call, connection())
+        listener.callEnd(call)
+        val summary = fetch.callSnapshot().single()
+        assertEquals(3, summary.connectAttempts)
+        assertEquals(2, summary.connectFailures)
+        assertEquals(mapOf(HfrConnectErrno.TIMEOUT to 1, HfrConnectErrno.OTHER to 1), summary.connectErrnos)
+        assertTrue(summary.line(), summary.line().contains("connectErrnos=[timeout:1;other:1]"))
+        assertFalse(summary.line().contains("Secret"))
+        assertEquals(HfrCallOutcome.OK, summary.outcome)
+    }
+
+    @Test
+    fun `badge request exports the private list family and its explicit intent`() {
+        val request = Request.Builder().url("https://forum.hardware.fr/forum1.php?cat=prive&page=1&pseudo=Secret")
+            .build().withHfrDiagnostics(HfrCallIntent(HfrCallIntent.Kind.MP_BADGE))
+        val call = OkHttpClient().newCall(request)
+        val listener = factory.create(call)
+        listener.callStart(call)
+        at(1_500) { listener.callEnd(call) }
+        val line = log.entries.value.single().message
+        assertTrue(line, line.contains("html:mp-list cat=- page=1"))
+        assertTrue(line, line.contains("intent=mp-badge"))
+        assertFalse(line.contains("Secret"))
+    }
 
     @Test
     fun `acquired IPv4 and IPv6 family is exported for both new and reused connections`() {
@@ -123,7 +163,7 @@ class HfrEventListenerFactoryTest {
     }
 
     @Test
-    fun `new and reused connections retain all timings without consuming buffer entries`() {
+    fun `new and reused connections retain all timings and can sample isolated successes`() {
         val (call, listener) = newCall()
         at(100) { call.request().tag(HfrCallTag::class.java)!!.executing(now); listener.callStart(call) }
         at(110) { listener.dnsStart(call, "unused") }
@@ -160,7 +200,8 @@ class HfrEventListenerFactoryTest {
         assertEquals(0L, reused.connectMs)
         assertEquals(1, reused.inFlightAtStart)
         assertEquals(HfrCallOutcome.OK, reused.outcome)
-        assertTrue(log.entries.value.isEmpty())
+        assertEquals(2, log.entries.value.size)
+        assertTrue(log.entries.value.all { it.tag == "HfrCall" && it.message.endsWith("sample=isolated") })
     }
 
     @Test
@@ -196,7 +237,7 @@ class HfrEventListenerFactoryTest {
                 assertFalse(entry.message, entry.message.containsSecret(it))
             }
             // Unknown context bits are allowed; arbitrary query delimiters remain forbidden.
-            val unknownBits = Regex("""\b(?:metered|validated|privateDns|foregroundS)=\?(?= |$)""")
+            val unknownBits = Regex("""\b(?:metered|validated|privateDns|foregroundS|batterySaver)=\?(?= |$)""")
             assertFalse(entry.message, entry.message.replace(unknownBits, "").contains("?"))
         }
     }
@@ -449,7 +490,8 @@ class HfrEventListenerFactoryTest {
         nextListener.callStart(next)
         nextListener.callEnd(next)
         assertEquals(1, fetch.callSnapshot().last().inFlightAtStart)
-        assertEquals(1, log.entries.value.count { it.tag == "HfrCall" })
+        assertEquals(2, log.entries.value.count { it.tag == "HfrCall" })
+        assertTrue(log.entries.value.last().message.endsWith("sample=isolated"))
     }
 
     @Test
