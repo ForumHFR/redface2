@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.flags
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -11,6 +12,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeState
@@ -32,8 +34,12 @@ internal fun NetworkProbePanel(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Row {
-            TextButton(onClick = onStart, enabled = !state.running && cooldownSeconds == 0L) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(
+                onClick = onStart,
+                enabled = !state.running && cooldownSeconds == 0L,
+                contentPadding = PaddingValues(0.dp),
+            ) {
                 Text(stringResource(R.string.diagnostics_probe_start))
             }
             if (state.running) {
@@ -43,21 +49,18 @@ internal fun NetworkProbePanel(
         if (state.running) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             Text(
-                stringResource(R.string.diagnostics_probe_running, state.waveSize ?: 1),
-                style = MaterialTheme.typography.bodySmall,
-            )
-        } else if (cooldownSeconds != null && cooldownSeconds > 0) {
-            Text(
-                stringResource(R.string.diagnostics_probe_cooldown, cooldownSeconds),
+                pluralStringResource(R.plurals.diagnostics_probe_running, state.waveSize ?: 1, state.waveSize ?: 1),
                 style = MaterialTheme.typography.bodySmall,
             )
         }
         ProbeStatus(state.status)
         state.waves.forEach { wave ->
+            val successes = pluralStringResource(R.plurals.diagnostics_probe_successes, wave.successes, wave.successes)
+            val failures = pluralStringResource(R.plurals.diagnostics_probe_failures, wave.failures, wave.failures)
             val median = wave.medianConnectionMs?.let { stringResource(R.string.diagnostics_probe_milliseconds, it) }
                 ?: stringResource(R.string.diagnostics_probe_no_measurement)
             Text(
-                stringResource(R.string.diagnostics_probe_wave, wave.size, wave.successes, wave.failures, median),
+                stringResource(R.string.diagnostics_probe_wave, wave.size, successes, failures, median),
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -66,6 +69,12 @@ internal fun NetworkProbePanel(
                 stringResource(R.string.diagnostics_probe_disturbed),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.tertiary,
+            )
+        }
+        if (!state.running && cooldownSeconds != null && cooldownSeconds > 0) {
+            Text(
+                stringResource(R.string.diagnostics_probe_cooldown, cooldownSeconds),
+                style = MaterialTheme.typography.bodySmall,
             )
         }
     }

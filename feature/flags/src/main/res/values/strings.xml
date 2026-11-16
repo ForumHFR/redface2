@@ -255,14 +255,29 @@
          rafraîchir, c'est le seul retour que le lecteur obtient. -->
     <string name="flags_post_submit_confirmed">Message publié</string>
     <string name="flags_post_edit_confirmed">Message modifié</string>
-    <string name="diagnostics_empty">Aucun log pour l’instant. Connectez-vous pour voir les événements.</string>
+    <string name="diagnostics_title">Diagnostics (%1$d/%2$d)</string>
+    <string name="diagnostics_copy">Copier</string>
+    <string name="diagnostics_clear">Vider</string>
+    <string name="diagnostics_close">Fermer</string>
+    <string name="diagnostics_empty">Aucun journal pour le moment. Connectez-vous pour voir les premières entrées.</string>
     <string name="diagnostics_probe_start">Tester la connexion</string>
     <string name="diagnostics_probe_cancel">Annuler</string>
     <string name="diagnostics_probe_explanation">Envoie 36 requêtes anonymes au forum, par vagues de 1, 5, 10 et 20, pour mesurer votre connexion. Aucune donnée de compte n’est envoyée.</string>
-    <string name="diagnostics_probe_running">Test en cours — vague de %1$d requêtes…</string>
+    <plurals name="diagnostics_probe_running">
+        <item quantity="one">Test en cours — vague de %1$d requête…</item>
+        <item quantity="other">Test en cours — vague de %1$d requêtes…</item>
+    </plurals>
     <string name="diagnostics_probe_cooldown">Test disponible dans %1$d s</string>
-    <string name="diagnostics_probe_wave">Vague de %1$d : %2$d réussites / %3$d échecs · connexion médiane : %4$s</string>
-    <string name="diagnostics_probe_milliseconds">%1$d ms</string>
+    <string name="diagnostics_probe_wave">Vague de %1$d\u00a0:\u00a0%2$s / %3$s · connexion médiane\u00a0:\u00a0%4$s</string>
+    <plurals name="diagnostics_probe_successes">
+        <item quantity="one">%1$d réussite</item>
+        <item quantity="other">%1$d réussites</item>
+    </plurals>
+    <plurals name="diagnostics_probe_failures">
+        <item quantity="one">%1$d échec</item>
+        <item quantity="other">%1$d échecs</item>
+    </plurals>
+    <string name="diagnostics_probe_milliseconds">%1$d\u00a0ms</string>
     <string name="diagnostics_probe_no_measurement">indisponible</string>
     <string name="diagnostics_probe_disturbed">Mesure perturbée : une autre activité HFR a eu lieu pendant le test.</string>
     <string name="diagnostics_probe_complete">Test terminé.</string>

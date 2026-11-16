@@ -91,33 +91,37 @@ fun DiagnosticsScreen(
                 .statusBarsPadding()
                 .navigationBarsPadding(),
         ) {
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "Diagnostics (${entries.size}/${DiagnosticsLog.CAPACITY})",
+                    text = stringResource(R.string.diagnostics_title, entries.size, DiagnosticsLog.CAPACITY),
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                Spacer(Modifier.size(16.dp))
-                Spacer(Modifier.weight(1f))
-                TextButton(
-                    enabled = entries.isNotEmpty(),
-                    onClick = {
-                        copyDiagnosticsToClipboard(
-                            context, entries, timeFormat,
-                            DiagnosticsEnvironment(
-                                versionName, versionCode, channel,
-                                Build.VERSION.SDK_INT, Build.MANUFACTURER, Build.MODEL,
-                            ),
-                        )
-                    },
-                ) { Text("Copier") }
-                TextButton(onClick = { viewModel.clear() }) { Text("Vider") }
-                TextButton(onClick = close) { Text("Fermer") }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(
+                        enabled = entries.isNotEmpty(),
+                        onClick = {
+                            copyDiagnosticsToClipboard(
+                                context, entries, timeFormat,
+                                DiagnosticsEnvironment(
+                                    versionName, versionCode, channel,
+                                    Build.VERSION.SDK_INT, Build.MANUFACTURER, Build.MODEL,
+                                ),
+                            )
+                        },
+                    ) { Text(stringResource(R.string.diagnostics_copy), softWrap = false) }
+                    TextButton(onClick = { viewModel.clear() }) {
+                        Text(stringResource(R.string.diagnostics_clear), softWrap = false)
+                    }
+                    TextButton(onClick = close) { Text(stringResource(R.string.diagnostics_close), softWrap = false) }
+                }
             }
             Text(
                 text = stringResource(R.string.diagnostics_copy_scope),
