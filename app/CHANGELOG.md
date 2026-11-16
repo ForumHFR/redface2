@@ -16,6 +16,10 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.71.0` — `internal` (dev) — 2026-11-16
+
+Drapeaux en données mobiles ([#984](https://github.com/ForumHFR/redface2/issues/984)) : un rafraîchissement ne tombe plus en erreur entière quand une partie des catégories échoue ; les drapeaux en cache de ces catégories restent affichés et un bandeau signale le rafraîchissement partiel (PR [#1667](https://github.com/ForumHFR/redface2/pull/1667)). Les lectures sont bornées à 5 en parallèle, avec une connexion de 5 s, une reprise et une échéance globale de 12 s. Diagnostics : l'export indique le premier plan, le type de réseau et les classes d'erreur de connexion (PR [#1668](https://github.com/ForumHFR/redface2/pull/1668)) ; « Tester la connexion » mesure la connexion par vagues anonymes de 1, 5, 10 et 20 requêtes (PR [#1669](https://github.com/ForumHFR/redface2/pull/1669)) ; « Actualisation expérimentale des drapeaux » compare quatre stratégies, règle N de 1 à 20 et coupe ou non la reprise (PR [#1670](https://github.com/ForumHFR/redface2/pull/1670)).
+
 ## `0.70.0` — `open` (bêta) — 2026-11-14
 
 Promotion bêta du lot développé en dev de `0.69.0` à `0.69.24`, depuis la précédente bêta `0.68.0`. Le détail par version dev figure dans les entrées ci-dessous. Contenu :

@@ -1,6 +1,5 @@
-Redface 2 v0.70.0 — bêta.
-- Éditeur refait : barre d'action en bas, formats, aperçu à côté du texte, feuille Options.
-- Brouillons sous ↺ : « Citer » insère tout de suite, le brouillon attend.
-- MP : modifier ses propres messages.
-- Envoi : erreurs plus claires, envoi incertain mieux délimité.
-- Visionneuse : GIF animés plus légers.
+Redface 2 v0.71.0 — dev.
+- Drapeaux : un échec partiel garde les drapeaux en cache au lieu d’une erreur.
+- Lectures bornées à 5 en parallèle, échéance de 12 s.
+- Diagnostics : bouton « Tester la connexion ».
+- Diagnostics : stratégies d’actualisation expérimentales à comparer.
