@@ -29,7 +29,6 @@ import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
-import fr.forumhfr.redface2.core.network.FlagReadDeadlineException
 import fr.forumhfr.redface2.core.network.FlagReadClock
 import fr.forumhfr.redface2.core.network.FlagReadSession
 import fr.forumhfr.redface2.core.network.HfrApiClient
@@ -3508,7 +3507,7 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
-    fun `observation joining a pulls replacement cannot outlive its original deadline - 984`() = runTest {
+    fun `observation deadline leaves a newer pull to publish without a transient failure - 984`() = runTest {
         val (api, forum) = wireDeps {
             stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
             stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
@@ -3516,8 +3515,9 @@ class DefaultFlagRepositoryTest {
         val monotonic = mockk<FlagReadClock>()
         every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
         val dao = stubFlagDao()
+        val diagnostics = DiagnosticsLog()
         // A queued dispatcher lets the pull start its replacement before the observer rejoins.
-        val repo = buildRepository(api, forum, flagDao = dao, flagReadClock = monotonic,
+        val repo = buildRepository(api, forum, flagDao = dao, flagReadClock = monotonic, diagnostics = diagnostics,
             testDispatcher = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
         coEvery { api.getTopicList(23, null, 1, any(), true) } coAnswers { awaitCancellation() }
         val observation = async { repo.observe(FlagType.CYAN).first { it !is FlagsResult.Loading } }
@@ -3527,16 +3527,61 @@ class DefaultFlagRepositoryTest {
         runCurrent()
         advanceTimeBy(2_000)
         runCurrent()
-        assertTrue("original observer must stop at t=12s, not t=22s", observation.isCompleted)
-        val result = observation.await()
-        assertTrue(result is FlagsResult.Failure && result.cause is FlagReadDeadlineException)
+        assertFalse("the observer must not receive a failure while the replacement is in flight",
+            observation.isCompleted)
+        val summary = diagnostics.entries.value.single { it.message.startsWith("refresh=1 types=CYAN") }.message
+        assertTrue("the original wait must finish at t=12s without failure: $summary", summary.contains("exception=-"))
         assertFalse("the newer pull still owns its independent budget", pull.isCompleted)
         coVerify(exactly = 0) { dao.replaceSnapshot("xat", FlagType.CYAN, any()) }
         advanceTimeBy(10_000)
         runCurrent()
         assertTrue(pull.isCompleted)
-        assertEquals(FlagRefreshStatus.PARTIAL, (pull.await() as FlagsResult.Success).refreshStatus)
+        val result = pull.await() as FlagsResult.Success
+        assertEquals(FlagRefreshStatus.PARTIAL, result.refreshStatus)
+        assertEquals(result, observation.await())
+        assertEquals(22_000L, testScheduler.currentTime)
         coVerify(exactly = 1) { dao.replaceSnapshot("xat", FlagType.CYAN, any()) }
+    }
+
+    @Test
+    fun `observation deadline keeps stale cache while a newer pull is in flight - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val monotonic = mockk<FlagReadClock>()
+        every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+        val dao = stubFlagDao()
+        val stale = Instant.parse("2026-05-03T11:00:00Z")
+        coEvery { dao.getFlags("xat", FlagType.CYAN) } returns listOf(
+            flagEntity(FlagType.CYAN, 999, "Old row", stale),
+        )
+        val diagnostics = DiagnosticsLog()
+        val repo = buildRepository(api, forum, flagDao = dao, flagReadClock = monotonic, diagnostics = diagnostics,
+            testDispatcher = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        coEvery { api.getTopicList(23, null, 1, any(), true) } coAnswers { awaitCancellation() }
+        repo.observe(FlagType.CYAN).test {
+            val cached = awaitItem() as FlagsResult.Success
+            assertEquals(999, cached.flags.single().topicId)
+            advanceTimeBy(10_000)
+            val pull = async { repo.refresh(FlagType.CYAN) }
+            runCurrent()
+            assertEquals(FlagsResult.Loading, awaitItem())
+            advanceTimeBy(2_000)
+            runCurrent()
+            val summary = diagnostics.entries.value.single { it.message.startsWith("refresh=1 types=CYAN") }.message
+            assertTrue("the cache fallback must finish without failure: $summary", summary.contains("exception=-"))
+            expectNoEvents()
+            assertFalse(pull.isCompleted)
+            assertEquals(cached, repo.observe(FlagType.CYAN).first())
+            coVerify(exactly = 0) { dao.replaceSnapshot("xat", FlagType.CYAN, any()) }
+            advanceTimeBy(10_000)
+            runCurrent()
+            val result = pull.await() as FlagsResult.Success
+            assertEquals(setOf(999, 35395), result.flags.map { it.topicId }.toSet())
+            assertEquals(result, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Test

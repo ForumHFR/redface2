@@ -34,12 +34,52 @@ class FlagsRefreshBannerTest {
     }
 
     @Test
-    fun `missing sticky categories use plural fallback names and a bounded list - 984`() {
+    fun `missing sticky categories use plural names and a bounded list - 984`() {
         mount(state(FlagRefreshStatus.PARTIAL).copy(refreshIssue = FlagRefreshIssue(
             stickyCategories = listOf(FlagRefreshCategory(13, "Discussions"),
-                FlagRefreshCategory(23, null), FlagRefreshCategory(32, "IA")),
+                FlagRefreshCategory(23, "Technologies Mobiles"), FlagRefreshCategory(32, "IA")),
         )))
-        compose.onNodeWithText("Épinglés non chargés pour les catégories Discussions, Catégorie 23 +1.").assertExists()
+        compose.onNodeWithText("Épinglés non chargés pour les catégories Discussions, Technologies Mobiles +1.")
+            .assertExists()
+    }
+
+    @Test
+    fun `missing sticky name after a disk reload uses an unnamed singular message - 984`() {
+        mount(state(FlagRefreshStatus.PARTIAL).copy(refreshIssue = FlagRefreshIssue(
+            stickyCategories = listOf(FlagRefreshCategory(23, null)),
+        )))
+        compose.onNodeWithText("Épinglés non chargés pour 1 catégorie.").assertExists()
+        compose.onNodeWithText("Catégorie 23", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun `blank or missing sticky names use an unnamed plural message - 984`() {
+        mount(state(FlagRefreshStatus.PARTIAL).copy(refreshIssue = FlagRefreshIssue(
+            stickyCategories = listOf(FlagRefreshCategory(13, "Discussions"),
+                FlagRefreshCategory(23, " "), FlagRefreshCategory(32, null)),
+        )))
+        compose.onNodeWithText("Épinglés non chargés pour 3 catégories.").assertExists()
+        compose.onNodeWithText("Catégorie 23", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun `partial session expiry hides the redundant sticky message - 984`() {
+        mount(state(FlagRefreshStatus.PARTIAL, FlagFailureKind.SESSION).copy(refreshIssue = FlagRefreshIssue(
+            stickyCategories = listOf(FlagRefreshCategory(13, "Discussions")),
+        )))
+        compose.onNodeWithText("Session HFR expirée", substring = true).assertExists()
+        compose.onNodeWithText("Épinglés non chargés", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Se connecter à HFR").assertExists()
+    }
+
+    @Test
+    fun `failed refresh hides the redundant sticky message - 984`() {
+        mount(state(FlagRefreshStatus.FAILED).copy(refreshIssue = FlagRefreshIssue(
+            stickyCategories = listOf(FlagRefreshCategory(13, "Discussions")),
+        )))
+        compose.onNodeWithText("Actualisation impossible.", substring = true).assertExists()
+        compose.onNodeWithText("Épinglés non chargés", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Réessayer").assertExists()
     }
 
     @Test

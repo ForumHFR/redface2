@@ -212,6 +212,8 @@ class DefaultFlagRepository @Inject constructor(
 
     private class SupersededFetchException : CancellationException("Flags fetch generation superseded")
 
+    private class FetchWaitDeadlineException : CancellationException("Flags replacement wait deadline reached")
+
     private class StickyDeadlineException : CancellationException("Shared sticky sweep deadline reached")
 
     private val inFlightFetches: MutableMap<FetchKey, ObservedFetch> = mutableMapOf()
@@ -933,6 +935,10 @@ class DefaultFlagRepository @Inject constructor(
                     acceptFetchedResult(key, result, observed.trace, caller, publish)
                 }
                 if (ownedResult != null) return ownedResult
+            } catch (_: FetchWaitDeadlineException) {
+                // Another caller still owns the replacement: keep existing content without
+                // publishing over its in-flight result, or leave a cold observer waiting for it.
+                return synchronized(cachedSuccesses) { cachedSuccesses[type] } ?: FlagsResult.Loading
             } finally {
                 releaseFetch(key, observed)
             }
@@ -951,7 +957,7 @@ class DefaultFlagRepository @Inject constructor(
             // A replacement already admitted by another caller may have a later deadline.
             // Stop waiting without cancelling work still owned by that caller.
             withTimeoutOrNull(admission.remainingMillis().coerceAtLeast(1)) { observed.deferred.await() }
-                ?: FlagsResult.Failure(FlagReadDeadlineException())
+                ?: throw FetchWaitDeadlineException()
         }
     } catch (superseded: SupersededFetchException) {
         // This repository cancelled obsolete work, not the caller's refresh. Its
