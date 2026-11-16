@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeWave
 import fr.forumhfr.redface2.core.network.HfrConstants
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
 import java.io.IOException
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
@@ -28,12 +29,20 @@ import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 
-class OkHttpNetworkProbeRunner @Inject constructor(
+class OkHttpNetworkProbeRunner internal constructor(
     private val baseClient: OkHttpClient,
-    @param:HfrBaseUrl private val baseUrl: HttpUrl,
-    @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    private val baseUrl: HttpUrl,
+    private val ioDispatcher: CoroutineDispatcher,
     private val traffic: HfrProbeTraffic,
+    private val waveTimeoutMs: Long,
 ) : NetworkProbeRunner {
+    @Inject constructor(
+        baseClient: OkHttpClient,
+        @HfrBaseUrl baseUrl: HttpUrl,
+        @IoDispatcher ioDispatcher: CoroutineDispatcher,
+        traffic: HfrProbeTraffic,
+    ) : this(baseClient, baseUrl, ioDispatcher, traffic, NetworkProbeRunner.WAVE_TIMEOUT_MS)
+
     override suspend fun run(onWaveStarted: (Int) -> Unit, onWaveFinished: (NetworkProbeWave) -> Unit) {
         val client = anonymousProbeClient(baseClient)
         val observation = traffic.snapshot()
@@ -56,11 +65,11 @@ class OkHttpNetworkProbeRunner @Inject constructor(
     ) {
         val timings = List(size) { ProbeTimingListener() }
         val dns = ProbeDns(client.dns, size,
-            System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(NetworkProbeRunner.WAVE_TIMEOUT_MS))
+            System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(waveTimeoutMs))
         val waveClient = client.newBuilder().dns(dns).build()
         var deadline = false
         try {
-            val completed = withTimeoutOrNull(NetworkProbeRunner.WAVE_TIMEOUT_MS) {
+            val completed = withTimeoutOrNull(waveTimeoutMs) {
                 coroutineScope {
                     timings.map { timing -> async { execute(waveClient, timing, dns) } }.awaitAll()
                 }
@@ -92,11 +101,12 @@ class OkHttpNetworkProbeRunner @Inject constructor(
             .header("User-Agent", HfrConstants.USER_AGENT)
             .build()
         val exchanged = AtomicBoolean()
-        // OkHttp can follow up a 503 Retry-After: 0 even with connection retries disabled.
-        // A network interceptor runs before each actual GET, including internal follow-ups.
+        // Remove 503 retry permission before OkHttp can open a second TCP/TLS connection.
+        // Keep the exchange guard as a fallback, before any unexpected follow-up GET.
         val call = client.newBuilder().eventListener(timing).addNetworkInterceptor { chain ->
             if (!exchanged.compareAndSet(false, true)) throw ExchangeLimitExceeded()
-            chain.proceed(chain.request())
+            val response = chain.proceed(chain.request())
+            if (response.code == 503) response.newBuilder().removeHeader("Retry-After").build() else response
         }.build().newCall(request)
         // The cancellation hook remains installed while execute() AND the body read are blocked.
         suspendCancellableCoroutine<Unit> { continuation ->
@@ -121,7 +131,10 @@ class OkHttpNetworkProbeRunner @Inject constructor(
                 outcome = NetworkProbeOutcome.CANCELLED
             } catch (error: ExchangeLimitExceeded) {
                 failure = error
-                outcome = NetworkProbeOutcome.HTTP_ERROR
+                outcome = NetworkProbeOutcome.EXCHANGE_LIMIT
+            } catch (error: UnknownHostException) {
+                failure = error
+                outcome = NetworkProbeOutcome.DNS_ERROR
             } catch (error: IOException) {
                 failure = error
                 outcome = if (call.isCanceled()) NetworkProbeOutcome.CANCELLED else NetworkProbeOutcome.NETWORK_ERROR

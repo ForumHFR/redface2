@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.network.diagnostics
 
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrConnectErrno
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeOutcome
+import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.Socket
@@ -67,6 +68,17 @@ class ProbeTimingListenerTest {
         assertEquals(HfrConnectErrno.TIMEOUT, result.errno)
         assertFalse(result.line().contains("Secret"))
         assertFalse(result.line().contains("example.invalid"))
+    }
+
+    @Test
+    fun `non connection failures export their outcome without fabricating an errno`() {
+        NetworkProbeOutcome.entries.filter { it != NetworkProbeOutcome.NETWORK_ERROR }.forEach { outcome ->
+            val listener = ProbeTimingListener { now }
+            listener.callStart(call)
+            val result = listener.finish(outcome, IOException("Secret control failure"))
+            assertNull(result.line(), result.errno)
+            assertFalse(result.line().contains("Secret"))
+        }
     }
 
     @Test

@@ -12,7 +12,7 @@ interface NetworkProbeRunner {
     }
 }
 
-enum class NetworkProbeOutcome { OK, HTTP_ERROR, NETWORK_ERROR, CANCELLED, DEADLINE }
+enum class NetworkProbeOutcome { OK, HTTP_ERROR, NETWORK_ERROR, DNS_ERROR, EXCHANGE_LIMIT, CANCELLED, DEADLINE }
 
 /**
  * TCP/TLS describe the acquired route on success, observed failed phases otherwise.

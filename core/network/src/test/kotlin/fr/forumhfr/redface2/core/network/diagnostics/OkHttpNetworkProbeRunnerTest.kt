@@ -10,12 +10,17 @@ import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeService
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeStatus
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeWave
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.Proxy
+import java.net.ServerSocket
+import java.net.Socket
+import java.net.UnknownHostException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import javax.net.ServerSocketFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancelAndJoin
@@ -33,6 +38,8 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.SocketPolicy
+import okhttp3.tls.HandshakeCertificates
+import okhttp3.tls.HeldCertificate
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -43,11 +50,15 @@ import org.junit.Test
 
 class OkHttpNetworkProbeRunnerTest {
     private val server = MockWebServer()
+    private val connections = AtomicInteger()
     private val traffic = HfrProbeTraffic()
     private val base = OkHttpClient.Builder().build()
 
     @Before
-    fun start() { server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0) }
+    fun start() {
+        server.serverSocketFactory = CountingServerSocketFactory(connections)
+        server.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+    }
 
     @After
     fun stop() { server.shutdown() }
@@ -135,7 +146,7 @@ class OkHttpNetworkProbeRunnerTest {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
         repeat(35) { server.enqueue(MockResponse().setBody("catalogue")) }
         val waves = mutableListOf<NetworkProbeWave>()
-        runner().run({}, { waves += it })
+        runner(waveTimeoutMs = 1_000).run({}, { waves += it })
         assertEquals(listOf(1, 5, 10, 20), waves.map { it.size })
         assertEquals(NetworkProbeOutcome.DEADLINE, waves.first().results.single().outcome)
         assertEquals(35, waves.drop(1).sumOf { it.successes })
@@ -143,13 +154,30 @@ class OkHttpNetworkProbeRunnerTest {
     }
 
     @Test
-    fun `408 followed by 200 never exceeds 36 server requests`() = runBlocking {
+    fun `408 followed by 200 uses exactly 36 server connections and coherent timings`() = runBlocking {
         assertSingleExchange(408)
     }
 
     @Test
-    fun `503 Retry-After zero followed by 200 never exceeds 36 server requests`() = runBlocking {
+    fun `503 Retry-After zero followed by 200 uses exactly 36 server connections and coherent timings`() = runBlocking {
         assertSingleExchange(503)
+    }
+
+    @Test
+    fun `DNS failures export a closed category without a connection errno or exception message`() = runBlocking {
+        val client = base.newBuilder().proxy(Proxy.NO_PROXY)
+            .dns { throw UnknownHostException("Secret host address cookie") }.build()
+        val url = server.url("/").newBuilder().host("probe.invalid").build()
+        val waves = mutableListOf<NetworkProbeWave>()
+        OkHttpNetworkProbeRunner(client, url, Dispatchers.IO, traffic).run({}, waves::add)
+        assertEquals(36, waves.sumOf { it.failures })
+        assertEquals(0, connections.get())
+        waves.flatMap { it.results }.forEach { result ->
+            assertTrue(result.line(), result.line().contains("outcome=dns_error errno=-"))
+            assertFalse(result.line().contains("Secret"))
+            assertEquals(0, result.connectAttempts)
+            assertNull(result.status)
+        }
     }
 
     @Test(timeout = 10_000)
@@ -181,7 +209,7 @@ class OkHttpNetworkProbeRunnerTest {
         repeat(35) { server.enqueue(MockResponse().setBody("catalogue")) }
         val dns = BlockingDns()
         val activity = HfrRefreshActivity()
-        val service = service(dns, activity)
+        val service = service(dns, activity, waveTimeoutMs = 1_000)
         val job = launch { service.run() }
         val refreshed = CompletableDeferred<Unit>()
         val refresh = launch { activity.withRefresh { refreshed.complete(Unit) } }
@@ -204,21 +232,49 @@ class OkHttpNetworkProbeRunnerTest {
     }
 
     private suspend fun assertSingleExchange(status: Int) {
-        server.enqueue(MockResponse().setResponseCode(status).setHeader("Retry-After", "0").setBody("retry"))
-        repeat(36) { server.enqueue(MockResponse().setBody("catalogue")) }
-        val waves = mutableListOf<NetworkProbeWave>()
-        runner().run({}, waves::add)
-        assertEquals(36, server.requestCount)
-        assertEquals(36, waves.sumOf { it.results.size })
-        assertEquals(NetworkProbeOutcome.HTTP_ERROR, waves.first().results.single().outcome)
-        assertEquals(status, waves.first().results.single().status)
-        assertEquals(35, waves.sumOf { it.successes })
+        MockWebServer().use { secureServer ->
+            val certificate = HeldCertificate.Builder().addSubjectAlternativeName("127.0.0.1").build()
+            val serverCertificates = HandshakeCertificates.Builder().heldCertificate(certificate).build()
+            val clientCertificates = HandshakeCertificates.Builder()
+                .addTrustedCertificate(certificate.certificate).build()
+            secureServer.serverSocketFactory = CountingServerSocketFactory(connections)
+            secureServer.useHttps(serverCertificates.sslSocketFactory(), false)
+            secureServer.start(InetAddress.getByAddress(byteArrayOf(127, 0, 0, 1)), 0)
+            val client = base.newBuilder().proxy(Proxy.NO_PROXY)
+                .sslSocketFactory(clientCertificates.sslSocketFactory(), clientCertificates.trustManager).build()
+            secureServer.enqueue(MockResponse().setResponseCode(status).setHeader("Retry-After", "0").setBody("retry"))
+            repeat(36) { secureServer.enqueue(MockResponse().setBody("catalogue")) }
+            val waves = mutableListOf<NetworkProbeWave>()
+            val url = secureServer.url("/").newBuilder().host("127.0.0.1").build()
+            OkHttpNetworkProbeRunner(client, url, Dispatchers.IO, traffic).run({}, waves::add)
+            assertEquals(36, connections.get())
+            assertEquals(36, secureServer.requestCount)
+            assertEquals(36, waves.sumOf { it.results.size })
+            assertEquals(NetworkProbeOutcome.HTTP_ERROR, waves.first().results.single().outcome)
+            assertEquals(status, waves.first().results.single().status)
+            assertEquals(35, waves.sumOf { it.successes })
+            waves.flatMap { it.results }.forEach { result ->
+                assertEquals(result.line(), 1, result.connectAttempts)
+                assertNull(result.errno)
+                val tcp = requireNotNull(result.tcpMs)
+                val tls = requireNotNull(result.tlsMs)
+                val headers = requireNotNull(result.headersReceivedMs)
+                assertTrue(result.line(), headers >= tcp + tls)
+                assertTrue(result.line(), requireNotNull(result.firstBodyByteMs) >= headers)
+            }
+            val line = waves.first().results.single().line()
+            assertTrue(line, line.contains("outcome=http_error errno=- connectAttempts=1 status=$status"))
+        }
     }
 
-    private fun service(dns: Dns, activity: HfrRefreshActivity): NetworkProbeService {
+    private fun service(
+        dns: Dns,
+        activity: HfrRefreshActivity,
+        waveTimeoutMs: Long = NetworkProbeRunner.WAVE_TIMEOUT_MS,
+    ): NetworkProbeService {
         val client = base.newBuilder().dns(dns).proxy(Proxy.NO_PROXY).build()
         val url = server.url("/").newBuilder().host("probe.invalid").build()
-        val runner = OkHttpNetworkProbeRunner(client, url, Dispatchers.IO, traffic)
+        val runner = OkHttpNetworkProbeRunner(client, url, Dispatchers.IO, traffic, waveTimeoutMs)
         val reservations = object : NetworkProbeReservationStore {
             override suspend fun reserve(): Long = 0
             override suspend fun remainingSeconds(): Long = 0
@@ -250,5 +306,17 @@ class OkHttpNetworkProbeRunnerTest {
         }
     }
 
-    private fun runner() = OkHttpNetworkProbeRunner(base, server.url("/"), Dispatchers.IO, traffic)
+    private class CountingServerSocketFactory(private val connections: AtomicInteger) : ServerSocketFactory() {
+        override fun createServerSocket(): ServerSocket = object : ServerSocket() {
+            override fun accept(): Socket = super.accept().also { connections.incrementAndGet() }
+        }
+        override fun createServerSocket(port: Int): ServerSocket = createServerSocket(port, 50)
+        override fun createServerSocket(port: Int, backlog: Int): ServerSocket =
+            createServerSocket().apply { bind(InetSocketAddress(port), backlog) }
+        override fun createServerSocket(port: Int, backlog: Int, address: InetAddress): ServerSocket =
+            createServerSocket().apply { bind(InetSocketAddress(address, port), backlog) }
+    }
+
+    private fun runner(waveTimeoutMs: Long = NetworkProbeRunner.WAVE_TIMEOUT_MS) =
+        OkHttpNetworkProbeRunner(base, server.url("/"), Dispatchers.IO, traffic, waveTimeoutMs)
 }

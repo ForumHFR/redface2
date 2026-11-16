@@ -114,7 +114,9 @@ internal class ProbeTimingListener(private val nanoTime: () -> Long = System::na
         val result = NetworkProbeRequestResult(
             tcpMs = tcpMs, tlsMs = tlsMs, headersReceivedMs = headersMs, firstBodyByteMs = firstByteMs,
             totalMs = elapsed(started ?: nanoTime(), end), outcome = outcome,
-            errno = errno ?: failure?.let(::classifyConnectErrno), connectAttempts = attemptCount, status = status,
+            // DNS and control failures have closed outcome categories, not a connection errno.
+            errno = errno ?: failure?.takeIf { outcome == NetworkProbeOutcome.NETWORK_ERROR }
+                ?.let(::classifyConnectErrno), connectAttempts = attemptCount, status = status,
         )
         completed = result
         attempts.clear()
