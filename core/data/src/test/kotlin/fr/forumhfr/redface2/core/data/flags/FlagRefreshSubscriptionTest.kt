@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.data.flags
 
 import android.content.Context
 import android.net.ConnectivityManager
+import fr.forumhfr.redface2.core.database.dao.FlagCacheSnapshot
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
@@ -29,8 +30,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -72,7 +74,10 @@ class FlagRefreshSubscriptionTest {
         val failure = IOException("SecretHost SecretCookie")
         coEvery { forum.getCategories(any()) } throws failure
         val result = repository().refresh(FlagType.CYAN)
-        assertSame(failure, (result as FlagsResult.Failure).cause)
+        // The detached socle fetch rethrows a recovered copy of the failure, not the same instance.
+        val cause = (result as FlagsResult.Failure).cause
+        assertTrue(cause is IOException)
+        assertEquals(failure.message, cause.message)
         verify(exactly = 1) { manager.unregisterNetworkCallback(callback.captured) }
         assertFalse(log.entries.value.toString().contains("Secret"))
     }
@@ -80,10 +85,14 @@ class FlagRefreshSubscriptionTest {
     private fun repository(): DefaultFlagRepository {
         val auth = mockk<AuthRepository>()
         every { auth.observeAuthState() } returns flowOf(AuthState.Authenticated("tester"))
+        // Since the socle a failed catalogue is committed as a failure batch; an empty snapshot keeps its cause.
+        val store = mockk<FlagCacheStore> {
+            coEvery { merge(any(), any(), any()) } returns FlagCacheSnapshot(emptyList(), emptyList())
+        }
         return DefaultFlagRepository(
             apiClient = mockk(), hfrClient = mockk(), flagAddResponseParser = mockk(),
             flagDeleteResponseParser = mockk(), forumRepository = forum, authRepository = auth,
-            flagCacheStore = mockk(), json = Json, ioDispatcher = UnconfinedTestDispatcher(),
+            flagCacheStore = store, json = Json, ioDispatcher = UnconfinedTestDispatcher(),
             clock = Clock.systemUTC(), diagnostics = log,
             refreshDiagnostics = FlagRefreshDiagnostics(log, AndroidNetworkDiagnosticsContextProvider(context)),
         )
