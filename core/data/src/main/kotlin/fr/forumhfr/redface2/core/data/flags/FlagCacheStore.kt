@@ -1,12 +1,15 @@
 package fr.forumhfr.redface2.core.data.flags
 
 import fr.forumhfr.redface2.core.data.cache.CachePolicy
+import fr.forumhfr.redface2.core.database.dao.FlagCacheSnapshot
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.entities.FetchMode
 import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.model.Flag
+import fr.forumhfr.redface2.core.model.FlagSource
 import fr.forumhfr.redface2.core.model.FlagType
 import java.time.Clock
 import java.time.Instant
@@ -21,28 +24,31 @@ class FlagCacheStore @Inject constructor(
 ) {
 
     suspend fun load(type: FlagType, userId: String): CachedFlags? = withContext(ioDispatcher) {
-        val rows = flagDao.getFlags(userId = userId, type = type)
-        if (rows.isEmpty()) return@withContext null
-
-        val fetchedAt = flagDao.getLastFetchedAt(userId = userId, type = type)
-            ?: return@withContext null
-        CachedFlags(
-            result = FlagsResult.Success(rows.map { it.toFlag() }),
-            isFresh = CachePolicy.isFresh(fetchedAt, CachePolicy.flags, clock),
-        )
+        val snapshot = flagDao.getSnapshot(userId, type)
+        if (snapshot.rows.isEmpty() && snapshot.coverage.none { it.lastSuccessAt != null }) {
+            return@withContext null
+        }
+        val result = snapshot.toResult()
+        CachedFlags(result, isFresh(result))
     }
 
-    suspend fun replace(userId: String, type: FlagType, flags: List<Flag>, isComplete: Boolean = true) {
-        // Persist the best-effort rows without granting them a fresh-cache window. No durable
-        // completeness status: a later disk observation retries through the existing stale path.
-        val fetchedAt = if (isComplete) clock.instant() else clock.instant().minus(CachePolicy.flags).minusNanos(1)
+    fun isFresh(result: FlagsResult.Success): Boolean = result.coverage.isComplete &&
+        result.refreshStatus == FlagRefreshStatus.COMPLETE &&
+        result.coverage.oldestSuccessAt?.let { CachePolicy.isFresh(it, CachePolicy.flags, clock) } == true
+
+    /** Builds the next snapshot before the single guarded write; retained rows keep their dates. */
+    internal suspend fun merge(userId: String, type: FlagType, batch: FlagRefreshBatch): FlagCacheSnapshot =
         withContext(ioDispatcher) {
-            flagDao.replaceForType(
-                userId = userId,
-                type = type,
-                rows = flags.map { it.toEntity(userId = userId, fetchedAt = fetchedAt) },
-            )
+            mergeFlagSnapshot(flagDao.getSnapshot(userId, type), userId, type, batch)
         }
+
+    internal suspend fun save(userId: String, type: FlagType, snapshot: FlagCacheSnapshot) {
+        withContext(ioDispatcher) { flagDao.replaceSnapshot(userId, type, snapshot) }
+    }
+
+    /** Local favourite decoration changes no source, coverage or receipt time. */
+    suspend fun markFavorite(userId: String, type: FlagType, cat: Int, topicId: Int) {
+        withContext(ioDispatcher) { flagDao.markFavorite(userId, type, cat, topicId) }
     }
 
     /**
@@ -73,7 +79,7 @@ class FlagCacheStore @Inject constructor(
     )
 }
 
-private fun FlagTopicEntity.toFlag(): Flag = Flag(
+internal fun FlagTopicEntity.toFlag(): Flag = Flag(
     cat = cat,
     subcat = subcat,
     topicId = topicId,
@@ -92,7 +98,7 @@ private fun FlagTopicEntity.toFlag(): Flag = Flag(
     lastReplyAt = lastReplyAt,
 )
 
-private fun Flag.toEntity(userId: String, fetchedAt: Instant): FlagTopicEntity = FlagTopicEntity(
+internal fun Flag.toEntity(userId: String, fetchedAt: Instant, source: FlagSource): FlagTopicEntity = FlagTopicEntity(
     userId = userId,
     type = type,
     cat = cat,
@@ -112,4 +118,5 @@ private fun Flag.toEntity(userId: String, fetchedAt: Instant): FlagTopicEntity =
     lastReplyAt = lastReplyAt,
     fetchedAt = fetchedAt,
     authMode = FetchMode.AUTHENTICATED,
+    source = source,
 )

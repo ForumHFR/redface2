@@ -560,3 +560,24 @@ val MIGRATION_21_22: Migration = object : Migration(21, 22) {
         )
     }
 }
+
+/** v22 → v23 (#984): keep the logical topic key and certify empty/partial category sources. */
+val MIGRATION_22_23: Migration = object : Migration(22, 23) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE flag_topics ADD COLUMN source TEXT NOT NULL DEFAULT 'LEGACY_UNKNOWN'")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `flag_category_coverage` (
+                `userId` TEXT NOT NULL,
+                `type` TEXT NOT NULL,
+                `cat` INTEGER NOT NULL,
+                `source` TEXT NOT NULL,
+                `lastSuccessAt` INTEGER,
+                `lastAttemptAt` INTEGER NOT NULL,
+                `failure` TEXT,
+                PRIMARY KEY(`userId`, `type`, `cat`, `source`)
+            )
+            """.trimIndent(),
+        )
+    }
+}

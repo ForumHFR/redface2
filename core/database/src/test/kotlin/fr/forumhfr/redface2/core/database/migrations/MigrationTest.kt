@@ -9,6 +9,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import fr.forumhfr.redface2.core.database.RedfaceDatabase
 import fr.forumhfr.redface2.core.database.entities.PrivateMessageEntity
 import fr.forumhfr.redface2.core.database.entities.PrivateMessageThreadPageEntity
+import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.PostContent
 import java.time.Instant
 import kotlinx.coroutines.test.runTest
@@ -61,6 +62,54 @@ class MigrationTest {
             ApplicationProvider.getApplicationContext(),
             RedfaceDatabase::class.java,
         ).build().close()
+    }
+
+    @Test
+    fun migrate_22_to_23_preserves_flag_keys_dates_and_accounts_without_certifying_legacy_rows() = runTest {
+        val name = "flags-22-to-23.db"
+        helper.createDatabase(name, 22).use { old ->
+            listOf("alice", "bob").forEach { user ->
+                old.execSQL(
+                    """INSERT INTO flag_topics (userId, type, cat, subcat, topicId, title, totalPages,
+                       replyCount, isFavorite, hasUnread, lastReadPage, lastPostReadId, firstPostAuthor,
+                       lastReplyAuthor, lastReplyAt, fetchedAt, authMode)
+                       VALUES (?, 'CYAN', 23, 550, 35395, 'Cached flag', 14, 540, 0, 1, 12,
+                       2783256, 'alice', 'bob', '2026-05-01 17:07', 1000, 'AUTHENTICATED')""",
+                    arrayOf<Any>(user),
+                )
+            }
+        }
+        helper.runMigrationsAndValidate(name, 23, true, MIGRATION_22_23).use { migrated ->
+            migrated.query("SELECT source, fetchedAt FROM flag_topics ORDER BY userId").use { cursor ->
+                repeat(2) {
+                    assertTrue(cursor.moveToNext())
+                    assertEquals("LEGACY_UNKNOWN", cursor.getString(0))
+                    assertEquals(1000L, cursor.getLong(1))
+                }
+                assertTrue(!cursor.moveToNext())
+            }
+            migrated.query("SELECT COUNT(*) FROM flag_category_coverage").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals(0, cursor.getInt(0))
+            }
+            migrated.query("PRAGMA table_info(flag_topics)").use { cursor ->
+                val keys = mutableListOf<String>()
+                while (cursor.moveToNext()) {
+                    if (cursor.getInt(cursor.getColumnIndexOrThrow("pk")) > 0) {
+                        keys += cursor.getString(cursor.getColumnIndexOrThrow("name"))
+                    }
+                }
+                assertEquals(listOf("userId", "type", "cat", "topicId"), keys)
+            }
+        }
+        val database = Room.databaseBuilder(ApplicationProvider.getApplicationContext(),
+            RedfaceDatabase::class.java, name).addMigrations(MIGRATION_22_23).build()
+        try {
+            assertEquals(1, database.flagDao().getFlags("alice", FlagType.CYAN).size)
+            assertEquals(1, database.flagDao().getFlags("bob", FlagType.CYAN).size)
+        } finally {
+            database.close()
+        }
     }
 
     @Test
@@ -144,6 +193,7 @@ class MigrationTest {
                 MIGRATION_19_20,
                 MIGRATION_20_21,
                 MIGRATION_21_22,
+                MIGRATION_22_23,
             )
             .build()
 
@@ -296,6 +346,7 @@ class MigrationTest {
                 MIGRATION_19_20,
                 MIGRATION_20_21,
                 MIGRATION_21_22,
+                MIGRATION_22_23,
             )
             .build()
 
@@ -408,6 +459,7 @@ class MigrationTest {
                 MIGRATION_19_20,
                 MIGRATION_20_21,
                 MIGRATION_21_22,
+                MIGRATION_22_23,
             )
             .build()
 
@@ -492,6 +544,7 @@ class MigrationTest {
                 MIGRATION_19_20,
                 MIGRATION_20_21,
                 MIGRATION_21_22,
+                MIGRATION_22_23,
             )
             .build()
 
@@ -572,6 +625,7 @@ class MigrationTest {
                 MIGRATION_19_20,
                 MIGRATION_20_21,
                 MIGRATION_21_22,
+                MIGRATION_22_23,
             )
             .build()
 
@@ -643,6 +697,7 @@ class MigrationTest {
                 MIGRATION_19_20,
                 MIGRATION_20_21,
                 MIGRATION_21_22,
+                MIGRATION_22_23,
             )
             .build()
 
@@ -728,6 +783,7 @@ class MigrationTest {
                 MIGRATION_19_20,
                 MIGRATION_20_21,
                 MIGRATION_21_22,
+                MIGRATION_22_23,
             )
             .build()
 
@@ -800,6 +856,7 @@ class MigrationTest {
                 MIGRATION_19_20,
                 MIGRATION_20_21,
                 MIGRATION_21_22,
+                MIGRATION_22_23,
             )
             .build()
 
@@ -862,6 +919,7 @@ class MigrationTest {
                 MIGRATION_19_20,
                 MIGRATION_20_21,
                 MIGRATION_21_22,
+                MIGRATION_22_23,
             )
             .build()
 
@@ -928,6 +986,7 @@ class MigrationTest {
                 MIGRATION_19_20,
                 MIGRATION_20_21,
                 MIGRATION_21_22,
+                MIGRATION_22_23,
             )
             .build()
 
@@ -999,6 +1058,7 @@ class MigrationTest {
                 MIGRATION_19_20,
                 MIGRATION_20_21,
                 MIGRATION_21_22,
+                MIGRATION_22_23,
             )
             .build()
 
@@ -1070,6 +1130,7 @@ class MigrationTest {
                 MIGRATION_19_20,
                 MIGRATION_20_21,
                 MIGRATION_21_22,
+                MIGRATION_22_23,
             )
             .build()
 
@@ -1151,6 +1212,7 @@ class MigrationTest {
                 MIGRATION_19_20,
                 MIGRATION_20_21,
                 MIGRATION_21_22,
+                MIGRATION_22_23,
             )
             .build()
 
@@ -1229,6 +1291,7 @@ class MigrationTest {
                 MIGRATION_19_20,
                 MIGRATION_20_21,
                 MIGRATION_21_22,
+                MIGRATION_22_23,
             )
             .build()
 
@@ -1302,6 +1365,7 @@ class MigrationTest {
                 MIGRATION_19_20,
                 MIGRATION_20_21,
                 MIGRATION_21_22,
+                MIGRATION_22_23,
             )
             .build()
 
@@ -1432,6 +1496,7 @@ class MigrationTest {
                 MIGRATION_19_20,
                 MIGRATION_20_21,
                 MIGRATION_21_22,
+                MIGRATION_22_23,
             )
             .build()
 

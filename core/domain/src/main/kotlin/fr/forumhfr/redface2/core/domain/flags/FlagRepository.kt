@@ -3,20 +3,19 @@ package fr.forumhfr.redface2.core.domain.flags
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
+import java.time.Instant
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 
 /**
  * Read access to the user's drapeaux. Phase 1D-1 (#110) ships a REST per-category
  * implementation that walks `forums/hardwarefr/categories/{cat}/topics/{bucket}/`
- * and concatenates the results — no Room persistence yet (deferred to #26). A
- * `lastReadPage` ack mutation endpoint will be added once the user-facing
- * remove/swipe interactions are designed; for now, drapeau mutations stay HTML
+ * and merges the available category sources with the account-scoped Room cache.
+ * Drapeau mutations stay HTML
  * (`addflag.php` / `delflag.php`) per ADR-003.
  *
  * Flow semantics:
- * - [observe] fetches on the first subscription for a tab, then reuses the last success
- *   from the current auth session so tab switches do not implicitly mutate HFR read state.
+ * - [observe] serves available snapshots first; only complete, fresh coverage avoids revalidation.
  * - [refresh] always fetches the network, updates the in-memory success cache, and
  *   broadcasts the result to active observers.
  * - [observeCacheUpdates] is invalidation-only: it never fetches and never emits an initial
@@ -40,7 +39,7 @@ interface FlagRepository {
      * Force a fresh network fetch, update the session cache, and broadcast it to current
      * observers. Active observers receive [FlagsResult.Loading] before the fresh result.
      * Returns the published outcome for cache-only consumers (Super). A success may carry a
-     * transient [FlagRefreshIssue]; its fresh rows are still published and persisted.
+     * [FlagRefreshIssue]; coverage and refresh status also survive persistence, including empty lists.
      */
     suspend fun refresh(type: FlagType): FlagsResult
 
@@ -112,8 +111,8 @@ interface FlagRepository {
      *
      * Resolution order (per-bucket) :
      * - Scans the in-memory per-type success caches first ; a hit returns without any network.
-     * - A warm bucket is authoritative **for its own type only** and is never implicitly refreshed
-     *   (the Drapeaux view owns refresh policy). On a miss, the **cold** buckets — and only those —
+     * - A warm bucket is authoritative **for its own type and covered categories only**.
+     *   On a miss, the **cold or uncovered** buckets — and only those —
      *   are fetched so the lookup can still resolve a type whose tab was never opened ; then a
      *   re-scan decides. All three warm + miss → null with zero network.
      * - An anonymous session (no HFR user) can hold no drapeaux : null with no round-trip.
@@ -142,11 +141,17 @@ interface FlagRepository {
  */
 sealed class FlagsResult {
     data object Loading : FlagsResult()
-    data class Success(val flags: List<Flag>, val issue: FlagRefreshIssue? = null) : FlagsResult()
+    data class Success(
+        val flags: List<Flag>,
+        val issue: FlagRefreshIssue? = null,
+        val coverage: FlagCoverage = FlagCoverage(),
+        val refreshStatus: FlagRefreshStatus = FlagRefreshStatus.COMPLETE,
+        val cachedAt: Instant? = coverage.oldestSuccessAt,
+    ) : FlagsResult()
     data class Failure(val cause: Throwable) : FlagsResult()
 }
 
-/** Missing parts of a best-effort list, kept only for the lifetime of this fetched snapshot. */
+/** Presentation details for missing sources; [FlagCoverage] persists their status across reloads. */
 data class FlagRefreshIssue(
     val stickyCategories: List<FlagRefreshCategory> = emptyList(),
     val paginationTruncated: Boolean = false,

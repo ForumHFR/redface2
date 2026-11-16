@@ -18,6 +18,10 @@ class HfrCallTag(
         private set
 
     fun executing(nanos: Long = System.nanoTime()) { executeNanos = nanos }
+
+    /** Each application Call owns its queue/execution times, while retaining the same collectors. */
+    internal fun forCall(queuedNanos: Long = this.queuedNanos): HfrCallTag =
+        HfrCallTag(queuedNanos, fetch, catalogue, editorSubmission)
 }
 
 fun Request.withHfrDiagnostics(context: CoroutineContext): Request = newBuilder()

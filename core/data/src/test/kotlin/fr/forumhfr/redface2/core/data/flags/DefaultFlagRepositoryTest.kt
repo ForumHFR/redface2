@@ -1,7 +1,13 @@
 package fr.forumhfr.redface2.core.data.flags
 
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.database.dao.FlagCacheSnapshot
 import fr.forumhfr.redface2.core.database.dao.FlagDao
+import fr.forumhfr.redface2.core.database.entities.FlagCategoryCoverageEntity
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
+import fr.forumhfr.redface2.core.model.FlagFailureKind
+import fr.forumhfr.redface2.core.model.FlagSource
+import io.mockk.MockKMatcherScope
 import fr.forumhfr.redface2.core.database.entities.FetchMode
 import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
@@ -23,6 +29,8 @@ import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
+import fr.forumhfr.redface2.core.network.FlagReadClock
+import fr.forumhfr.redface2.core.network.FlagReadSession
 import fr.forumhfr.redface2.core.network.HfrApiClient
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
@@ -38,10 +46,12 @@ import java.time.Instant
 import java.time.ZoneOffset
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.first
@@ -49,6 +59,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
@@ -89,6 +100,345 @@ class DefaultFlagRepositoryTest {
     private val capturedParticipatedFixture: String = fixture("rest_cat23_participated.json")
 
     @Test
+    fun `stale or incomplete memory success never refetches on resubscription - 984`() = runTest {
+        for (incomplete in listOf(false, true)) {
+            var now = Instant.parse("2026-05-03T12:00:00Z")
+            val clock = mockk<Clock>()
+            every { clock.instant() } answers { now }
+            val api = mockk<HfrApiClient>()
+            coEvery {
+                api.getCategoryFlagTopics(any(), any(), page = any(), resultsPerPage = any(), useAuth = true)
+            } returns capturedParticipatedFixture
+            coEvery { api.getTopicList(any(), null, 1, any(), true) } coAnswers {
+                if (incomplete) throw IOException("sticky offline") else EMPTY_PAGE
+            }
+            val forum = stubForumRepository(sampleCategories)
+            val dao = stubFlagDao()
+            val repo = buildRepository(api, forum, flagDao = dao, clock = clock)
+            val cached = FlagType.entries.associateWith { repo.refresh(it) as FlagsResult.Success }
+            assertTrue(cached.values.all { (it.refreshStatus == FlagRefreshStatus.PARTIAL) == incomplete })
+            if (!incomplete) now = now.plusSeconds(120)
+            // Keep each subscription alive: first() would cancel before a background fetch starts.
+            repeat(2) {
+                FlagType.entries.forEach { type ->
+                    repo.observe(type).test {
+                        assertEquals(cached.getValue(type), awaitItem())
+                        runCurrent()
+                        expectNoEvents()
+                        cancelAndIgnoreRemainingEvents()
+                    }
+                }
+            }
+            coVerify(exactly = 6) {
+                api.getCategoryFlagTopics(any(), any(), page = any(), resultsPerPage = any(), useAuth = true)
+            }
+            coVerify(exactly = 3) { forum.getCategories(true) }
+            coVerify(exactly = 3) { dao.replaceSnapshot(any(), any(), any()) }
+        }
+    }
+
+    @Test
+    fun `legacy rows are unverified until an actual refresh fails - 984`() = runTest {
+        val at = Instant.parse("2026-05-03T11:00:00Z")
+        val dao = stubFlagDao()
+        dao.replaceSnapshot("xat", FlagType.CYAN, FlagCacheSnapshot(
+            listOf(flagEntity(FlagType.CYAN, 35395, "Legacy row", at).copy(source = FlagSource.LEGACY_UNKNOWN)),
+            emptyList(),
+        ))
+        val store = FlagCacheStore(dao, Clock.fixed(at, ZoneOffset.UTC), UnconfinedTestDispatcher())
+        val unverified = requireNotNull(store.load(FlagType.CYAN, "xat"))
+        assertEquals(FlagRefreshStatus.UNVERIFIED, unverified.result.refreshStatus)
+        assertNull(unverified.result.issue)
+        assertFalse(unverified.isFresh)
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+        }
+        coEvery { forum.getCategories(true) } returns ForumResult.Failure(IOException("offline"))
+        val failed = buildRepository(api, forum, flagDao = dao).refresh(FlagType.CYAN) as FlagsResult.Success
+        assertEquals(FlagRefreshStatus.FAILED, failed.refreshStatus)
+        assertEquals(unverified.result.flags, failed.flags)
+        assertTrue(failed.coverage.categories.all { it.failure == FlagFailureKind.NETWORK })
+    }
+
+    @Test
+    fun `empty or unreadable catalogue preserves cached rows and never certifies emptiness - 984`() = runTest {
+        val badCatalogues = listOf(
+            ForumResult.Success(emptyList()),
+            ForumResult.Success(listOf(sampleCategories.first().copy(id = 0))),
+            ForumResult.Failure(IOException("catalogue unreadable")),
+        )
+        for (catalogue in badCatalogues) {
+            val (api, forum) = wireDeps {
+                stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+                stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+            }
+            val dao = stubFlagDao()
+            val repo = buildRepository(api, forum, flagDao = dao)
+            val before = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+            val rows = dao.getSnapshot("xat", FlagType.CYAN).rows
+            coEvery { forum.getCategories(true) } returns catalogue
+            val failed = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+            assertEquals(before.flags, failed.flags)
+            assertEquals(rows, dao.getSnapshot("xat", FlagType.CYAN).rows)
+            assertEquals(FlagRefreshStatus.FAILED, failed.refreshStatus)
+            assertFalse(failed.coverage.isComplete)
+            assertEquals(before.coverage.oldestSuccessAt, failed.coverage.oldestSuccessAt)
+            assertTrue(failed.coverage.categories.all { it.failure != null })
+            coVerify(exactly = 2) {
+                api.getCategoryFlagTopics(any(), any(), page = any(), resultsPerPage = any(), useAuth = true)
+            }
+        }
+    }
+
+    @Test
+    fun `empty catalogue fails without a snapshot and preserves a certified empty cache - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+        }
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, forum, flagDao = dao)
+        repo.refresh(FlagType.CYAN)
+        coEvery { forum.getCategories(true) } returns ForumResult.Success(emptyList())
+        val retained = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertTrue(retained.flags.isEmpty())
+        assertEquals(FlagRefreshStatus.FAILED, retained.refreshStatus)
+        assertFalse(retained.coverage.isComplete)
+        assertTrue(retained.coverage.categories.all { it.failure == FlagFailureKind.SCHEMA })
+        assertTrue(buildRepository(api, forum).refresh(FlagType.CYAN) is FlagsResult.Failure)
+    }
+
+    @Test
+    fun `failed sticky supplements do not make successful buckets cold for findFlag - 984`() = runTest {
+        val api = mockk<HfrApiClient>()
+        coEvery {
+            api.getCategoryFlagTopics(any(), any(), page = any(), resultsPerPage = any(), useAuth = true)
+        } returns EMPTY_PAGE
+        coEvery { api.getTopicList(any(), null, 1, any(), true) } throws IOException("sticky offline")
+        val repo = buildRepository(api, stubForumRepository(sampleCategories))
+        FlagType.entries.forEach { repo.refresh(it) }
+        repeat(2) { assertNull(repo.findFlag(cat = 23, topicId = 999)) }
+        coVerify(exactly = 6) {
+            api.getCategoryFlagTopics(any(), any(), page = any(), resultsPerPage = any(), useAuth = true)
+        }
+    }
+
+    @Test
+    fun `delflag during a partial refresh cannot restore a retained failed category row - 984`() = runTest {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val dao = stubFlagDao()
+        val hfr = mockk<HfrClient>()
+        coEvery { hfr.removeFlag(13, any(), 35395, FlagType.CYAN, any()) } returns DELETE_SUCCESS_HTML
+        val repo = buildRepository(api, forum, flagDao = dao, hfrClient = hfr)
+        val flag = (repo.refresh(FlagType.CYAN) as FlagsResult.Success).flags.single { it.cat == 13 }
+        coEvery {
+            api.getCategoryFlagTopics(13, HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } throws
+            IOException("failed category must retain its other rows")
+        coEvery {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            entered.complete(Unit)
+            withContext(NonCancellable) { release.await() }
+            capturedParticipatedFixture
+        }
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(2, (awaitItem() as FlagsResult.Success).flags.size)
+            val pull = async { repo.refresh(FlagType.CYAN) }
+            try {
+                entered.await()
+                assertEquals(FlagsResult.Loading, awaitItem())
+                assertTrue(repo.removeFlag(flag).isSuccess)
+                assertFalse((awaitItem() as FlagsResult.Success).flags.any { it.cat == 13 })
+                release.complete(Unit)
+                val partial = pull.await() as FlagsResult.Success
+                assertEquals(FlagRefreshStatus.PARTIAL, partial.refreshStatus)
+                assertEquals(listOf(23), partial.flags.map { it.cat })
+                assertEquals(partial, awaitItem())
+                assertTrue(partial.coverage.categories.any { it.cat == 13 && it.failure == FlagFailureKind.NETWORK })
+                assertEquals(listOf(23), dao.getSnapshot("xat", FlagType.CYAN).rows.map { it.cat })
+                assertNull(repo.findCachedFlag(13, 35395))
+                expectNoEvents()
+            } finally {
+                release.complete(Unit)
+                pull.cancel()
+            }
+        }
+    }
+
+    @Test
+    fun `coverage does not depend on a diagnostic sink or transport call summaries - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        coEvery { api.getTopicList(13, null, 1, any(), true) } throws IOException("offline")
+        val logged = buildRepository(api, forum).refresh(FlagType.CYAN) as FlagsResult.Success
+        val quiet = buildRepository(api, forum, diagnostics = mockk(relaxed = true))
+            .refresh(FlagType.CYAN) as FlagsResult.Success
+        assertEquals(logged.flags, quiet.flags)
+        assertEquals(logged.coverage, quiet.coverage)
+        assertEquals(logged.refreshStatus, quiet.refreshStatus)
+        assertEquals(FlagRefreshStatus.PARTIAL, quiet.refreshStatus)
+    }
+
+    @Test
+    fun `partial buckets keep old rows and actual dates through a disk reload - 984`() = runTest {
+        val oldTime = Instant.parse("2026-05-03T12:00:00Z")
+        var now = oldTime
+        val clock = mockk<Clock>()
+        every { clock.instant() } answers { now }
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, forum, flagDao = dao, clock = clock)
+        repo.refresh(FlagType.CYAN)
+        now = oldTime.plusSeconds(120)
+        coEvery {
+            api.getCategoryFlagTopics(13, HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } throws IOException("private message must never reach coverage")
+        coEvery {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } returns capturedParticipatedFixture.replace("35395", "35396")
+
+        val partial = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertEquals(FlagRefreshStatus.PARTIAL, partial.refreshStatus)
+        assertEquals(setOf(13 to 35395, 23 to 35396), partial.flags.map { it.cat to it.topicId }.toSet())
+        val rows = dao.getSnapshot("xat", FlagType.CYAN).rows
+        assertEquals(oldTime, rows.single { it.cat == 13 }.fetchedAt)
+        assertEquals(now, rows.single { it.cat == 23 }.fetchedAt)
+        val reloaded = requireNotNull(FlagCacheStore(dao, clock, UnconfinedTestDispatcher())
+            .load(FlagType.CYAN, "xat"))
+        assertEquals(partial.coverage, reloaded.result.coverage)
+        assertEquals(partial.refreshStatus, reloaded.result.refreshStatus)
+        assertFalse(reloaded.isFresh)
+        coVerify(exactly = 2) { dao.replaceSnapshot("xat", FlagType.CYAN, any()) }
+    }
+
+    @Test
+    fun `exception after first page discards that category instead of replacing it - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val repo = buildRepository(api, forum)
+        repo.refresh(FlagType.CYAN)
+        coEvery {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
+                page = 1, resultsPerPage = any(), useAuth = true)
+        } returns capturedParticipatedFixture.replace("35395", "35396").replace("\"results_count\": 1",
+            "\"results_count\": 2")
+        coEvery {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
+                page = 2, resultsPerPage = any(), useAuth = true)
+        } throws IOException("second page unavailable")
+        val result = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertEquals(listOf(35395), result.flags.map { it.topicId })
+        assertEquals(FlagRefreshStatus.PARTIAL, result.refreshStatus)
+        assertFalse(result.coverage.covers(23))
+    }
+
+    @Test
+    fun `total failure keeps populated or empty cache but fails without any snapshot - 984`() = runTest {
+        listOf(capturedParticipatedFixture, EMPTY_PAGE, null).forEach { initial ->
+            val (api, forum) = wireDeps {
+                stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+                stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, initial ?: EMPTY_PAGE)
+            }
+            val dao = stubFlagDao()
+            val repo = buildRepository(api, forum, flagDao = dao)
+            val cached = if (initial != null) repo.refresh(FlagType.CYAN) as FlagsResult.Success else null
+            coEvery {
+                api.getCategoryFlagTopics(any(), HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+            } throws IOException("offline")
+            val result = repo.refresh(FlagType.CYAN)
+            if (cached == null) {
+                assertTrue(result is FlagsResult.Failure)
+            } else {
+                result as FlagsResult.Success
+                assertEquals(cached.flags, result.flags)
+                assertEquals(FlagRefreshStatus.FAILED, result.refreshStatus)
+                assertEquals(cached.cachedAt, result.cachedAt)
+                val disk = requireNotNull(FlagCacheStore(dao,
+                    Clock.fixed(Instant.parse("2026-05-03T12:00:00Z"), ZoneOffset.UTC),
+                    UnconfinedTestDispatcher()).load(FlagType.CYAN, "xat"))
+                assertEquals(FlagRefreshStatus.FAILED, disk.result.refreshStatus)
+                assertFalse(disk.isFresh)
+            }
+        }
+    }
+
+    @Test
+    fun `schema failure differs from valid empty and an expired session stops new auth reads - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, forum, flagDao = dao)
+        repo.refresh(FlagType.CYAN)
+        coEvery {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } returns "{\"resource\":{}}"
+        val invalid = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertEquals(35395, invalid.flags.single().topicId)
+        assertEquals(FlagFailureKind.SCHEMA,
+            invalid.coverage.categories.single { it.cat == 23 && it.source == FlagSource.BUCKET }.failure)
+        coEvery {
+            api.getCategoryFlagTopics(13, HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } throws SessionExpiredException("[redacted]")
+        val expired = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertEquals(FlagRefreshStatus.FAILED, expired.refreshStatus)
+        assertTrue(expired.coverage.categories.any { it.failure == FlagFailureKind.SESSION })
+        // Only the first two refreshes may have started a supplement.
+        coVerify(exactly = 2) { api.getTopicList(13, null, 1, any(), true) }
+    }
+
+    @Test
+    fun `findFlag rechecks a warm type whose target category was not covered - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            HfrRestFlagBucket.entries.forEach { bucket ->
+                stubFlagsCall(13, bucket, EMPTY_PAGE)
+                stubFlagsCall(23, bucket, EMPTY_PAGE)
+            }
+        }
+        coEvery {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } throws IOException("offline")
+        val repo = buildRepository(api, forum)
+        FlagType.entries.forEach { repo.refresh(it) }
+        coEvery {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } returns capturedParticipatedFixture
+        assertEquals(35395, repo.findFlag(23, 35395)?.topicId)
+        coVerify(exactly = 2) {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        }
+        coVerify(exactly = 1) {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.READ,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        }
+    }
+
+    @Test
     fun `fast refresh records two entries with exact page and transport counters - 984`() = runTest {
         val diagnostics = DiagnosticsLog()
         val apiClient = diagnosticApi()
@@ -106,7 +456,7 @@ class DefaultFlagRepositoryTest {
             assertTrue(summary, summary.contains(it))
         }
         assertTrue(repo.observe(FlagType.CYAN).first() is FlagsResult.Success)
-        coVerify(exactly = 1) { dao.replaceForType(any(), FlagType.CYAN, any()) }
+        coVerify(exactly = 1) { dao.replaceSnapshot(any(), FlagType.CYAN, any()) }
     }
 
     @Test
@@ -115,8 +465,8 @@ class DefaultFlagRepositoryTest {
         val apiClient = diagnosticApi(failSticky = true)
         val dao = stubFlagDao()
         var persistedRows = emptyList<FlagTopicEntity>()
-        coEvery { dao.replaceForType("xat", FlagType.CYAN, any()) } coAnswers {
-            persistedRows = thirdArg()
+        coEvery { dao.replaceSnapshot("xat", FlagType.CYAN, any()) } coAnswers {
+            persistedRows = thirdArg<FlagCacheSnapshot>().rows
         }
         val repo = buildRepository(apiClient, stubForumRepository(sampleCategories),
             flagDao = dao, diagnostics = diagnostics)
@@ -125,18 +475,22 @@ class DefaultFlagRepositoryTest {
         assertEquals(listOf(FlagRefreshCategory(13, "Discussions")), result.issue?.stickyCategories)
         assertEquals(false, result.issue?.paginationTruncated)
         coVerify(exactly = 1) {
-            dao.replaceForType("xat", FlagType.CYAN, match { rows ->
+            dao.replaceSnapshot("xat", FlagType.CYAN, rowsMatching { rows ->
                 rows.single().topicId == 35395 &&
-                    rows.single().fetchedAt < Instant.parse("2026-05-03T11:59:30Z")
+                    rows.single().fetchedAt == Instant.parse("2026-05-03T12:00:00Z")
             })
         }
         coEvery { dao.getFlags("xat", FlagType.CYAN) } returns persistedRows
-        coEvery { dao.getLastFetchedAt("xat", FlagType.CYAN) } returns persistedRows.single().fetchedAt
+        coEvery { dao.getCoverage("xat", FlagType.CYAN) } returns result.coverage.categories.map {
+            FlagCategoryCoverageEntity("xat", FlagType.CYAN, it.cat, it.source,
+                it.lastSuccessAt, it.lastAttemptAt, it.failure)
+        }
         val disk = requireNotNull(FlagCacheStore(dao,
             Clock.fixed(Instant.parse("2026-05-03T12:00:00Z"), ZoneOffset.UTC),
             UnconfinedTestDispatcher()).load(FlagType.CYAN, "xat"))
         assertFalse("partial rows cannot delay a later disk retry", disk.isFresh)
-        assertNull("the warning is not persisted", disk.result.issue)
+        assertEquals(FlagRefreshStatus.PARTIAL, disk.result.refreshStatus)
+        assertEquals(listOf(13), disk.result.issue?.stickyCategories?.map { it.id })
         val summary = diagnostics.entries.value.last().message
         assertTrue(summary, summary.contains("outcome=success-incomplete"))
         assertTrue(summary, summary.contains("reasons=sticky_request"))
@@ -147,7 +501,7 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
-    fun `folded bucket failure is returned and diagnosed as failure - 984`() = runTest {
+    fun `bucket failure preserves independent successes - 984`() = runTest {
         val diagnostics = DiagnosticsLog()
         val (apiClient, forumRepository) = wireDeps {
             stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
@@ -158,9 +512,11 @@ class DefaultFlagRepositoryTest {
                 page = any(), resultsPerPage = any(), useAuth = true)
         } throws IOException("Cookie=SecretCookie hash_check=SecretHash")
         val repo = buildRepository(apiClient, forumRepository, diagnostics = diagnostics)
-        assertTrue(repo.refresh(FlagType.CYAN) is FlagsResult.Failure)
+        val result = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertEquals(FlagRefreshStatus.PARTIAL, result.refreshStatus)
+        assertEquals(FlagFailureKind.NETWORK,
+            result.coverage.categories.single { it.cat == 23 && it.source == FlagSource.BUCKET }.failure)
         val summary = diagnostics.entries.value.last().message
-        assertTrue(summary, summary.contains("outcome=failure exception=IOException"))
         assertTrue(summary, summary.contains("bucketsFailures=1"))
         assertTrue(summary, !summary.contains("SecretCookie"))
     }
@@ -182,11 +538,11 @@ class DefaultFlagRepositoryTest {
             assertEquals(listOf(FlagRefreshCategory(13, "Discussions")), fresh.issue?.stickyCategories)
             cancelAndIgnoreRemainingEvents()
         }
-        coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.CYAN, any()) }
+        coVerify(exactly = 1) { dao.replaceSnapshot("xat", FlagType.CYAN, any()) }
     }
 
     @Test
-    fun `partial refresh replaces old rows rather than retaining the failed category - 984`() = runTest {
+    fun `partial refresh retains the failed sticky category - 984`() = runTest {
         val (api, forum) = wireDeps {
             stubFlagsCall(13, HfrRestFlagBucket.FAVORITES, EMPTY_PAGE)
             stubFlagsCall(23, HfrRestFlagBucket.FAVORITES, capturedParticipatedFixture)
@@ -208,13 +564,16 @@ class DefaultFlagRepositoryTest {
         } returns capturedParticipatedFixture.replace("35395", "35396")
 
         val partial = repo.refresh(FlagType.FAVORITE) as FlagsResult.Success
-        assertEquals(35396, partial.flags.single().topicId)
+        assertEquals(setOf(100_217, 35396), partial.flags.map { it.topicId }.toSet())
         assertEquals(listOf(FlagRefreshCategory(13, "Discussions")), partial.issue?.stickyCategories)
-        assertEquals(partial, repo.observe(FlagType.FAVORITE).first())
         coVerify(exactly = 1) {
-            dao.replaceForType("xat", FlagType.FAVORITE, match { it.singleOrNull()?.topicId == 35396 })
+            dao.replaceSnapshot("xat", FlagType.FAVORITE, rowsMatching { rows ->
+                rows.map { it.topicId }.toSet() == setOf(100_217, 35396)
+            })
         }
-        coVerify(exactly = 2) { dao.replaceForType("xat", FlagType.FAVORITE, any()) }
+        coVerify(exactly = 2) { dao.replaceSnapshot("xat", FlagType.FAVORITE, any()) }
+        // Re-observation serves the incomplete memory snapshot without an implicit refresh.
+        assertEquals(partial, repo.observe(FlagType.FAVORITE).first())
     }
 
     @Test
@@ -244,11 +603,8 @@ class DefaultFlagRepositoryTest {
         val updated = repo.observe(FlagType.CYAN).first() as FlagsResult.Success
         assertTrue(updated.flags.single().isFavorite)
         assertTrue("a mutation reuses the warning identity", updated.issue === partial.issue)
-        coVerify(exactly = 2) {
-            dao.replaceForType("xat", FlagType.CYAN, match { rows ->
-                rows.single().fetchedAt < Instant.parse("2026-05-03T11:59:30Z")
-            })
-        }
+        coVerify(exactly = 1) { dao.markFavorite("xat", FlagType.CYAN, 23, 35395) }
+        assertEquals(partial.coverage, updated.coverage)
     }
 
     @Test
@@ -266,7 +622,7 @@ class DefaultFlagRepositoryTest {
         val repo = buildRepository(api, stubForumRepository(sampleCategories),
             flagDao = dao, diagnostics = diagnostics)
         val result = repo.refresh(FlagType.CYAN) as FlagsResult.Success
-        assertEquals(100, result.flags.size)
+        assertTrue("capped category must not replace its cache", result.flags.isEmpty())
         assertEquals(true, result.issue?.paginationTruncated)
         assertEquals(emptyList<FlagRefreshCategory>(), result.issue?.stickyCategories)
         assertTrue(diagnostics.entries.value.last().message.contains("reasons=page_cap"))
@@ -282,7 +638,7 @@ class DefaultFlagRepositoryTest {
                 page = 101, resultsPerPage = any(), useAuth = true,
             )
         }
-        coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.CYAN, any()) }
+        coVerify(exactly = 1) { dao.replaceSnapshot("xat", FlagType.CYAN, any()) }
     }
 
     @Test
@@ -329,10 +685,10 @@ class DefaultFlagRepositoryTest {
         }
 
         coVerify {
-            flagDao.replaceForType(
+            flagDao.replaceSnapshot(
                 userId = "xat",
                 type = FlagType.CYAN,
-                rows = match { rows -> rows.size == 1 && rows.single().topicId == 35395 },
+                snapshot = rowsMatching { rows -> rows.size == 1 && rows.single().topicId == 35395 },
             )
         }
     }
@@ -394,7 +750,7 @@ class DefaultFlagRepositoryTest {
                 useAuth = true,
             )
         }
-        coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.CYAN, any()) }
+        coVerify(exactly = 1) { dao.replaceSnapshot("xat", FlagType.CYAN, any()) }
         coVerify(exactly = 2) {
             apiClient.getTopicList(cat = any(), subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
         }
@@ -476,9 +832,9 @@ class DefaultFlagRepositoryTest {
         coVerify(exactly = 2) {
             api.getTopicList(cat = any(), subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
         }
-        coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.FAVORITE, any()) }
+        coVerify(exactly = 1) { dao.replaceSnapshot("xat", FlagType.FAVORITE, any()) }
         coVerify(exactly = 1) {
-            dao.replaceForType("xat", FlagType.FAVORITE, match { it.single().topicId == 100_217 })
+            dao.replaceSnapshot("xat", FlagType.FAVORITE, rowsMatching { it.single().topicId == 100_217 })
         }
         val refreshEntries = diagnostics.entries.value.filter { it.tag == FlagRefreshDiagnostics.TAG }
         val pullRefresh = refreshEntries.single {
@@ -553,7 +909,7 @@ class DefaultFlagRepositoryTest {
                 }
                 expectNoEvents()
                 assertEquals(2, stickyCalls)
-                coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.FAVORITE, any()) }
+                coVerify(exactly = 1) { dao.replaceSnapshot("xat", FlagType.FAVORITE, any()) }
                 cancelAndIgnoreRemainingEvents()
             } finally {
                 release.complete(Unit)
@@ -595,7 +951,7 @@ class DefaultFlagRepositoryTest {
         assertEquals(1, calls)
         val result = repo.observe(FlagType.FAVORITE).first() as FlagsResult.Success
         assertEquals(100_217, result.flags.single().topicId)
-        coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.FAVORITE, any()) }
+        coVerify(exactly = 1) { dao.replaceSnapshot("xat", FlagType.FAVORITE, any()) }
     }
 
     @Test
@@ -627,7 +983,7 @@ class DefaultFlagRepositoryTest {
             pull.cancel(CancellationException("last pull closed"))
             pull.join()
             cancelled.await()
-            coVerify(exactly = 0) { dao.replaceForType(any(), any(), any()) }
+            coVerify(exactly = 0) { dao.replaceSnapshot(any(), any(), any()) }
             coVerify(exactly = 0) {
                 api.getTopicList(cat = any(), subcat = any(), page = any(),
                     resultsPerPage = any(), useAuth = any())
@@ -655,7 +1011,7 @@ class DefaultFlagRepositoryTest {
 
         val error = runCatching { repo.refresh(FlagType.CYAN) }.exceptionOrNull()
         assertCancellation(cancellation, error)
-        coVerify(exactly = 0) { dao.replaceForType(any(), any(), any()) }
+        coVerify(exactly = 0) { dao.replaceSnapshot(any(), any(), any()) }
         val summary = diagnostics.entries.value.last().message
         assertTrue(summary, summary.contains("outcome=failure exception=CancellationException"))
     }
@@ -674,14 +1030,14 @@ class DefaultFlagRepositoryTest {
         val dao = stubFlagDao()
         val repo = buildRepository(api, stubForumRepository(sampleCategories.take(1)), flagDao = dao)
         assertCancellation(cancellation, runCatching { repo.refresh(FlagType.CYAN) }.exceptionOrNull())
-        coVerify(exactly = 0) { dao.replaceForType(any(), any(), any()) }
+        coVerify(exactly = 0) { dao.replaceSnapshot(any(), any(), any()) }
     }
 
     @Test
     fun `Room cancellation propagates instead of publishing a successful refresh - 984`() = runTest {
         val cancellation = CancellationException("cancel Room")
         val dao = stubFlagDao()
-        coEvery { dao.replaceForType(any(), any(), any()) } throws cancellation
+        coEvery { dao.replaceSnapshot(any(), any(), any()) } throws cancellation
         val repo = buildRepository(diagnosticApi(), stubForumRepository(sampleCategories), flagDao = dao)
         assertCancellation(cancellation, runCatching { repo.refresh(FlagType.CYAN) }.exceptionOrNull())
     }
@@ -710,7 +1066,7 @@ class DefaultFlagRepositoryTest {
         }
         FlagType.entries.forEach { type ->
             assertTrue(repo.observe(type).first() is FlagsResult.Success)
-            coVerify(exactly = 1) { dao.replaceForType("xat", type, any()) }
+            coVerify(exactly = 1) { dao.replaceSnapshot("xat", type, any()) }
         }
     }
 
@@ -803,8 +1159,8 @@ class DefaultFlagRepositoryTest {
         assertTrue(previous.await().exceptionOrNull() is CancellationException)
         assertTrue((repo.observe(FlagType.CYAN).first() as FlagsResult.Success).flags.isEmpty())
         assertEquals(2, calls)
-        coVerify(exactly = 0) { dao.replaceForType("xat", any(), any()) }
-        coVerify(exactly = 1) { dao.replaceForType("seconduser", FlagType.CYAN, any()) }
+        coVerify(exactly = 0) { dao.replaceSnapshot("xat", any(), any()) }
+        coVerify(exactly = 1) { dao.replaceSnapshot("seconduser", FlagType.CYAN, any()) }
     }
 
     @Test
@@ -833,10 +1189,10 @@ class DefaultFlagRepositoryTest {
         }
 
         coVerify {
-            flagDao.replaceForType(
+            flagDao.replaceSnapshot(
                 userId = "xat",
                 type = FlagType.CYAN,
-                rows = match { rows ->
+                snapshot = rowsMatching { rows ->
                     rows.size == 3 && rows.all { it.type == FlagType.CYAN } &&
                         rows.map { it.topicId }.containsAll(listOf(26595, 55667, 121657))
                 },
@@ -1104,7 +1460,7 @@ class DefaultFlagRepositoryTest {
             apiClient.getCategoryFlagTopics(cat = 13, bucket = HfrRestFlagBucket.PARTICIPATED,
                 page = any(), resultsPerPage = any(), useAuth = true)
         }
-        coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.CYAN, any()) }
+        coVerify(exactly = 1) { dao.replaceSnapshot("xat", FlagType.CYAN, any()) }
     }
 
     @Test
@@ -1168,7 +1524,7 @@ class DefaultFlagRepositoryTest {
             apiClient.getCategoryFlagTopics(cat = 13, bucket = HfrRestFlagBucket.PARTICIPATED,
                 page = any(), resultsPerPage = any(), useAuth = true)
         }
-        coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.CYAN, any()) }
+        coVerify(exactly = 1) { dao.replaceSnapshot("xat", FlagType.CYAN, any()) }
     }
 
     @Test
@@ -1330,7 +1686,7 @@ class DefaultFlagRepositoryTest {
                 fetchedAt = now,
             ),
         )
-        coEvery { flagDao.getLastFetchedAt("xat", FlagType.CYAN) } returns now
+        coEvery { flagDao.getCoverage("xat", FlagType.CYAN) } returns successfulCoverage(FlagType.CYAN, now)
         val repo = buildRepository(
             apiClient = apiClient,
             forumRepository = stubForumRepository(sampleCategories),
@@ -1357,12 +1713,13 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
-    fun `clearSessionCache drops cached flags so the next observe fetches again`() = runTest {
+    fun `clearSessionCache plus logout disk purge makes the next observe fetch again`() = runTest {
         val (apiClient, forumRepository) = wireDeps {
             stubFlagsCall(13, HfrRestFlagBucket.FAVORITES, EMPTY_PAGE)
             stubFlagsCall(23, HfrRestFlagBucket.FAVORITES, capturedParticipatedFixture)
         }
-        val repo = buildRepository(apiClient, forumRepository)
+        val dao = stubFlagDao()
+        val repo = buildRepository(apiClient, forumRepository, flagDao = dao)
 
         repo.observe(FlagType.FAVORITE).test {
             assertEquals(FlagsResult.Loading, awaitItem())
@@ -1371,6 +1728,8 @@ class DefaultFlagRepositoryTest {
         }
 
         repo.clearSessionCache()
+        // CacheInvalidator purges this account on logout; the fake now actually persists snapshots.
+        dao.deleteForType("xat", FlagType.FAVORITE)
 
         repo.observe(FlagType.FAVORITE).test {
             assertEquals(FlagsResult.Loading, awaitItem())
@@ -1750,13 +2109,7 @@ class DefaultFlagRepositoryTest {
         }
 
         coVerify { hfrClient.addFlag(context) }
-        coVerify {
-            flagDao.replaceForType(
-                userId = "xat",
-                type = FlagType.CYAN,
-                rows = match { rows -> rows.singleOrNull { it.topicId == 35395 }?.isFavorite == true },
-            )
-        }
+        coVerify { flagDao.markFavorite("xat", FlagType.CYAN, 23, 35395) }
         coVerify(exactly = 1) {
             flagDao.deleteForType(userId = "xat", type = FlagType.FAVORITE)
         }
@@ -2130,10 +2483,10 @@ class DefaultFlagRepositoryTest {
         assertTrue(summary, summary.contains("fetchRefreshIds=[1, 2]"))
         assertTrue(summary, !summary.contains("cache_generation"))
         coVerify(exactly = 1) {
-            flagDao.replaceForType(
+            flagDao.replaceSnapshot(
                 userId = "xat",
                 type = FlagType.FAVORITE,
-                rows = match { rows -> rows.singleOrNull()?.topicId == 35395 },
+                snapshot = rowsMatching { rows -> rows.singleOrNull()?.topicId == 35395 },
             )
         }
     }
@@ -2238,10 +2591,10 @@ class DefaultFlagRepositoryTest {
         }
 
         coVerify(exactly = 0) {
-            flagDao.replaceForType(
+            flagDao.replaceSnapshot(
                 userId = "xat",
                 type = FlagType.CYAN,
-                rows = match { rows -> rows.any { it.topicId == 35395 && it.isFavorite } },
+                snapshot = rowsMatching { rows -> rows.any { it.topicId == 35395 && it.isFavorite } },
             )
         }
     }
@@ -2271,10 +2624,10 @@ class DefaultFlagRepositoryTest {
         }
 
         coVerify(exactly = 0) {
-            flagDao.replaceForType(
+            flagDao.replaceSnapshot(
                 userId = "xat",
                 type = FlagType.CYAN,
-                rows = match { rows -> rows.any { it.topicId == 35395 && it.isFavorite } },
+                snapshot = rowsMatching { rows -> rows.any { it.topicId == 35395 && it.isFavorite } },
             )
         }
     }
@@ -2443,8 +2796,8 @@ class DefaultFlagRepositoryTest {
             api.getTopicList(cat = 23, subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
         } returns EMPTY_PAGE
         val dao = stubFlagDao()
-        coEvery { dao.replaceForType("xat", FlagType.CYAN, any()) } coAnswers {
-            roomRows = thirdArg<List<FlagTopicEntity>>()
+        coEvery { dao.replaceSnapshot("xat", FlagType.CYAN, any()) } coAnswers {
+            roomRows = thirdArg<FlagCacheSnapshot>().rows
             if (deleted) writesAfterDeletion += roomRows
         }
         coEvery { dao.deleteFlag("xat", FlagType.CYAN, 23, 35395) } coAnswers {
@@ -2530,8 +2883,8 @@ class DefaultFlagRepositoryTest {
                 assertTrue((awaitItem() as FlagsResult.Success).flags.isEmpty())
                 expectNoEvents()
                 assertNull(repo.findCachedFlag(23, 35395))
-                coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.CYAN, match { it.isEmpty() }) }
-                coVerify(exactly = 0) { dao.replaceForType("xat", FlagType.CYAN, match { it.isNotEmpty() }) }
+                coVerify(exactly = 1) { dao.replaceSnapshot("xat", FlagType.CYAN, rowsMatching { it.isEmpty() }) }
+                coVerify(exactly = 0) { dao.replaceSnapshot("xat", FlagType.CYAN, rowsMatching { it.isNotEmpty() }) }
                 assertEquals(2, calls)
                 cancelAndIgnoreRemainingEvents()
             } finally {
@@ -2556,11 +2909,11 @@ class DefaultFlagRepositoryTest {
             api.getTopicList(cat = 23, subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
         } returns EMPTY_PAGE
         val dao = stubFlagDao()
-        coEvery { dao.replaceForType("xat", FlagType.CYAN, any()) } coAnswers {
+        coEvery { dao.replaceSnapshot("xat", FlagType.CYAN, any()) } coAnswers {
             entered.complete(Unit)
             // Model a write that cannot be interrupted after it has begun committing.
             withContext(NonCancellable) { release.await() }
-            roomRows = thirdArg<List<FlagTopicEntity>>()
+            roomRows = thirdArg<FlagCacheSnapshot>().rows
         }
         coEvery { dao.deleteFlag("xat", FlagType.CYAN, 23, 35395) } coAnswers {
             roomRows = roomRows.filterNot { it.topicId == 35395 }
@@ -2933,6 +3286,334 @@ class DefaultFlagRepositoryTest {
         ))
     }
 
+    @Test
+    fun `collection publishes complete buckets at twelve seconds and retains unfinished cached categories - 984`() =
+        runTest {
+            val (api, forum) = wireDeps {
+                stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+                stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+            }
+            val monotonic = mockk<FlagReadClock>()
+            every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+            val repo = buildRepository(api, forum, flagReadClock = monotonic,
+                testDispatcher = UnconfinedTestDispatcher(testScheduler))
+            val old = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+            coEvery {
+                api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
+                    page = any(), resultsPerPage = any(), useAuth = true)
+            } coAnswers { awaitCancellation() }
+            val refresh = async { repo.refresh(FlagType.CYAN) }
+            advanceTimeBy(11_999)
+            assertFalse(refresh.isCompleted)
+            advanceTimeBy(1)
+            runCurrent()
+            assertTrue(refresh.isCompleted)
+            val result = refresh.await() as FlagsResult.Success
+            assertEquals(12_000L, testScheduler.currentTime)
+            assertEquals(old.flags, result.flags)
+            assertEquals(FlagRefreshStatus.PARTIAL, result.refreshStatus)
+            assertEquals(null, result.coverage.categories.single {
+                it.cat == 13 && it.source == FlagSource.BUCKET
+            }.failure)
+            assertTrue(result.coverage.categories.filter { it.cat == 23 }
+                .all { it.failure == FlagFailureKind.DEADLINE })
+        }
+
+    @Test
+    fun `sticky sweep is cancelled at the deadline while completed sticky partitions survive - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val monotonic = mockk<FlagReadClock>()
+        every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+        val repo = buildRepository(api, forum, flagReadClock = monotonic,
+                testDispatcher = UnconfinedTestDispatcher(testScheduler))
+        repo.refresh(FlagType.CYAN)
+        var cancelled = false
+        coEvery {
+            api.getTopicList(23, null, page = 1, resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            try { awaitCancellation() } finally { cancelled = true }
+        }
+        val refresh = async { repo.refresh(FlagType.CYAN) }
+        advanceTimeBy(12_000)
+        runCurrent()
+        assertTrue(refresh.isCompleted)
+        val result = refresh.await() as FlagsResult.Success
+        assertTrue(cancelled)
+        assertEquals(FlagFailureKind.DEADLINE, result.coverage.categories.single {
+            it.cat == 23 && it.source == FlagSource.STICKY
+        }.failure)
+        assertEquals(null, result.coverage.categories.single {
+            it.cat == 13 && it.source == FlagSource.STICKY
+        }.failure)
+        assertEquals(FlagRefreshStatus.PARTIAL, result.refreshStatus)
+    }
+
+    @Test
+    fun `catalogue deadline retains the whole previous snapshot and marks its categories - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val monotonic = mockk<FlagReadClock>()
+        every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+        val repo = buildRepository(api, forum, flagReadClock = monotonic,
+            testDispatcher = UnconfinedTestDispatcher(testScheduler))
+        val old = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        coEvery { forum.getCategories(any()) } coAnswers { awaitCancellation() }
+        val refresh = async { repo.refresh(FlagType.CYAN) }
+        advanceTimeBy(12_000)
+        runCurrent()
+        assertTrue(refresh.isCompleted)
+        val result = refresh.await() as FlagsResult.Success
+        assertEquals(old.flags, result.flags)
+        assertTrue(result.coverage.categories.all { it.failure == FlagFailureKind.DEADLINE })
+        assertEquals(FlagRefreshStatus.FAILED, result.refreshStatus)
+    }
+
+    @Test
+    fun `last consumer cancellation stops detached sticky sweep without publishing a failure - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        var started = 0
+        var cancelled = 0
+        coEvery {
+            api.getTopicList(any(), null, page = 1, resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            started++
+            try { awaitCancellation() } finally { cancelled++ }
+        }
+        val repo = buildRepository(api, forum, testDispatcher = UnconfinedTestDispatcher(testScheduler))
+        val first = async { repo.refresh(FlagType.CYAN) }
+        val second = async { repo.refresh(FlagType.CYAN) }
+        runCurrent()
+        assertEquals(2, started)
+        first.cancel()
+        runCurrent()
+        assertEquals(0, cancelled)
+        second.cancel()
+        runCurrent()
+        assertEquals(2, cancelled)
+    }
+
+    @Test
+    fun `joined caller cannot extend admitted collection deadline - 984`() = runTest {
+        for (joinDelay in listOf(0L, 10_000L)) {
+            val (api, forum) = wireDeps {
+                stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+                stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+            }
+            val monotonic = mockk<FlagReadClock>()
+            every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+            val repo = buildRepository(api, forum, flagReadClock = monotonic,
+                    testDispatcher = UnconfinedTestDispatcher(testScheduler))
+            coEvery {
+                api.getTopicList(any(), null, page = 1, resultsPerPage = any(), useAuth = true)
+            } coAnswers { awaitCancellation() }
+            val startedAt = testScheduler.currentTime
+            val first = async { repo.refresh(FlagType.CYAN) }
+            advanceTimeBy(joinDelay)
+            val joined = async { repo.refresh(FlagType.CYAN) }
+            advanceTimeBy(12_000 - joinDelay)
+            runCurrent()
+            assertTrue(first.isCompleted)
+            assertTrue(joined.isCompleted)
+            assertEquals(startedAt + 12_000L, testScheduler.currentTime)
+            assertEquals((first.await() as FlagsResult.Success).coverage,
+                (joined.await() as FlagsResult.Success).coverage)
+        }
+    }
+
+    @Test
+    fun `joined caller keeps original budget when its predecessor leaves and generation changes - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+            stubFlagsCall(13, HfrRestFlagBucket.READ, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.READ, EMPTY_PAGE)
+        }
+        val monotonic = mockk<FlagReadClock>()
+        every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+        val repo = buildRepository(api, forum, flagReadClock = monotonic,
+            testDispatcher = UnconfinedTestDispatcher(testScheduler))
+        repo.refresh(FlagType.CYAN)
+        coEvery {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } coAnswers { awaitCancellation() }
+        val first = async { repo.refresh(FlagType.CYAN) }
+        advanceTimeBy(5_000)
+        val joined = async { repo.refresh(FlagType.CYAN) }
+        runCurrent()
+        first.cancel()
+        runCurrent()
+        advanceTimeBy(5_000)
+        repo.refresh(FlagType.RED) // Fences CYAN; its remaining caller must retain the original 12 s.
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertTrue(joined.isCompleted)
+        assertEquals(12_000L, testScheduler.currentTime)
+        assertEquals(FlagRefreshStatus.PARTIAL, (joined.await() as FlagsResult.Success).refreshStatus)
+    }
+
+    @Test
+    fun `shared sticky deadline preserves a later consumers completed buckets - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+            stubFlagsCall(13, HfrRestFlagBucket.READ, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.READ, capturedParticipatedFixture)
+        }
+        val monotonic = mockk<FlagReadClock>()
+        every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, forum, flagDao = dao, flagReadClock = monotonic,
+            testDispatcher = UnconfinedTestDispatcher(testScheduler))
+        var cancelled = false
+        coEvery { api.getTopicList(23, null, 1, any(), true) } coAnswers {
+            try { awaitCancellation() } finally { cancelled = true }
+        }
+        // Observations share the generation without a pull fencing the earlier consumer.
+        val first = async { repo.observe(FlagType.CYAN).first { it is FlagsResult.Success } }
+        runCurrent()
+        advanceTimeBy(4_000)
+        val later = async { repo.observe(FlagType.RED).first { it is FlagsResult.Success } }
+        runCurrent()
+        advanceTimeBy(8_000)
+        runCurrent()
+        assertTrue(first.isCompleted)
+        assertTrue("a shared deadline must finish the later refresh without cancelling it", later.isCompleted)
+        val result = later.await() as FlagsResult.Success
+        assertEquals(12_000L, testScheduler.currentTime)
+        assertTrue(cancelled)
+        assertEquals(FlagRefreshStatus.PARTIAL, result.refreshStatus)
+        assertEquals(35395, result.flags.single().topicId)
+        assertTrue(result.coverage.categories.filter { it.source == FlagSource.BUCKET }
+            .all { it.failure == null && it.lastSuccessAt != null })
+        assertEquals(FlagFailureKind.DEADLINE, result.coverage.categories.single {
+            it.cat == 23 && it.source == FlagSource.STICKY
+        }.failure)
+        assertNull(result.coverage.categories.single { it.cat == 13 && it.source == FlagSource.STICKY }.failure)
+        val disk = dao.getSnapshot("xat", FlagType.RED)
+        assertEquals(35395, disk.rows.single().topicId)
+        assertEquals(result.coverage.categories.map { it.failure }, disk.coverage.map { it.failure })
+        coVerify(exactly = 1) { dao.replaceSnapshot("xat", FlagType.RED, any()) }
+        coVerify(exactly = 1) { api.getTopicList(23, null, 1, any(), true) }
+        first.await()
+    }
+
+    @Test
+    fun `observation deadline leaves a newer pull to publish without a transient failure - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val monotonic = mockk<FlagReadClock>()
+        every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+        val dao = stubFlagDao()
+        val diagnostics = DiagnosticsLog()
+        // A queued dispatcher lets the pull start its replacement before the observer rejoins.
+        val repo = buildRepository(api, forum, flagDao = dao, flagReadClock = monotonic, diagnostics = diagnostics,
+            testDispatcher = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        coEvery { api.getTopicList(23, null, 1, any(), true) } coAnswers { awaitCancellation() }
+        val observation = async { repo.observe(FlagType.CYAN).first { it !is FlagsResult.Loading } }
+        runCurrent()
+        advanceTimeBy(10_000)
+        val pull = async { repo.refresh(FlagType.CYAN) }
+        runCurrent()
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertFalse("the observer must not receive a failure while the replacement is in flight",
+            observation.isCompleted)
+        val summary = diagnostics.entries.value.single { it.message.startsWith("refresh=1 types=CYAN") }.message
+        assertTrue("the original wait must finish at t=12s without failure: $summary", summary.contains("exception=-"))
+        assertFalse("the newer pull still owns its independent budget", pull.isCompleted)
+        coVerify(exactly = 0) { dao.replaceSnapshot("xat", FlagType.CYAN, any()) }
+        advanceTimeBy(10_000)
+        runCurrent()
+        assertTrue(pull.isCompleted)
+        val result = pull.await() as FlagsResult.Success
+        assertEquals(FlagRefreshStatus.PARTIAL, result.refreshStatus)
+        assertEquals(result, observation.await())
+        assertEquals(22_000L, testScheduler.currentTime)
+        coVerify(exactly = 1) { dao.replaceSnapshot("xat", FlagType.CYAN, any()) }
+    }
+
+    @Test
+    fun `observation deadline keeps stale cache while a newer pull is in flight - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val monotonic = mockk<FlagReadClock>()
+        every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+        val dao = stubFlagDao()
+        val stale = Instant.parse("2026-05-03T11:00:00Z")
+        coEvery { dao.getFlags("xat", FlagType.CYAN) } returns listOf(
+            flagEntity(FlagType.CYAN, 999, "Old row", stale),
+        )
+        val diagnostics = DiagnosticsLog()
+        val repo = buildRepository(api, forum, flagDao = dao, flagReadClock = monotonic, diagnostics = diagnostics,
+            testDispatcher = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        coEvery { api.getTopicList(23, null, 1, any(), true) } coAnswers { awaitCancellation() }
+        repo.observe(FlagType.CYAN).test {
+            val cached = awaitItem() as FlagsResult.Success
+            assertEquals(999, cached.flags.single().topicId)
+            advanceTimeBy(10_000)
+            val pull = async { repo.refresh(FlagType.CYAN) }
+            runCurrent()
+            assertEquals(FlagsResult.Loading, awaitItem())
+            advanceTimeBy(2_000)
+            runCurrent()
+            val summary = diagnostics.entries.value.single { it.message.startsWith("refresh=1 types=CYAN") }.message
+            assertTrue("the cache fallback must finish without failure: $summary", summary.contains("exception=-"))
+            expectNoEvents()
+            assertFalse(pull.isCompleted)
+            assertEquals(cached, repo.observe(FlagType.CYAN).first())
+            coVerify(exactly = 0) { dao.replaceSnapshot("xat", FlagType.CYAN, any()) }
+            advanceTimeBy(10_000)
+            runCurrent()
+            val result = pull.await() as FlagsResult.Success
+            assertEquals(setOf(999, 35395), result.flags.map { it.topicId }.toSet())
+            assertEquals(result, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `catalogue owner inherits read session while resolveFavorite stays outside - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+            stubFlagsCall(23, HfrRestFlagBucket.FAVORITES, EMPTY_PAGE)
+        }
+        coEvery { forum.getCategories(any()) } coAnswers {
+            assertTrue(currentCoroutineContext()[FlagReadSession] != null)
+            ForumResult.Success(sampleCategories)
+        }
+        coEvery {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.FAVORITES,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            assertNull(currentCoroutineContext()[FlagReadSession])
+            EMPTY_PAGE
+        }
+        val repo = buildRepository(api, forum)
+        repo.refresh(FlagType.CYAN)
+        coEvery {
+            api.getTopicList(23, null, page = 1, resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            assertNull(currentCoroutineContext()[FlagReadSession])
+            EMPTY_PAGE
+        }
+        val menuRepo = buildRepository(api, forum)
+        assertEquals(false, menuRepo.resolveFavorite(23, 999).getOrThrow())
+    }
+
     private fun sampleFlag(type: FlagType = FlagType.CYAN, topicId: Int = 35395): Flag = Flag(
         cat = 23,
         subcat = 550,
@@ -2992,6 +3673,8 @@ class DefaultFlagRepositoryTest {
         clock: Clock = Clock.fixed(Instant.parse("2026-05-03T12:00:00Z"), ZoneOffset.UTC),
         hfrClient: HfrClient = mockk(relaxed = true),
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
+        flagReadClock: FlagReadClock = FlagReadClock(),
+        testDispatcher: CoroutineDispatcher = UnconfinedTestDispatcher(),
     ): DefaultFlagRepository = DefaultFlagRepository(
         apiClient = apiClient,
         hfrClient = hfrClient,
@@ -3002,13 +3685,14 @@ class DefaultFlagRepositoryTest {
         flagCacheStore = FlagCacheStore(
             flagDao = flagDao,
             clock = clock,
-            ioDispatcher = UnconfinedTestDispatcher(),
+            ioDispatcher = testDispatcher,
         ),
         json = json,
-        ioDispatcher = UnconfinedTestDispatcher(),
+        ioDispatcher = testDispatcher,
         clock = clock,
         diagnostics = diagnostics,
         refreshDiagnostics = FlagRefreshDiagnostics(diagnostics),
+        flagReadClock = flagReadClock,
     )
 
     private fun stubAuthRepository(pseudo: String = "XaT"): AuthRepository {
@@ -3019,10 +3703,45 @@ class DefaultFlagRepositoryTest {
 
     private fun stubFlagDao(): FlagDao {
         val dao = mockk<FlagDao>(relaxed = true)
-        coEvery { dao.getFlags(any(), any()) } returns emptyList()
+        val snapshots = mutableMapOf<Pair<String, FlagType>, FlagCacheSnapshot>()
+        coEvery { dao.getFlags(any(), any()) } coAnswers {
+            snapshots[firstArg<String>() to secondArg<FlagType>()]?.rows.orEmpty()
+        }
+        coEvery { dao.getCoverage(any(), any()) } coAnswers {
+            snapshots[firstArg<String>() to secondArg<FlagType>()]?.coverage.orEmpty()
+        }
+        coEvery { dao.getSnapshot(any(), any()) } coAnswers {
+            FlagCacheSnapshot(dao.getFlags(firstArg(), secondArg()), dao.getCoverage(firstArg(), secondArg()))
+        }
+        coEvery { dao.replaceSnapshot(any(), any(), any()) } coAnswers {
+            snapshots[firstArg<String>() to secondArg<FlagType>()] = thirdArg()
+        }
+        coEvery { dao.deleteForType(any(), any()) } coAnswers {
+            snapshots.remove(firstArg<String>() to secondArg<FlagType>())
+            Unit
+        }
+        coEvery { dao.deleteFlag(any(), any(), any(), any()) } coAnswers {
+            val key = firstArg<String>() to secondArg<FlagType>()
+            snapshots[key]?.let { snapshot ->
+                snapshots[key] = snapshot.copy(rows = snapshot.rows.filterNot {
+                    it.cat == thirdArg<Int>() && it.topicId == arg<Int>(3)
+                })
+            }
+            Unit
+        }
         coEvery { dao.getLastFetchedAt(any(), any()) } returns null
         return dao
     }
+
+    private fun MockKMatcherScope.rowsMatching(predicate: (List<FlagTopicEntity>) -> Boolean): FlagCacheSnapshot =
+        match { predicate(it.rows) }
+
+    private fun successfulCoverage(type: FlagType, at: Instant): List<FlagCategoryCoverageEntity> =
+        sampleCategories.flatMap { category ->
+            listOf(FlagSource.BUCKET, FlagSource.STICKY).map { source ->
+                FlagCategoryCoverageEntity("xat", type, category.id, source, at, at, null)
+            }
+        }
 
     private fun sampleFlagAddContext(): FlagAddContext = FlagAddContext(
         cat = 23,

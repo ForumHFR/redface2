@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.database.converters
 import androidx.room.TypeConverter
 import fr.forumhfr.redface2.core.database.entities.FetchMode
 import fr.forumhfr.redface2.core.database.serialization.PostContentSerializer
+import fr.forumhfr.redface2.core.model.FlagFailureKind
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.PostContent
 import java.time.Instant
@@ -101,4 +102,17 @@ internal object Converters {
     @JvmStatic
     fun flagTypeFromString(value: String): FlagType =
         runCatching { FlagType.valueOf(value) }.getOrDefault(FlagType.CYAN)
+
+    /** Keep the v23 failure vocabulary readable by P1a builds on rollback. */
+    @TypeConverter
+    @JvmStatic
+    fun flagFailureKindToString(value: FlagFailureKind?): String? =
+        if (value == FlagFailureKind.DEADLINE) FlagFailureKind.UNKNOWN.name else value?.name
+
+    /** Future failure names still mean a failed partition, never a successful or missing one. */
+    @TypeConverter
+    @JvmStatic
+    fun flagFailureKindFromString(value: String?): FlagFailureKind? = value?.let {
+        runCatching { FlagFailureKind.valueOf(it) }.getOrDefault(FlagFailureKind.UNKNOWN)
+    }
 }

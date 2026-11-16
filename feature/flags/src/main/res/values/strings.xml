@@ -119,7 +119,7 @@
     <string name="flags_dt_row_state_unknown">État inconnu : %1$s</string>
     <!-- Échec du chargement de la liste DT (boîte de réception). La lecture MPStorage, best-effort,
          n'atteint jamais cet état (elle se dégrade en « pas de badge »). -->
-    <string name="flags_dt_error">Impossible de charger les conversations. Vérifie ta connexion ou réessaie.</string>
+    <string name="flags_dt_error">Impossible de charger les conversations. Vérifiez votre connexion ou réessayez.</string>
 
     <!-- #179 — Vue drapeaux groupée par catégorie (parité vue web par défaut). -->
     <!-- Cyan (« Mes sujets ») : section de catégorie sans nouveau message non lu. Wording parité web. -->
@@ -143,9 +143,24 @@
     <!-- #753 (Dintr-un lemn) — l'ancien texte prescrivait « Masquer les catégories sans non-lu »,
          qui ne réaffiche que les bandeaux de catégories vides : l'action qui réaffiche les SUJETS lus
          est la bascule « +lus » (pilule d'onglet). Les deux actions sont nommées avec leur effet réel. -->
-    <string name="flags_no_unread_category_subtitle">Tape sur la pilule de l\'onglet pour afficher aussi les sujets lus (« +lus »), ou désactive « Masquer les catégories sans non-lu » pour voir les catégories vides.</string>
-    <string name="flags_error">Impossible de récupérer les drapeaux. Vérifie ta connexion ou réessaie.</string>
-    <string name="flags_session_expired">Session HFR expirée. Reconnecte-toi pour recharger tes drapeaux.</string>
+    <string name="flags_no_unread_category_subtitle">Appuyez sur la pilule de l\'onglet pour afficher aussi les sujets lus (« +lus »), ou désactivez « Masquer les catégories sans non-lu » pour voir les catégories vides.</string>
+    <string name="flags_error">Impossible de récupérer les drapeaux. Vérifiez votre connexion ou réessayez.</string>
+    <string name="flags_session_expired">Session HFR expirée. Reconnectez-vous pour actualiser vos drapeaux.</string>
+    <plurals name="flags_partially_updated">
+        <item quantity="one">Liste partiellement actualisée : %1$d catégorie non actualisée.</item>
+        <item quantity="other">Liste partiellement actualisée : %1$d catégories non actualisées.</item>
+    </plurals>
+    <plurals name="flags_missing_stickies">
+        <item quantity="one">Épinglés non chargés pour la catégorie %1$s.</item>
+        <item quantity="other">Épinglés non chargés pour les catégories %1$s.</item>
+    </plurals>
+    <plurals name="flags_missing_stickies_unnamed">
+        <item quantity="one">Épinglés non chargés pour %1$d catégorie.</item>
+        <item quantity="other">Épinglés non chargés pour %1$d catégories.</item>
+    </plurals>
+    <string name="flags_cached_update_failed">Liste du %1$s. Actualisation impossible.</string>
+    <string name="flags_update_failed">Actualisation impossible. Les données disponibles sont affichées.</string>
+    <string name="flags_invalid_response">Réponse HFR non reconnue. Les données disponibles sont affichées.</string>
     <string name="flags_retry">Réessayer</string>
     <!-- #984 — best-effort list warning; %1$s contains the missing parts of this refresh. -->
     <string name="flags_incomplete">Liste incomplète : %1$s</string>

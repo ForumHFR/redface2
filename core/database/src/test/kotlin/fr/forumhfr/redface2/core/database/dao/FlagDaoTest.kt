@@ -6,6 +6,9 @@ import fr.forumhfr.redface2.core.database.RedfaceDatabase
 import fr.forumhfr.redface2.core.database.entities.FetchMode
 import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.FlagSource
+import fr.forumhfr.redface2.core.model.FlagFailureKind
+import fr.forumhfr.redface2.core.database.entities.FlagCategoryCoverageEntity
 import java.time.Instant
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -39,6 +42,37 @@ class FlagDaoTest {
     @After
     fun tearDown() {
         database.close()
+    }
+
+    @Test
+    fun `unknown persisted failure remains a neutral failed partition - 984`() = runTest {
+        val now = Instant.parse("2026-05-03T12:00:00Z")
+        dao.upsertCoverage(listOf(FlagCategoryCoverageEntity(
+            "alice", FlagType.CYAN, 23, FlagSource.STICKY, null, now, null,
+        )))
+        database.openHelper.writableDatabase.execSQL(
+            "UPDATE flag_category_coverage SET failure = 'FUTURE_FAILURE'",
+        )
+        assertEquals(FlagFailureKind.UNKNOWN, dao.getCoverage("alice", FlagType.CYAN).single().failure)
+        database.openHelper.writableDatabase.execSQL("UPDATE flag_category_coverage SET failure = NULL")
+        assertNull(dao.getCoverage("alice", FlagType.CYAN).single().failure)
+    }
+
+    @Test
+    fun `deadline writes a failure name readable by P1a without a schema change - 984`() = runTest {
+        val now = Instant.parse("2026-05-03T12:00:00Z")
+        dao.upsertCoverage(listOf(FlagCategoryCoverageEntity(
+            "alice", FlagType.CYAN, 23, FlagSource.STICKY, now, now, FlagFailureKind.DEADLINE,
+        )))
+        database.openHelper.readableDatabase.query("SELECT failure FROM flag_category_coverage").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            // UNKNOWN belongs to P1a's persisted vocabulary; DEADLINE does not.
+            assertEquals("UNKNOWN", cursor.getString(0))
+        }
+        assertEquals(FlagFailureKind.UNKNOWN, dao.getCoverage("alice", FlagType.CYAN).single().failure)
+        // Also tolerate rows written by the earlier P1c build.
+        database.openHelper.writableDatabase.execSQL("UPDATE flag_category_coverage SET failure = 'DEADLINE'")
+        assertEquals(FlagFailureKind.DEADLINE, dao.getCoverage("alice", FlagType.CYAN).single().failure)
     }
 
     @Test

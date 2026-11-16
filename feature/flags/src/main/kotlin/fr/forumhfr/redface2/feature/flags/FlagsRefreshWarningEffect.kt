@@ -28,13 +28,19 @@ internal fun FlagsRefreshWarningEffect(
     host: SnackbarHostState,
     onConsumed: (FlagsRefreshWarning) -> Unit,
     onRetry: (FlagsRefreshWarning) -> Unit,
+    hasRefreshBanner: Boolean = false,
 ) {
     val resources = LocalContext.current.resources
     val currentWarning by rememberUpdatedState(warning)
     val currentOnConsumed by rememberUpdatedState(onConsumed)
     val currentOnRetry by rememberUpdatedState(onRetry)
-    LaunchedEffect(warning?.presentation, authSessionKey, selectedTab, host) {
+    LaunchedEffect(warning?.presentation, authSessionKey, selectedTab, host, hasRefreshBanner) {
         if (warning != null && warning.pseudo == authSessionKey && warning.tab == selectedTab) {
+            // The snapshot banner owns Retry on regular tabs; Super has no coverage banner.
+            if (hasRefreshBanner) {
+                currentOnConsumed(warning)
+                return@LaunchedEffect
+            }
             // A previous composition already presented this event. Its suspended display was
             // cancelled, so finish the handoff without showing it again after recreation.
             if (warning.presentation.wasPresented) {

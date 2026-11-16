@@ -268,6 +268,7 @@ fun FlagsRoute(
         host = snackbarHostState,
         onConsumed = viewModel::consumeRefreshWarning,
         onRetry = viewModel::retryRefreshWarning,
+        hasRefreshBanner = (flagsState as? FlagsListUiState.Success)?.hasRefreshBanner == true,
     )
 
     // #385 — hoisted list state + scroll-to-top when the unread filter flips (cf.
@@ -1602,6 +1603,9 @@ internal fun FlagListBody(
     val pullState = rememberPullToRefreshState()
     val settling = rememberPullSettling(pullState, state.isRefreshing)
     val pushRelease = pullPushReleaseFactor(state.isRefreshing, settling)
+    val snapshot = (state.flagsState as? FlagsListUiState.Success)
+        ?.takeIf { it.hasRefreshBanner }
+    val contentTopPadding = LocalFlagsContentTopPadding.current
     PullToRefreshBox(
         isRefreshing = state.isRefreshing,
         // #728 — flag this refresh as MANUAL (gesture-driven): the rich contained indicator shows here
@@ -1623,7 +1627,7 @@ internal fun FlagListBody(
         },
         modifier = Modifier.fillMaxSize(),
     ) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 // #728 — content slides down with the LIVE pull distance during the GESTURE, then is
@@ -1635,15 +1639,27 @@ internal fun FlagListBody(
                 .graphicsLayer {
                     translationY = pullState.distanceFraction.coerceIn(0f, 1f) * pushRelease() *
                         MAX_PULL_PUSH.toPx()
-                },
+                }
+                .padding(top = if (snapshot != null) contentTopPadding else 0.dp),
         ) {
-            FlagListContent(
-                state = state,
-                actions = actions,
-                listState = listState,
-                rowActionsEnabled = rowActionsEnabled,
-                rowClickEnabled = rowClickEnabled,
-            )
+            if (snapshot != null) {
+                FlagsRefreshBanner(snapshot, actions.onRefresh, actions.onLoginRequested)
+            }
+            // The persistent banner sits below the overlaid bar. Consume its inset once here;
+            // the list and its filtered/empty states then start directly below the banner.
+            CompositionLocalProvider(
+                LocalFlagsContentTopPadding provides if (snapshot != null) 0.dp else contentTopPadding,
+            ) {
+                Box(modifier = Modifier.weight(1f)) {
+                    FlagListContent(
+                        state = state,
+                        actions = actions,
+                        listState = listState,
+                        rowActionsEnabled = rowActionsEnabled,
+                        rowClickEnabled = rowClickEnabled,
+                    )
+                }
+            }
         }
     }
 }

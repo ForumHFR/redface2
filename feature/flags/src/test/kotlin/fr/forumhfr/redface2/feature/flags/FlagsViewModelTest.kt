@@ -17,6 +17,11 @@ import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshCategory
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
+import fr.forumhfr.redface2.core.domain.flags.FlagCategoryCoverage
+import fr.forumhfr.redface2.core.domain.flags.FlagCoverage
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
+import fr.forumhfr.redface2.core.model.FlagFailureKind
+import fr.forumhfr.redface2.core.model.FlagSource
 import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
@@ -114,6 +119,64 @@ class FlagsViewModelTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `tab resubscriptions keep stale or partial snapshots behind the auto refresh preference - 984`() = runTest {
+        for (incomplete in listOf(false, true)) {
+            for (enabled in listOf(false, true)) {
+                val snapshot = incompleteSuccess().copy(
+                    issue = if (incomplete) incompleteSuccess().issue else null,
+                    cachedAt = fixedClock.instant().minusSeconds(if (incomplete) 0 else 120),
+                    refreshStatus = if (incomplete) FlagRefreshStatus.PARTIAL else FlagRefreshStatus.COMPLETE,
+                )
+                val flags = FakeFlagRepository().apply {
+                    observationResults = mapOf(FlagType.CYAN to snapshot, FlagType.RED to snapshot)
+                    refreshResults = observationResults
+                }
+                val prefs = FakeUserPreferencesRepository().apply { flagsAutoRefresh.value = enabled }
+                val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags,
+                    FakeForumRepository(), prefs)
+                advanceUntilIdle()
+                vm.maybeAutoRefresh()
+                advanceUntilIdle()
+                vm.selectTab(FlagTab.Red)
+                advanceUntilIdle()
+                vm.maybeAutoRefresh()
+                advanceUntilIdle()
+                vm.selectTab(FlagTab.Cyan)
+                advanceUntilIdle()
+                val beforeLanding = flags.refreshCalls
+                vm.maybeAutoRefresh()
+                advanceUntilIdle()
+                assertEquals(if (enabled) listOf(FlagType.CYAN, FlagType.RED) else emptyList<FlagType>(), beforeLanding)
+                assertEquals(beforeLanding, flags.refreshCalls)
+            }
+        }
+    }
+
+    @Test
+    fun `coverage and failed status survive unread filtering of every retained row - 984`() = runTest {
+        val flags = FakeFlagRepository()
+        val at = Instant.parse("2026-05-03T12:00:00Z")
+        val issue = FlagRefreshIssue(stickyCategories = listOf(FlagRefreshCategory(13, "Discussions")))
+        val coverage = FlagCoverage(listOf(FlagCategoryCoverage(13, FlagSource.BUCKET, at, at,
+            FlagFailureKind.NETWORK)))
+        flags.observationResults = mapOf(FlagType.CYAN to FlagsResult.Success(
+            listOf(stubFlag(1, FlagType.CYAN).copy(hasUnread = false)), coverage = coverage,
+            refreshStatus = FlagRefreshStatus.FAILED, cachedAt = at,
+            issue = issue,
+        ))
+        val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
+        advanceUntilIdle()
+        val displayed = vm.flagsState.value as FlagsListUiState.Success
+        assertTrue(flatTopics(displayed).isEmpty())
+        assertEquals(coverage, displayed.coverage)
+        assertEquals(FlagRefreshStatus.FAILED, displayed.refreshStatus)
+        assertEquals(at, displayed.cachedAt)
+        assertEquals(issue, displayed.refreshIssue)
+        vm.refreshWarning.value?.let(vm::consumeRefreshWarning)
+        assertEquals(issue, (vm.flagsState.value as FlagsListUiState.Success).refreshIssue)
     }
 
     @Test
