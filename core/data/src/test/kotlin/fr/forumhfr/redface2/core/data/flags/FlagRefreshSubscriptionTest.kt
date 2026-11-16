@@ -7,9 +7,12 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshPolicy
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.network.FlagReadLimiter
 import fr.forumhfr.redface2.core.network.diagnostics.AndroidNetworkDiagnosticsContextProvider
 import io.mockk.Runs
 import io.mockk.coEvery
@@ -95,6 +98,10 @@ class FlagRefreshSubscriptionTest {
             flagCacheStore = store, json = Json, ioDispatcher = UnconfinedTestDispatcher(),
             clock = Clock.systemUTC(), diagnostics = log,
             refreshDiagnostics = FlagRefreshDiagnostics(log, AndroidNetworkDiagnosticsContextProvider(context)),
+            readLimiter = FlagReadLimiter(),
+            preferences = mockk<UserPreferencesRepository> {
+                every { observeFlagsRefreshPolicy() } returns flowOf(FlagsRefreshPolicy())
+            },
         )
     }
 }
