@@ -213,9 +213,10 @@ Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
 - [x] **Refonte de la vue Drapeaux** — #603 (livrée, bêta 0.18.0 — [ADR-017]({{ site.baseurl }}/adr/017-refonte-vue-drapeaux))
 - [x] **Refonte de la vue Topic** — #604 (livrée, bêta 0.37.0 : cinq vagues, moteur de pagination in-VM #895, loupe #182, passe images #876 ; reliquats en Vue · Topic 2)
 - [x] **Refonte de la vue Éditeur** — [#1417](https://github.com/ForumHFR/redface2/issues/1417) (livrée, bêta 0.70.0 : app bar et barre d'action en bas, panneau d'en-tête, aperçu à côté du texte, feuilles Options et Formats, brouillons sous ↺, raccourci de la barre d'action ; spec et ADR-020 publiées sur [forumhfr.github.io/artifacts/editeur-spec](https://forumhfr.github.io/artifacts/editeur-spec/) ; reliquats en Vue · Éditeur 3)
-- [x] **Couleurs configurables** — #595/#883 : sous-page Réglages → Affichage → Couleurs, 8 presets
+- [x] **Couleurs configurables** — #296/#883 : sous-page Réglages → Affichage → Couleurs, 8 presets
   d'accent + RGB custom `#RRGGBB`, tons de fond clair/sombre persistés, couleurs du système
-  Android 12+ et aperçu live recordable par Roborazzi.
+  Android 12+ et aperçu live des couleurs, recordable par Roborazzi (l'aperçu en direct des autres
+  réglages d'affichage reste suivi par #595).
 - [x] **Icône du lanceur configurable** — #326 : Réglages → Affichage propose les variantes
   Classique, Sombre, Rose et Rouge via quatre alias Android persistés.
 - [x] **Hygiène repo / audit des dérives** — exécutée (2026-06) ; #605 requalifiée en ombrelle de suivi Phase 4
@@ -247,7 +248,7 @@ Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
 - [ ] Animations et transitions (raffinements continus)
 - [ ] Mode offline complet (lecture + file d'attente d'écriture)
 - [ ] Notifications push configurables
-- [x] Thème dynamique (Material You) — livré via Réglages → Affichage → Couleurs en Phase 4 (#595/#883)
+- [x] Thème dynamique (Material You) — livré via Réglages → Affichage → Couleurs en Phase 4 (#296/#883)
 - [ ] Thème "HFR classique"
 - [ ] Widgets Android
 - [ ] Tests de performance (scroll, cold start, mémoire)
