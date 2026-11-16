@@ -1,0 +1,4 @@
+Source: dérivée de la capture REST réelle du 15/11/2026 `085_S0_B_favorites.json` (corpus externe 984-corpus/raw, jamais copié dans le dépôt). Groupes raccourcis à deux sujets, compteurs results_count conservés.
+Endpoint: requête unique globale des drapeaux (rest_api.php, toutes catégories), compte agent authentifié.
+Privacy: titres « Sujet N », auteurs « auteur1 », identifiants de sujets, positions et dates neutralisés ;
+  liens de compte remplacés, `tns3` vidé. Aucune donnée de compte. Détail : README-global-flags.md.

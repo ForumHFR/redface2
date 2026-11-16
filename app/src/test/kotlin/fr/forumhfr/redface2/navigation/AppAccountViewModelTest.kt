@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.navigation
 
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.LoginError
+import fr.forumhfr.redface2.core.domain.flags.FlagLookup
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
@@ -213,9 +214,9 @@ class AppAccountViewModelTest {
             return Result.success(Unit)
         }
 
-        override suspend fun findFlag(cat: Int, topicId: Int): fr.forumhfr.redface2.core.model.Flag? {
+        override suspend fun findFlag(cat: Int, topicId: Int): FlagLookup {
             // Not exercised in these tests — included to satisfy the interface (#809).
-            return null
+            return FlagLookup.Absent
         }
     }
 

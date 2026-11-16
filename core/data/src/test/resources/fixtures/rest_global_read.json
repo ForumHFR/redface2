@@ -1,0 +1,327 @@
+{
+  "resource": {
+    "page": 1,
+    "results_count": 6,
+    "results_per_page": 6,
+    "resources": [
+      {
+        "page": 1,
+        "results_count": 16,
+        "results_per_page": 16,
+        "resources": [
+          {
+            "id": 1001,
+            "title": "Sujet 1",
+            "last_post_date": "15-11-2026 à 12:00:00",
+            "is_closed": false,
+            "is_sticky": false,
+            "links": {
+              "forum": {
+                "linked_type": "forum",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+              },
+              "category": {
+                "linked_type": "forum_category",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/",
+                "title": "Catégorie"
+              },
+              "subcategory": {
+                "linked_type": "forum_subcategory",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/subcategories/481/"
+              },
+              "posts": {
+                "linked_type": "list",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/subcategories/481/topics/1001/posts/?page=1&results_per_page=40",
+                "count": 120619
+              },
+              "last_author": {
+                "linked_type": "user",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/users/auteur1/",
+                "title": "auteur1",
+                "tns3": ""
+              },
+              "author": {
+                "linked_type": "user",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/users/auteur1/",
+                "title": "auteur1",
+                "tns3": ""
+              }
+            },
+            "type": "topic",
+            "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/subcategories/481/topics/1001/",
+            "is_read": false,
+            "flag_owntopic": 0,
+            "last_position": 1,
+            "last_post_read_id": 100
+          },
+          {
+            "id": 1002,
+            "title": "Sujet 2",
+            "last_post_date": "15-11-2026 à 12:00:00",
+            "is_closed": false,
+            "is_sticky": false,
+            "links": {
+              "forum": {
+                "linked_type": "forum",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+              },
+              "category": {
+                "linked_type": "forum_category",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/"
+              },
+              "subcategory": {
+                "linked_type": "forum_subcategory",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/subcategories/109/"
+              },
+              "posts": {
+                "linked_type": "list",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/subcategories/109/topics/1002/posts/?page=1&results_per_page=40",
+                "count": 28486
+              },
+              "last_author": {
+                "linked_type": "user",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/users/auteur1/",
+                "title": "auteur1",
+                "tns3": ""
+              },
+              "author": {
+                "linked_type": "user",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/users/auteur1/",
+                "title": "auteur1",
+                "tns3": ""
+              }
+            },
+            "type": "topic",
+            "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/subcategories/109/topics/1002/",
+            "is_read": false,
+            "flag_owntopic": 0,
+            "last_position": 1,
+            "last_post_read_id": 100
+          }
+        ],
+        "list_type": "topic",
+        "type": "list",
+        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/topics/read/?page=1&results_per_page=20",
+        "links": {
+          "category": {
+            "linked_type": "forum_category",
+            "type": "link",
+            "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/",
+            "title": "Catégorie"
+          }
+        }
+      },
+      {
+        "page": 1,
+        "results_count": 1,
+        "results_per_page": 1,
+        "resources": [
+          {
+            "id": 1003,
+            "title": "Sujet 3",
+            "last_post_date": "15-11-2026 à 12:00:00",
+            "is_closed": false,
+            "is_sticky": false,
+            "links": {
+              "forum": {
+                "linked_type": "forum",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+              },
+              "category": {
+                "linked_type": "forum_category",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/30/",
+                "title": "Catégorie"
+              },
+              "posts": {
+                "linked_type": "list",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/30/topics/1003/posts/?page=1&results_per_page=40",
+                "count": 19372
+              },
+              "last_author": {
+                "linked_type": "user",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/users/auteur1/",
+                "title": "auteur1"
+              },
+              "author": {
+                "linked_type": "user",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/users/auteur1/",
+                "title": "auteur1",
+                "tns3": ""
+              }
+            },
+            "type": "topic",
+            "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/30/topics/1003/",
+            "is_read": false,
+            "flag_owntopic": 0,
+            "last_position": 1,
+            "last_post_read_id": 100
+          }
+        ],
+        "list_type": "topic",
+        "type": "list",
+        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/30/topics/read/?page=1&results_per_page=1",
+        "links": {
+          "category": {
+            "linked_type": "forum_category",
+            "type": "link",
+            "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/30/",
+            "title": "Catégorie"
+          }
+        }
+      },
+      {
+        "page": 1,
+        "results_count": 3,
+        "results_per_page": 3,
+        "resources": [
+          {
+            "id": 1004,
+            "title": "Sujet 4",
+            "last_post_date": "15-11-2026 à 12:00:00",
+            "is_closed": false,
+            "is_sticky": false,
+            "links": {
+              "forum": {
+                "linked_type": "forum",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+              },
+              "category": {
+                "linked_type": "forum_category",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/14/",
+                "title": "Catégorie"
+              },
+              "subcategory": {
+                "linked_type": "forum_subcategory",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/14/subcategories/478/"
+              },
+              "posts": {
+                "linked_type": "list",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/14/subcategories/478/topics/1004/posts/?page=1&results_per_page=40",
+                "count": 6253
+              },
+              "last_author": {
+                "linked_type": "user",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/users/auteur1/",
+                "title": "auteur1"
+              },
+              "author": {
+                "linked_type": "user",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/users/auteur1/",
+                "title": "auteur1"
+              }
+            },
+            "type": "topic",
+            "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/14/subcategories/478/topics/1004/",
+            "is_read": false,
+            "flag_owntopic": 0,
+            "last_position": 1,
+            "last_post_read_id": 100
+          },
+          {
+            "id": 1005,
+            "title": "Sujet 5",
+            "last_post_date": "15-11-2026 à 12:00:00",
+            "is_closed": false,
+            "is_sticky": false,
+            "links": {
+              "forum": {
+                "linked_type": "forum",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/"
+              },
+              "category": {
+                "linked_type": "forum_category",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/14/"
+              },
+              "subcategory": {
+                "linked_type": "forum_subcategory",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/14/subcategories/444/"
+              },
+              "posts": {
+                "linked_type": "list",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/14/subcategories/444/topics/1005/posts/?page=1&results_per_page=40",
+                "count": 32347
+              },
+              "last_author": {
+                "linked_type": "user",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/users/auteur1/",
+                "title": "auteur1"
+              },
+              "author": {
+                "linked_type": "user",
+                "type": "link",
+                "href": "https://forum.hardware.fr/api/users/auteur1/",
+                "title": "auteur1",
+                "tns3": ""
+              }
+            },
+            "type": "topic",
+            "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/14/subcategories/444/topics/1005/",
+            "is_read": false,
+            "flag_owntopic": 0,
+            "last_position": 1,
+            "last_post_read_id": 100
+          }
+        ],
+        "list_type": "topic",
+        "type": "list",
+        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/14/topics/read/?page=1&results_per_page=3",
+        "links": {
+          "category": {
+            "linked_type": "forum_category",
+            "type": "link",
+            "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/14/",
+            "title": "Catégorie"
+          }
+        }
+      },
+      {
+        "page": 1,
+        "results_count": 0,
+        "results_per_page": 16,
+        "resources": [],
+        "list_type": "topic",
+        "type": "list",
+        "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/topics/read/?page=1&results_per_page=20",
+        "links": {
+          "category": {
+            "linked_type": "forum_category",
+            "type": "link",
+            "href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/1/",
+            "title": "Catégorie"
+          }
+        }
+      }
+    ],
+    "list_type": "list",
+    "type": "list",
+    "href": "https://forum.hardware.fr/api/forums/hardwarefr/topics/read/?page=1&results_per_page=25"
+  }
+}

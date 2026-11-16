@@ -1,16 +1,24 @@
 package fr.forumhfr.redface2.feature.flags
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeService
+import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshPolicy
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import java.io.IOException
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -18,8 +26,13 @@ import kotlinx.coroutines.launch
 class DiagnosticsViewModel @Inject constructor(
     private val log: DiagnosticsLog,
     private val probe: NetworkProbeService,
+    private val preferences: UserPreferencesRepository,
 ) : ViewModel() {
     val entries = log.entries
+    val policy = preferences.observeFlagsRefreshPolicy()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), FlagsRefreshPolicy())
+    var policySaveFailed by mutableStateOf(false)
+        private set
     val probeState = probe.state
     private val mutableCooldownSeconds = MutableStateFlow<Long?>(null)
     val cooldownSeconds = mutableCooldownSeconds.asStateFlow()
@@ -35,6 +48,20 @@ class DiagnosticsViewModel @Inject constructor(
     }
 
     fun clear() = log.clear()
+
+    fun savePolicy(policy: FlagsRefreshPolicy, onSaved: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                preferences.setFlagsRefreshPolicy(policy)
+                policySaveFailed = false
+                onSaved()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: IOException) {
+                policySaveFailed = true
+            }
+        }
+    }
 
     fun startProbe() {
         if (probeJob?.isActive == true || probeState.value.running) return

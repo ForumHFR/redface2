@@ -30,21 +30,7 @@ internal fun FlagsRefreshBanner(
     if (!state.hasRefreshBanner) return
     val failures = state.coverage.categories.filter { it.failure != null }
     val sessionExpired = failures.any { it.failure == FlagFailureKind.SESSION }
-    val message = when {
-        sessionExpired -> stringResource(R.string.flags_session_expired)
-        failures.any { it.failure == FlagFailureKind.SCHEMA } -> stringResource(R.string.flags_invalid_response)
-        state.refreshStatus == FlagRefreshStatus.FAILED -> {
-            val time = state.cachedAt?.let {
-                DateTimeFormatter.ofPattern("dd/MM à HH:mm").withZone(ZoneId.systemDefault()).format(it)
-            }
-            if (time == null) stringResource(R.string.flags_update_failed)
-            else stringResource(R.string.flags_cached_update_failed, time)
-        }
-        else -> {
-            val count = failures.map { it.cat }.distinct().size
-            pluralStringResource(R.plurals.flags_partially_updated, count, count)
-        }
-    }
+    val message = refreshBannerMessage(state, sessionExpired)
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text(message, style = MaterialTheme.typography.bodyMedium)
@@ -66,6 +52,28 @@ internal fun FlagsRefreshBanner(
             TextButton(onClick = if (sessionExpired) onLogin else onRetry) {
                 Text(stringResource(if (sessionExpired) R.string.flags_login_cta else R.string.flags_retry))
             }
+        }
+    }
+}
+
+@Composable
+private fun refreshBannerMessage(state: FlagsListUiState.Success, sessionExpired: Boolean): String {
+    val failures = state.coverage.categories.filter { it.failure != null }
+    return when {
+        sessionExpired -> stringResource(R.string.flags_session_expired)
+        failures.any { it.failure == FlagFailureKind.SCHEMA } -> stringResource(R.string.flags_invalid_response)
+        state.refreshStatus == FlagRefreshStatus.FAILED -> {
+            val time = state.cachedAt?.let {
+                DateTimeFormatter.ofPattern("dd/MM à HH:mm").withZone(ZoneId.systemDefault()).format(it)
+            }
+            if (time == null) stringResource(R.string.flags_update_failed)
+            else stringResource(R.string.flags_cached_update_failed, time)
+        }
+        failures.isEmpty() && state.coverage.isGlobalObservation -> stringResource(R.string.flags_global_limited)
+        else -> {
+            val count = state.coverage.categories.filter { it.failure != null || it.lastSuccessAt == null }
+                .map { it.cat }.filter { it > 0 }.distinct().size
+            pluralStringResource(R.plurals.flags_partially_updated, count, count)
         }
     }
 }

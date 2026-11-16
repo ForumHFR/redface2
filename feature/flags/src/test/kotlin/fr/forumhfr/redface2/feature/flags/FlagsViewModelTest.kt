@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
+import fr.forumhfr.redface2.core.domain.flags.FlagLookup
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshCategory
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
@@ -3591,9 +3592,9 @@ class FlagsViewModelTest {
             return result
         }
 
-        override suspend fun findFlag(cat: Int, topicId: Int): Flag? {
+        override suspend fun findFlag(cat: Int, topicId: Int): FlagLookup {
             findFlagCalls = findFlagCalls + (cat to topicId)
-            return findFlagResults[cat to topicId]
+            return findFlagResults[cat to topicId]?.let(FlagLookup::Found) ?: FlagLookup.Absent
         }
 
         override suspend fun findCachedFlag(topicId: Int): Flag? {

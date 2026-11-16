@@ -10,6 +10,9 @@ import java.time.Clock
 internal class FlagRefreshCollection(private val clock: Clock) {
     var categories: List<Category>? = null
     private val outcomes = linkedMapOf<Pair<Int, FlagSource>, CategoryRefreshOutcome>()
+    private val retained = mutableSetOf<Pair<Int, FlagSource>>()
+
+    fun retain(cat: Int, source: FlagSource) { retained += cat to source }
     var failure: Throwable? = null
         private set
 
@@ -25,7 +28,8 @@ internal class FlagRefreshCollection(private val clock: Clock) {
         if (deadline) failed(FlagReadDeadlineException())
         val cats = categories
         val completed = if (cats == null) emptyList() else cats.flatMap { category ->
-            listOf(FlagSource.BUCKET, FlagSource.STICKY).map { source ->
+            listOf(FlagSource.BUCKET, FlagSource.STICKY).mapNotNull { source ->
+                if ((category.id to source) in retained) return@mapNotNull null
                 outcomes[category.id to source] ?: CategoryRefreshOutcome(
                     category.id, source, receivedAt = clock.instant(),
                     failure = if (deadline) FlagFailureKind.DEADLINE else

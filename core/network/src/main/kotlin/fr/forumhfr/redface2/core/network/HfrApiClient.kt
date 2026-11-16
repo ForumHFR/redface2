@@ -54,6 +54,13 @@ class HfrApiClient @Inject constructor(
     suspend fun getCategories(useAuth: Boolean = false): String =
         get(uri = CATEGORIES_URI, useAuth = useAuth, flagOperation = FlagReadOperation.CATALOGUE)
 
+    /** Grouped-by-category envelope; this dedicated URI is never decoded as a flat topic list. */
+    suspend fun getGlobalFlagTopics(bucket: HfrRestFlagBucket): String = get(
+        uri = "forums/hardwarefr/topics/${bucket.uriSegment}/",
+        useAuth = true,
+        flagOperation = FlagReadOperation.GLOBAL_BUCKET,
+    )
+
     suspend fun getSubcategories(cat: Int): String =
         get(uri = "${CATEGORIES_URI}$cat/subcategories/", useAuth = false)
 
@@ -115,9 +122,7 @@ class HfrApiClient @Inject constructor(
      * definition per-user. The bucket is taken from the [HfrRestFlagBucket] enum — no
      * free-form string variant.
      *
-     * The matching global endpoint (`forums/hardwarefr/topics/{bucket}/`) is intentionally
-     * not exposed yet : its envelope is grouped-by-category and we have no captured
-     * fixture for it. It can be added in a follow-up PR once a fixture exists.
+     * The matching grouped global endpoint has a dedicated [getGlobalFlagTopics] method.
      */
     // 6 params: every one maps to a distinct REST URI segment / query param (cat, subcat,
     // bucket, page, results_per_page) plus the auth toggle. They are not a cohesive object

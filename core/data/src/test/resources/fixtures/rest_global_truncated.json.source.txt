@@ -1,0 +1,4 @@
+Source: variante négative dérivée de la structure des captures REST du 15/11/2026 (083-085, corpus 984-corpus/raw) : groupe privé de sa liste (enveloppe tronquée). Non capturée telle quelle.
+Endpoint: requête unique globale des drapeaux (rest_api.php, toutes catégories), compte agent authentifié.
+Privacy: titres « Sujet N », auteurs « auteur1 », identifiants de sujets, positions et dates neutralisés ;
+  liens de compte remplacés, `tns3` vidé. Aucune donnée de compte. Détail : README-global-flags.md.

@@ -467,6 +467,7 @@ fun TopicScreen(
     val favoriteAddedMsg = stringResource(R.string.topic_post_favorite_added)
     val favoriteFailedMsg = stringResource(R.string.topic_post_favorite_failed)
     val flagNotFoundMsg = stringResource(R.string.topic_remove_flag_not_found)
+    val flagUnavailableMsg = stringResource(R.string.topic_remove_flag_unavailable)
     // #293 — moderation-alert feedback messages (resolved upfront, same rationale: the
     // effect handler is not a composable, and LocalContext.getString is not config-aware).
     val alertSentMsg = stringResource(R.string.topic_alert_sent)
@@ -738,6 +739,9 @@ fun TopicScreen(
                         favoriteFailedMsg,
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
+                }
+                TopicEffect.TopicFlagUnavailable -> {
+                    android.widget.Toast.makeText(context, flagUnavailableMsg, android.widget.Toast.LENGTH_LONG).show()
                 }
                 TopicEffect.TopicFlagNotFound -> {
                     android.widget.Toast.makeText(

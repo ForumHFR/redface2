@@ -10,9 +10,14 @@ import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeRunner
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeService
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeStatus
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeWave
+import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshPolicy
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import io.mockk.every
+import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -92,13 +97,18 @@ class DiagnosticsViewModelTest {
         lease?.close()
     }
 
+    private val preferences = mockk<UserPreferencesRepository>(relaxed = true) {
+        every { observeFlagsRefreshPolicy() } returns flowOf(FlagsRefreshPolicy())
+    }
+
     private fun newService() = NetworkProbeService(runner, reservations, activity, log)
 
     private fun owned(service: NetworkProbeService): DiagnosticsViewModel {
         val owner = ViewModelStore().also { owners += it }
         return ViewModelProvider(owner, object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
-            override fun <T : ViewModel> create(modelClass: Class<T>): T = DiagnosticsViewModel(log, service) as T
+            override fun <T : ViewModel> create(modelClass: Class<T>): T =
+                DiagnosticsViewModel(log, service, preferences) as T
         })[DiagnosticsViewModel::class.java]
     }
 

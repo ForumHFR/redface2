@@ -28,8 +28,36 @@ import org.junit.Test
 class SuperFavoriteListMapperTest {
 
     @Test
+    fun `global enrichment keeps local Super entries and exposes limited coverage`() = runTest {
+        val now = java.time.Instant.parse("2026-11-15T12:00:00Z")
+        val coverage = fr.forumhfr.redface2.core.domain.flags.FlagCoverage(listOf(
+            fr.forumhfr.redface2.core.domain.flags.FlagCategoryCoverage(0,
+                fr.forumhfr.redface2.core.model.FlagSource.GLOBAL, now, now),
+        ))
+        val flags = mockk<FlagRepository>()
+        coEvery { flags.cachedCoverage() } returns coverage
+        every { flags.observeCacheUpdates(any()) } returns emptyFlow()
+        coEvery { flags.findCachedFlag(cat = 1, topicId = 1) } returns stubFlag(1, FlagType.CYAN)
+        coEvery { flags.findCachedFlag(cat = 1, topicId = 2) } returns null
+        val forum = mockk<ForumRepository>()
+        stubCachedCategories(forum)
+        val preferences = mockk<UserPreferencesRepository>()
+        stubPreferences(preferences, groupByCategory = false)
+        val favorites = setOf(SuperFavoriteTopic(cat = 1, topicId = 1, title = "Sujet 1", subcat = null),
+            SuperFavoriteTopic(cat = 1, topicId = 2, title = "Sujet 2", subcat = null))
+        val state = SuperFavoriteListMapper(flags, forum, preferences)
+            .superFavoriteListState(flowOf(favorites)).first() as FlagsListUiState.Success
+        assertEquals(2, (state.content as FlagsContent.Flat).rows.size)
+        assertEquals(coverage, state.coverage)
+        assertEquals(fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus.PARTIAL, state.refreshStatus)
+        coVerify(exactly = 0) { flags.refresh(any()) }
+    }
+
+    @Test
     fun `group off resolves all favorites cache-only and keeps snapshot fallbacks`() = runTest {
-        val flagRepository = mockk<FlagRepository>()
+        val flagRepository = mockk<FlagRepository> {
+            coEvery { cachedCoverage() } returns fr.forumhfr.redface2.core.domain.flags.FlagCoverage()
+        }
         val forumRepository = mockk<ForumRepository>()
         val preferences = mockk<UserPreferencesRepository>()
         val mapper = SuperFavoriteListMapper(flagRepository, forumRepository, preferences)
@@ -79,7 +107,9 @@ class SuperFavoriteListMapperTest {
 
     @Test
     fun `group on drops empty categories and returns one section per favorite category`() = runTest {
-        val flagRepository = mockk<FlagRepository>()
+        val flagRepository = mockk<FlagRepository> {
+            coEvery { cachedCoverage() } returns fr.forumhfr.redface2.core.domain.flags.FlagCoverage()
+        }
         val forumRepository = mockk<ForumRepository>()
         val preferences = mockk<UserPreferencesRepository>()
         val mapper = SuperFavoriteListMapper(flagRepository, forumRepository, preferences)
@@ -125,7 +155,9 @@ class SuperFavoriteListMapperTest {
 
     @Test
     fun `hide-read keeps resolved fully-read Super favorites visible`() = runTest {
-        val flagRepository = mockk<FlagRepository>()
+        val flagRepository = mockk<FlagRepository> {
+            coEvery { cachedCoverage() } returns fr.forumhfr.redface2.core.domain.flags.FlagCoverage()
+        }
         val forumRepository = mockk<ForumRepository>()
         val preferences = mockk<UserPreferencesRepository>()
         val mapper = SuperFavoriteListMapper(flagRepository, forumRepository, preferences)
@@ -150,7 +182,9 @@ class SuperFavoriteListMapperTest {
 
     @Test
     fun `cache update signal re-resolves the Super list without observing real buckets`() = runTest {
-        val flagRepository = mockk<FlagRepository>()
+        val flagRepository = mockk<FlagRepository> {
+            coEvery { cachedCoverage() } returns fr.forumhfr.redface2.core.domain.flags.FlagCoverage()
+        }
         val forumRepository = mockk<ForumRepository>()
         val preferences = mockk<UserPreferencesRepository>()
         val mapper = SuperFavoriteListMapper(flagRepository, forumRepository, preferences)

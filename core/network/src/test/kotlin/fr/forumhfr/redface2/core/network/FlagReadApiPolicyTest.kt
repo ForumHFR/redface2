@@ -22,6 +22,23 @@ import org.junit.Test
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class FlagReadApiPolicyTest {
     @Test
+    fun `global client builds one dedicated authenticated URI for every bucket`() = runTest {
+        val uris = mutableListOf<String?>()
+        var anonymous = 0
+        val client = OkHttpClient.Builder().addInterceptor { chain ->
+            uris += chain.request().url.queryParameter("uri")
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                .code(200).message("OK").body("{}".toResponseBody()).build()
+        }.build()
+        val anon = client.newBuilder().addInterceptor { anonymous++; it.proceed(it.request()) }.build()
+        val api = HfrApiClient(client, anon, "https://forum.hardware.fr/".toHttpUrl(),
+            UnconfinedTestDispatcher(testScheduler))
+        HfrRestFlagBucket.entries.forEach { api.getGlobalFlagTopics(it) }
+        assertEquals(HfrRestFlagBucket.entries.map { "forums/hardwarefr/topics/${it.uriSegment}/" }, uris)
+        assertEquals(0, anonymous)
+    }
+
+    @Test
     fun `only explicit collection intents use the bound and five second TCP policy`() = runTest {
         val limiter = FlagReadLimiter()
         val timeouts = mutableListOf<Int>()

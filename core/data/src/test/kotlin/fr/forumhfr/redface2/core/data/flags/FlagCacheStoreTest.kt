@@ -61,6 +61,72 @@ class FlagCacheStoreTest {
     }
 
     @Test
+    fun `global positives use baseline source vocabulary and stay limited after reopening Room - P2c`() = runTest {
+        val initial = FlagCacheSnapshot(listOf(row(13).copy(source = FlagSource.STICKY)), coverage(listOf(13)))
+        database.flagDao().replaceSnapshot("alice", FlagType.CYAN, initial)
+        val observation = row(23).toFlag()
+        val batch = FlagRefreshBatch(null, emptyList(), now, globalOnly = true, observations = listOf(observation))
+        store.save("alice", FlagType.CYAN, store.merge("alice", FlagType.CYAN, batch))
+        database.close()
+        open()
+        val loaded = requireNotNull(store.load(FlagType.CYAN, "alice"))
+        assertTrue(loaded.result.coverage.isGlobalObservation)
+        assertFalse(loaded.isFresh)
+        val disk = database.flagDao().getSnapshot("alice", FlagType.CYAN)
+        assertEquals(initial.rows.single(), disk.rows.single { it.cat == 13 })
+        // 94379fcc0's generated DAO uses an exhaustive enum reader (no tolerant converter).
+        for (table in listOf("flag_topics", "flag_category_coverage")) {
+            database.openHelper.readableDatabase.query("SELECT source FROM $table").use { cursor ->
+                while (cursor.moveToNext()) BaselineFlagSource.valueOf(cursor.getString(0))
+            }
+        }
+        assertEquals(FlagSource.LEGACY_UNKNOWN, disk.rows.single { it.cat == 23 }.source)
+        store.save("alice", FlagType.CYAN, store.merge("alice", FlagType.CYAN,
+            FlagRefreshBatch(null, emptyList(), now.plusSeconds(1), globalOnly = true)))
+        assertEquals(disk.rows, database.flagDao().getSnapshot("alice", FlagType.CYAN).rows)
+    }
+
+    @Test
+    fun `Room global observations survive failed buckets despite historical complete coverage - P2c fix2`() = runTest {
+        for (historicalSuccess in listOf(old, now)) {
+            for (catalogueAvailable in listOf(true, false)) {
+                database.flagDao().replaceSnapshot("alice", FlagType.CYAN, FlagCacheSnapshot(
+                    listOf(row(13), row(23)), coverage(listOf(13, 23), historicalSuccess),
+                ))
+                val observation = row(23).copy(topicId = 99).toFlag()
+                store.save("alice", FlagType.CYAN, store.merge("alice", FlagType.CYAN,
+                    FlagRefreshBatch(null, emptyList(), now, globalOnly = true,
+                        observations = listOf(observation))))
+                database.close()
+                open()
+                val persisted = database.flagDao().getFlags("alice", FlagType.CYAN).single { it.topicId == 99 }
+                assertEquals(FlagSource.LEGACY_UNKNOWN, persisted.source)
+                assertEquals(now, persisted.fetchedAt)
+                val failed = if (catalogueAvailable) FlagRefreshBatch(listOf(13, 23), listOf(
+                    outcome(13, FlagSource.BUCKET), outcome(13, FlagSource.STICKY),
+                    outcome(23, FlagSource.BUCKET, FlagFailureKind.DEADLINE),
+                    outcome(23, FlagSource.STICKY, FlagFailureKind.DEADLINE),
+                ), now.plusSeconds(1)) else FlagRefreshBatch(null, emptyList(), now.plusSeconds(1),
+                    cause = java.io.IOException("catalogue offline"))
+                store.save("alice", FlagType.CYAN, store.merge("alice", FlagType.CYAN, failed))
+                database.close()
+                open()
+                assertEquals(persisted, database.flagDao().getFlags("alice", FlagType.CYAN)
+                    .single { it.topicId == 99 })
+                assertFalse(requireNotNull(store.load(FlagType.CYAN, "alice")).isFresh)
+                val success = FlagRefreshBatch(listOf(13, 23), listOf(
+                    outcome(13, FlagSource.BUCKET), outcome(13, FlagSource.STICKY),
+                    outcome(23, FlagSource.BUCKET), outcome(23, FlagSource.STICKY),
+                ), now.plusSeconds(2))
+                store.save("alice", FlagType.CYAN, store.merge("alice", FlagType.CYAN, success))
+                assertTrue(database.flagDao().getFlags("alice", FlagType.CYAN).isEmpty())
+                assertEquals(FlagRefreshStatus.COMPLETE,
+                    requireNotNull(store.load(FlagType.CYAN, "alice")).result.refreshStatus)
+            }
+        }
+    }
+
+    @Test
     fun `migrated rows without coverage stay unverified and stale after reopening Room`() = runTest {
         database.flagDao().replaceSnapshot("alice", FlagType.CYAN, FlagCacheSnapshot(
             listOf(row(13).copy(source = FlagSource.LEGACY_UNKNOWN)), emptyList(),
@@ -168,6 +234,8 @@ class FlagCacheStoreTest {
         database.flagDao().deleteAll()
         assertNull(store.load(FlagType.CYAN, "bob"))
     }
+
+    private enum class BaselineFlagSource { BUCKET, STICKY, LEGACY_UNKNOWN }
 
     private fun coverage(cats: List<Int>, at: Instant = old): List<FlagCategoryCoverageEntity> = cats.flatMap { cat ->
         listOf(FlagSource.BUCKET, FlagSource.STICKY).map { source ->

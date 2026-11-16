@@ -285,4 +285,26 @@
     <string name="diagnostics_probe_refresh_active">Veuillez attendre la fin du rafraîchissement des drapeaux.</string>
     <string name="diagnostics_probe_storage_error">Impossible d’enregistrer le départ du test. Réessayez plus tard.</string>
     <string name="diagnostics_probe_failed">Le test n’a pas pu se terminer. Réessayez plus tard.</string>
+    <string name="diagnostics_flags_experimental">Actualisation expérimentale des drapeaux</string>
+    <string name="diagnostics_flags_experimental_title">Actualisation expérimentale</string>
+    <string name="diagnostics_flags_experimental_help">Pour vos essais : choisissez une stratégie. Les données non actualisées sont conservées.</string>
+    <string name="diagnostics_flags_baseline">Socle (par défaut)</string>
+    <string name="diagnostics_flags_legacy">Ancien</string>
+    <string name="diagnostics_flags_global_only">Requête unique seule</string>
+    <string name="diagnostics_flags_global_first">Requête unique d’abord, puis catégories</string>
+    <string name="diagnostics_flags_baseline_help">Catégories et épinglés, avec une limite de requêtes simultanées.</string>
+    <string name="diagnostics_flags_legacy_help">Même protection des données que le socle, sans limite de requêtes simultanées. Aucune catégorie n’est abandonnée si une autre échoue.</string>
+    <string name="diagnostics_flags_global_only_help">La requête unique ne voit ni les épinglés ni les drapeaux lus sans favori. Leur état précédent est conservé.</string>
+    <string name="diagnostics_flags_global_first_help">La requête unique affiche les premiers résultats, sans épinglés ni drapeaux lus sans favori ; les catégories complètent ensuite dans le temps restant.</string>
+    <string name="diagnostics_flags_n">N choisi : %1$d</string>
+    <string name="diagnostics_flags_effective_n">N effectif : %1$d</string>
+    <string name="diagnostics_flags_unbounded">N effectif : sans borne</string>
+    <string name="diagnostics_flags_n_ignored">N est ignoré avec la stratégie Ancien.</string>
+    <string name="diagnostics_flags_decrease">Diminuer N</string>
+    <string name="diagnostics_flags_increase">Augmenter N</string>
+    <string name="diagnostics_flags_retry">Reprise applicative (hors reprises internes du réseau)</string>
+    <string name="diagnostics_flags_apply">Appliquer</string>
+    <string name="diagnostics_flags_cancel">Annuler</string>
+    <string name="diagnostics_flags_save_failed">Enregistrement impossible. Veuillez réessayer.</string>
+    <string name="flags_global_limited">Couverture limitée : les épinglés et les drapeaux lus sans favori ne sont pas actualisés.</string>
 </resources>

@@ -10,6 +10,7 @@ import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,7 +31,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -67,6 +70,11 @@ fun DiagnosticsScreen(
     val entries by viewModel.entries.collectAsStateWithLifecycle()
     val cooldownSeconds by viewModel.cooldownSeconds.collectAsStateWithLifecycle()
     val probeState by viewModel.probeState.collectAsStateWithLifecycle()
+    val policy by viewModel.policy.collectAsStateWithLifecycle()
+    var showPolicy by remember { mutableStateOf(false) }
+    if (showPolicy) FlagsRefreshPolicyDialog(policy, viewModel.policySaveFailed,
+        onDismiss = { showPolicy = false },
+        onSave = { viewModel.savePolicy(it) { showPolicy = false } })
     val close = { viewModel.cancelProbe(); onClose() }
     BackHandler(onBack = close)
     val listState = rememberLazyListState()
@@ -130,6 +138,12 @@ fun DiagnosticsScreen(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
             NetworkProbePanel(probeState, cooldownSeconds, viewModel::startProbe, viewModel::cancelProbe)
+            TextButton(
+                onClick = { showPolicy = true },
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Text(stringResource(R.string.diagnostics_flags_experimental))
+            }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
             if (entries.isEmpty()) {

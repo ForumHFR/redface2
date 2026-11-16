@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.domain.preferences
 
+import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshPolicy
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
@@ -8,6 +9,7 @@ import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 interface UserPreferencesRepository {
     /** ED-63: source dimensions in dp, by direction × current-window width class; absent = 50/50. */
@@ -308,6 +310,12 @@ interface UserPreferencesRepository {
 
     /** Persists [observeSyncPrivateMessagesWriteEnabled]. Default `false` until the first call. */
     suspend fun setSyncPrivateMessagesWriteEnabled(enabled: Boolean)
+
+    /** Tester-only policy; implementations without experimental support retain the baseline. */
+    fun observeFlagsRefreshPolicy(): Flow<FlagsRefreshPolicy> = flowOf(FlagsRefreshPolicy())
+
+    /** Persist the entire policy atomically, so no observer sees a partly applied choice. */
+    suspend fun setFlagsRefreshPolicy(policy: FlagsRefreshPolicy) = Unit
 
     /**
      * Auto-refresh of the Drapeaux lists (#378): when `true`, landing on the flags screen

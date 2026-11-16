@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.feature.flags
 
+import fr.forumhfr.redface2.core.domain.flags.FlagCoverage
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
@@ -58,11 +60,11 @@ class SuperFavoriteListMapper @Inject constructor(
             cacheUpdates,
         ) { favorites, layout, _ -> favorites to layout }
             .mapLatest { (favorites, layout) ->
-                ResolvedSuperFavorites(resolveSuperFavoriteFlags(favorites), layout)
+                ResolvedSuperFavorites(resolveSuperFavoriteFlags(favorites), layout, flagRepository.cachedCoverage())
             }
-            .flatMapLatest { (flags, layout) ->
+            .flatMapLatest { (flags, layout, coverage) ->
                 forumRepository.subcategoryNamesForFlags(flags).map { names ->
-                    ResolvedSuperFavoriteRows(flags, layout, names)
+                    ResolvedSuperFavoriteRows(flags, layout, names, coverage)
                 }
             }
 
@@ -72,6 +74,13 @@ class SuperFavoriteListMapper @Inject constructor(
                     rows = rows,
                     categoriesResult = categoriesResult,
                 ),
+                coverage = rows.coverage,
+                refreshStatus = if (rows.coverage.categories.isNotEmpty() && !rows.coverage.isComplete) {
+                    FlagRefreshStatus.PARTIAL
+                } else {
+                    FlagRefreshStatus.COMPLETE
+                },
+                cachedAt = rows.coverage.oldestSuccessAt,
             )
         }.distinctUntilChanged()
     }
@@ -160,12 +169,14 @@ class SuperFavoriteListMapper @Inject constructor(
     private data class ResolvedSuperFavorites(
         val flags: List<Flag>,
         val layout: SuperFavoriteLayout,
+        val coverage: FlagCoverage,
     )
 
     private data class ResolvedSuperFavoriteRows(
         val flags: List<Flag>,
         val layout: SuperFavoriteLayout,
         val subcategoryNames: Map<SubcategoryKey, String>,
+        val coverage: FlagCoverage,
     )
 
 }

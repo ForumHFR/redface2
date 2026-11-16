@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.domain.diagnostics
 
+import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshPolicy
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshCategory
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
 import fr.forumhfr.redface2.core.model.Category
@@ -32,6 +33,7 @@ class FlagRefreshDiagnostics @Inject constructor(
     private val activity: HfrRefreshActivity = HfrRefreshActivity(),
 ) {
     private val sequence = AtomicLong()
+    @Volatile var policy = FlagsRefreshPolicy()
 
     /** Holds admission through the actual detached transport, independently of UI trace lifetime. */
     suspend fun <T> withRefresh(block: suspend () -> T): T = activity.withRefresh(block)
@@ -50,7 +52,7 @@ class FlagRefreshDiagnostics @Inject constructor(
         val network = runCatching { networkContext.snapshot() }.getOrElse { NetworkDiagnosticsContext() }
         val restrictions = runCatching { networkContext.restrictions() }
             .getOrElse { NetworkDiagnosticsRestrictions() }
-        val contextLine = "${restrictions.line()} ${network.line()} ${timing.line()}"
+        val contextLine = "${policy.diagnosticLine()} ${restrictions.line()} ${network.line()} ${timing.line()}"
         val trace = FlagRefreshTrace(sequence.incrementAndGet(), types, log, startedNanos, contextLine, environment)
         log.record(DiagnosticsLog.Level.INFO, TAG,
             "refresh=${trace.id} trigger=${trigger.label} types=${types.joinToString { it.name }} " +
@@ -66,7 +68,7 @@ class FlagRefreshDiagnostics @Inject constructor(
     ) {
         log.record(DiagnosticsLog.Level.INFO, TAG,
             "trigger=${trigger.label} types=${types.joinToString { it.name }} " +
-                "ignored=${if (throttled) "throttle" else "reentrance"} " +
+                "${policy.diagnosticLine()} ignored=${if (throttled) "throttle" else "reentrance"} " +
                 "deferredTypes=${deferredTypes.joinToString { it.name }}")
     }
 
@@ -160,7 +162,8 @@ class FlagRefreshTrace internal constructor(
     }
 
     private fun fetchLine(): String =
-        "fetches=${fetches.size} newFetches=${fetches.size - joined} joined=$joined " +
+        "fetchPolicies=[${fetches.joinToString { it.policy.diagnosticLine() }}] " +
+            "fetches=${fetches.size} newFetches=${fetches.size - joined} joined=$joined " +
             "pendingFetches=${fetches.count { !it.isFinished() }} " +
             "fetchRefreshIds=${fetches.map { it.refreshId }.distinct()} " +
             "fetchFailureClasses=${fetches.mapNotNull { it.failureClass }.distinct()} " +
@@ -236,6 +239,7 @@ class FlagFetchTrace(val refreshId: Long, val type: FlagType) : AbstractCoroutin
     private val phases = mutableMapOf<FlagRefreshPhase, Long>()
     private val phaseFailures = mutableMapOf<FlagRefreshPhase, Int>()
     private var finished = false
+    @Volatile var policy = FlagsRefreshPolicy()
     @Volatile var readLimit: Int = 0
     @Volatile var readCounterOwner: Any? = null
     @Volatile var readCounters: () -> Map<String, Long> = { emptyMap() }

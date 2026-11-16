@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.data.flags
 
+import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshStrategy
+import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshPolicy
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.database.dao.FlagCacheSnapshot
 import fr.forumhfr.redface2.core.database.dao.FlagDao
@@ -20,6 +22,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallOutcome
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallSummary
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrEndpoint
+import fr.forumhfr.redface2.core.domain.flags.FlagLookup
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshCategory
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
@@ -98,6 +101,295 @@ class DefaultFlagRepositoryTest {
     )
 
     private val capturedParticipatedFixture: String = fixture("rest_cat23_participated.json")
+
+    @Test
+    fun `cold targeted lookup leaves other catalogue categories unverified in memory and Room - P2c fix`() = runTest {
+        val (api, forum) = wireDeps {
+            HfrRestFlagBucket.entries.forEach { stubFlagsCall(23, it, EMPTY_PAGE) }
+        }
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, forum, flagDao = dao)
+        assertEquals(FlagLookup.Absent, repo.findFlag(23, 999))
+        for (type in FlagType.entries) {
+            val memory = repo.observe(type).first() as FlagsResult.Success
+            val disk = requireNotNull(FlagCacheStore(dao, Clock.systemUTC(), UnconfinedTestDispatcher(testScheduler))
+                .load(type, "xat"))
+            assertEquals(FlagRefreshStatus.PARTIAL, memory.refreshStatus)
+            assertTrue(memory.coverage.covers(23))
+            assertFalse(memory.coverage.covers(13))
+            assertTrue(memory.coverage.categories.any { it.cat == 13 && it.lastSuccessAt == null })
+            assertEquals(memory.coverage, disk.result.coverage)
+            assertFalse(disk.isFresh)
+        }
+        coVerify(exactly = 0) { api.getCategoryFlagTopics(13, any(), page = any(),
+            resultsPerPage = any(), useAuth = true) }
+    }
+
+    @Test
+    fun `successful global empty is a no-op on cold and warm caches without any Room write - P2c fix`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        coEvery { api.getGlobalFlagTopics(any()) } returns EMPTY_PAGE
+        val policy = MutableStateFlow(FlagsRefreshPolicy(strategy = FlagsRefreshStrategy.GLOBAL_ONLY))
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, forum, flagDao = dao, policy = policy)
+        assertTrue(repo.refresh(FlagType.CYAN) is FlagsResult.Failure)
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(FlagsResult.Loading, awaitItem())
+            assertTrue(awaitItem() is FlagsResult.Failure)
+            cancelAndIgnoreRemainingEvents()
+        }
+        coVerify(exactly = 0) { dao.replaceSnapshot(any(), any(), any()) }
+        policy.value = FlagsRefreshPolicy()
+        val baseline = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        policy.value = policy.value.copy(strategy = FlagsRefreshStrategy.GLOBAL_ONLY)
+        assertEquals(baseline, repo.refresh(FlagType.CYAN))
+        coVerify(exactly = 1) { dao.replaceSnapshot(any(), any(), any()) }
+    }
+
+    @Test
+    fun `cold empty global before category failure stays visible on reobservation - P2c fix2`() = runTest {
+        val (api, forum) = wireDeps {}
+        coEvery { api.getGlobalFlagTopics(any()) } returns EMPTY_PAGE
+        coEvery { api.getCategoryFlagTopics(any(), any(), page = any(),
+            resultsPerPage = any(), useAuth = true) } throws IOException("buckets offline")
+        val dao = stubFlagDao()
+        val policy = MutableStateFlow(FlagsRefreshPolicy(strategy = FlagsRefreshStrategy.GLOBAL_FIRST))
+        val repo = buildRepository(api, forum, flagDao = dao, policy = policy,
+            testDispatcher = UnconfinedTestDispatcher(testScheduler))
+        assertTrue(repo.refresh(FlagType.CYAN) is FlagsResult.Failure)
+        repeat(2) {
+            repo.observe(FlagType.CYAN).test {
+                assertEquals(FlagsResult.Loading, awaitItem())
+                assertTrue(awaitItem() is FlagsResult.Failure)
+                runCurrent()
+                expectNoEvents()
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+        coVerify(exactly = 0) { dao.replaceSnapshot(any(), any(), any()) }
+        assertNull(FlagCacheStore(dao, Clock.systemUTC(), UnconfinedTestDispatcher(testScheduler))
+            .load(FlagType.CYAN, "xat"))
+    }
+
+    @Test
+    fun `targeted lookup keeps global marker until an inventory refresh - P2c fix2`() = runTest {
+        val observed = decodeGlobalFlags(json, fixture("rest_global_participated.json"), FlagType.CYAN)
+        val categories = sampleCategories + observed.map { Category(it.cat, "Observed category", false, 0) }
+        val (api, forum) = wireDeps {
+            categories.forEach { cat ->
+                HfrRestFlagBucket.entries.forEach { stubFlagsCall(cat.id, it, EMPTY_PAGE) }
+            }
+        }
+        coEvery { forum.getCategories(any()) } returns ForumResult.Success(categories)
+        coEvery { api.getGlobalFlagTopics(any()) } returns fixture("rest_global_participated.json")
+        val dao = stubFlagDao()
+        val at = Instant.parse("2026-05-03T11:00:00Z")
+        val coverage = categories.flatMap { cat ->
+            listOf(FlagSource.BUCKET, FlagSource.STICKY).map { source ->
+                FlagCategoryCoverageEntity("xat", FlagType.CYAN, cat.id, source, at, at, null)
+            }
+        }
+        dao.replaceSnapshot("xat", FlagType.CYAN, FlagCacheSnapshot(emptyList(), coverage))
+        val policy = MutableStateFlow(FlagsRefreshPolicy(strategy = FlagsRefreshStrategy.GLOBAL_ONLY))
+        val repo = buildRepository(api, forum, flagDao = dao, policy = policy)
+        repo.refresh(FlagType.CYAN)
+        assertEquals(FlagLookup.Absent, repo.findFlag(23, 999))
+        val limited = repo.observe(FlagType.CYAN).first() as FlagsResult.Success
+        assertTrue(limited.coverage.isGlobalObservation)
+        assertEquals(FlagRefreshStatus.PARTIAL, limited.refreshStatus)
+        assertEquals(observed.toSet(), limited.flags.toSet())
+        val disk = requireNotNull(FlagCacheStore(dao, Clock.systemUTC(),
+            UnconfinedTestDispatcher(testScheduler)).load(FlagType.CYAN, "xat"))
+        assertTrue(disk.result.coverage.isGlobalObservation)
+        assertFalse(disk.isFresh)
+        policy.value = FlagsRefreshPolicy()
+        val complete = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertFalse(complete.coverage.isGlobalObservation)
+        assertEquals(FlagRefreshStatus.COMPLETE, complete.refreshStatus)
+        assertTrue(complete.flags.isEmpty())
+    }
+
+    @Test
+    fun `baseline catalogue failure clears global provenance - P2c fix`() = runTest {
+        val (api, forum) = wireDeps {}
+        coEvery { api.getGlobalFlagTopics(any()) } returns fixture("rest_global_participated.json")
+        val policy = MutableStateFlow(FlagsRefreshPolicy(strategy = FlagsRefreshStrategy.GLOBAL_ONLY))
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, forum, flagDao = dao, policy = policy)
+        val global = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertTrue(global.coverage.isGlobalObservation)
+        policy.value = FlagsRefreshPolicy()
+        coEvery { forum.getCategories(any()) } returns ForumResult.Failure(IOException("catalogue offline"))
+        val failed = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertEquals(global.flags, failed.flags)
+        assertFalse(failed.coverage.isGlobalObservation)
+        assertEquals(FlagRefreshStatus.FAILED, failed.refreshStatus)
+        assertTrue(failed.coverage.categories.all { it.failure == FlagFailureKind.NETWORK })
+        assertEquals(failed.coverage, requireNotNull(FlagCacheStore(dao, Clock.systemUTC(),
+            UnconfinedTestDispatcher(testScheduler)).load(FlagType.CYAN, "xat")).result.coverage)
+    }
+
+    @Test
+    fun `lookup cannot certify absence after a mutation invalidates an already resolved type - P2c`() = runTest {
+        val (api, forum) = wireDeps {
+            HfrRestFlagBucket.entries.forEach { stubFlagsCall(23, it, EMPTY_PAGE) }
+        }
+        val release = CompletableDeferred<Unit>()
+        coEvery { api.getCategoryFlagTopics(23, HfrRestFlagBucket.READ, page = any(),
+            resultsPerPage = any(), useAuth = true) } coAnswers {
+            release.await()
+            EMPTY_PAGE
+        }
+        val hfr = mockk<HfrClient>()
+        coEvery { hfr.addFlag(any()) } returns ADD_SUCCESS_HTML
+        val repo = buildRepository(api, forum, hfrClient = hfr,
+            testDispatcher = UnconfinedTestDispatcher(testScheduler))
+        val lookup = async { repo.findFlag(23, 999) }
+        runCurrent()
+        coVerify(exactly = 1) { api.getCategoryFlagTopics(23, HfrRestFlagBucket.FAVORITES,
+            page = any(), resultsPerPage = any(), useAuth = true) }
+        assertTrue(repo.addFlag(sampleFlagAddContext()).isSuccess)
+        release.complete(Unit)
+        assertEquals(FlagLookup.Unavailable, lookup.await())
+    }
+
+    @Test
+    fun `every diagnostic line carries policy for pulls initial observations and joins - P2c`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+        }
+        val finish = CompletableDeferred<Unit>()
+        coEvery { api.getGlobalFlagTopics(any()) } coAnswers {
+            finish.await()
+            fixture("rest_global_participated.json")
+        }
+        val log = DiagnosticsLog()
+        val policy = MutableStateFlow(FlagsRefreshPolicy(
+            strategy = FlagsRefreshStrategy.GLOBAL_ONLY, concurrency = 2))
+        val repo = buildRepository(api, forum, diagnostics = log, policy = policy,
+            testDispatcher = UnconfinedTestDispatcher(testScheduler))
+        val first = async { repo.observe(FlagType.CYAN).first { it is FlagsResult.Success } }
+        val joined = async { repo.observe(FlagType.CYAN).first { it is FlagsResult.Success } }
+        runCurrent()
+        finish.complete(Unit)
+        first.await()
+        joined.await()
+        repo.refresh(FlagType.CYAN)
+        val lines = log.entries.value.filter { it.tag == FlagRefreshDiagnostics.TAG }.map { it.message }
+        assertTrue(lines.any { "initial-observe" in it })
+        assertTrue(lines.any { "joined=1" in it })
+        assertTrue(lines.all { "strategy=global-only" in it && "N=2" in it })
+    }
+
+    @Test
+    fun `global malformed preserves old positions with a durable visible failure - P2c`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val policy = MutableStateFlow(FlagsRefreshPolicy())
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, forum, flagDao = dao, policy = policy)
+        val baseline = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        policy.value = policy.value.copy(strategy = FlagsRefreshStrategy.GLOBAL_ONLY)
+        for (body in listOf("{\"resource\":{}}")) {
+            coEvery { api.getGlobalFlagTopics(HfrRestFlagBucket.PARTICIPATED) } returns body
+            val result = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+            assertEquals(baseline.flags, result.flags)
+            assertTrue(result.coverage.isGlobalObservation)
+            assertFalse(result.coverage.isComplete)
+            assertEquals(FlagRefreshStatus.FAILED, result.refreshStatus)
+            val disk = FlagCacheStore(dao, Clock.systemUTC(), UnconfinedTestDispatcher(testScheduler))
+                .load(FlagType.CYAN, "xat")!!
+            assertTrue(disk.result.coverage.isGlobalObservation)
+            assertFalse(disk.isFresh)
+            assertEquals(baseline.flags, disk.result.flags)
+        }
+        coVerify(exactly = 1) { api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
+            page = any(), resultsPerPage = any(), useAuth = true) }
+    }
+
+    @Test
+    fun `global failure still runs categories and global success spends the same deadline - P2c`() = runTest {
+        for (fail in listOf(true, false)) {
+            val (api, forum) = wireDeps {
+                stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+                stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+            }
+            val monotonic = mockk<FlagReadClock>()
+            every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+            val start = testScheduler.currentTime
+            coEvery { api.getGlobalFlagTopics(any()) } coAnswers {
+                kotlinx.coroutines.delay(10_000)
+                if (fail) throw IOException("global unavailable") else fixture("rest_global_participated.json")
+            }
+            coEvery { api.getTopicList(any(), null, 1, any(), true) } coAnswers { awaitCancellation() }
+            val policy = MutableStateFlow(FlagsRefreshPolicy(
+                strategy = FlagsRefreshStrategy.GLOBAL_FIRST))
+            val repo = buildRepository(api, forum, policy = policy, flagReadClock = monotonic,
+                testDispatcher = UnconfinedTestDispatcher(testScheduler))
+            val result = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+            assertEquals(12_000L, testScheduler.currentTime - start)
+            assertTrue(result.flags.any { it.topicId == 35395 })
+            coVerify(exactly = 1) { api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true) }
+        }
+    }
+
+    @Test
+    fun `policy change cancels drains and replaces an in-flight global result - P2c`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val close = CompletableDeferred<Unit>()
+        var cancelled = false
+        coEvery { api.getGlobalFlagTopics(any()) } coAnswers {
+            try { awaitCancellation() } finally {
+                cancelled = true
+                withContext(NonCancellable) { close.await() }
+            }
+        }
+        val policy = MutableStateFlow(FlagsRefreshPolicy(
+            strategy = FlagsRefreshStrategy.GLOBAL_ONLY))
+        val repo = buildRepository(api, forum, policy = policy,
+            testDispatcher = UnconfinedTestDispatcher(testScheduler))
+        val refreshing = async { repo.refresh(FlagType.CYAN) }
+        runCurrent()
+        policy.value = FlagsRefreshPolicy(concurrency = 1)
+        runCurrent()
+        assertTrue(cancelled)
+        coVerify(exactly = 0) { api.getCategoryFlagTopics(any(), any(), page = any(),
+            resultsPerPage = any(), useAuth = true) }
+        close.complete(Unit)
+        val result = refreshing.await() as FlagsResult.Success
+        assertEquals(35395, result.flags.single().topicId)
+        assertFalse(result.coverage.isGlobalObservation)
+    }
+
+    @Test
+    fun `hot global miss resolves only target category and distinguishes unavailable - P2c`() = runTest {
+        val (api, forum) = wireDeps {
+            HfrRestFlagBucket.entries.forEach { bucket -> stubFlagsCall(23, bucket, EMPTY_PAGE) }
+        }
+        coEvery { api.getGlobalFlagTopics(any()) } returns EMPTY_PAGE
+        val policy = MutableStateFlow(FlagsRefreshPolicy(
+            strategy = FlagsRefreshStrategy.GLOBAL_ONLY))
+        val repo = buildRepository(api, forum, policy = policy)
+        repo.refresh(FlagType.CYAN)
+        assertEquals(FlagLookup.Absent, repo.findFlag(23, 999))
+        coVerify(exactly = 0) { api.getCategoryFlagTopics(13, any(), page = any(),
+            resultsPerPage = any(), useAuth = true) }
+        repo.clearSessionCache()
+        repo.refresh(FlagType.CYAN)
+        coEvery { api.getCategoryFlagTopics(23, HfrRestFlagBucket.READ, page = any(),
+            resultsPerPage = any(), useAuth = true) } throws IOException("offline")
+        assertEquals(FlagLookup.Unavailable, repo.findFlag(23, 999))
+    }
 
     @Test
     fun `stale or incomplete memory success never refetches on resubscription - 984`() = runTest {
@@ -218,7 +510,7 @@ class DefaultFlagRepositoryTest {
         coEvery { api.getTopicList(any(), null, 1, any(), true) } throws IOException("sticky offline")
         val repo = buildRepository(api, stubForumRepository(sampleCategories))
         FlagType.entries.forEach { repo.refresh(it) }
-        repeat(2) { assertNull(repo.findFlag(cat = 23, topicId = 999)) }
+        repeat(2) { assertEquals(FlagLookup.Unavailable, repo.findFlag(cat = 23, topicId = 999)) }
         coVerify(exactly = 6) {
             api.getCategoryFlagTopics(any(), any(), page = any(), resultsPerPage = any(), useAuth = true)
         }
@@ -427,7 +719,7 @@ class DefaultFlagRepositoryTest {
             api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
                 page = any(), resultsPerPage = any(), useAuth = true)
         } returns capturedParticipatedFixture
-        assertEquals(35395, repo.findFlag(23, 35395)?.topicId)
+        assertEquals(35395, (repo.findFlag(23, 35395) as FlagLookup.Found).flag.topicId)
         coVerify(exactly = 2) {
             api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
                 page = any(), resultsPerPage = any(), useAuth = true)
@@ -3048,8 +3340,8 @@ class DefaultFlagRepositoryTest {
         repo.observe(FlagType.CYAN).first { it is FlagsResult.Success }
 
         val found = repo.findFlag(cat = 23, topicId = 35395)
-        assertEquals(35395, found?.topicId)
-        assertEquals(FlagType.CYAN, found?.type)
+        assertEquals(35395, (found as FlagLookup.Found).flag.topicId)
+        assertEquals(FlagType.CYAN, (found as FlagLookup.Found).flag.type)
 
         // A memory hit fires NO fallback fan-out: the RED / FAVORITE buckets were never queried.
         coVerify(exactly = 0) {
@@ -3116,8 +3408,8 @@ class DefaultFlagRepositoryTest {
         repo.observe(FlagType.CYAN).first { it is FlagsResult.Success } // warms CYAN only
 
         val found = repo.findFlag(cat = 23, topicId = 35395)
-        assertEquals(35395, found?.topicId)
-        assertEquals(FlagType.FAVORITE, found?.type)
+        assertEquals(35395, (found as FlagLookup.Found).flag.topicId)
+        assertEquals(FlagType.FAVORITE, (found as FlagLookup.Found).flag.type)
 
         // The warm CYAN bucket was authoritative for its own type : never implicitly re-fetched.
         coVerify(exactly = 1) {
@@ -3149,7 +3441,7 @@ class DefaultFlagRepositoryTest {
         // Every bucket warm + miss → null with ZERO additional network (one observe fetch per
         // bucket per cat, nothing more — the Drapeaux view owns refresh policy).
         val found = repo.findFlag(cat = 23, topicId = 999_999)
-        assertNull(found)
+        assertEquals(FlagLookup.Absent, found)
         HfrRestFlagBucket.entries.forEach { bucket ->
             coVerify(exactly = 1) {
                 apiClient.getCategoryFlagTopics(
@@ -3174,8 +3466,8 @@ class DefaultFlagRepositoryTest {
         val repo = buildRepository(apiClient, forumRepository)
 
         val found = repo.findFlag(cat = 23, topicId = 35395)
-        assertEquals(35395, found?.topicId)
-        assertEquals(FlagType.FAVORITE, found?.type)
+        assertEquals(35395, (found as FlagLookup.Found).flag.topicId)
+        assertEquals(FlagType.FAVORITE, (found as FlagLookup.Found).flag.type)
 
         // The fan-out actually queried the FAVORITES bucket that held the match.
         coVerify {
@@ -3201,8 +3493,8 @@ class DefaultFlagRepositoryTest {
         repo.observe(FlagType.FAVORITE).first { it is FlagsResult.Success }
 
         val found = repo.findFlag(cat = 23, topicId = 35395)
-        assertEquals(35395, found?.topicId)
-        assertEquals(FlagType.CYAN, found?.type)
+        assertEquals(35395, (found as FlagLookup.Found).flag.topicId)
+        assertEquals(FlagType.CYAN, (found as FlagLookup.Found).flag.type)
     }
 
     @Test
@@ -3218,7 +3510,7 @@ class DefaultFlagRepositoryTest {
 
         // Cold cache + anonymous → short-circuit to null before any REST round-trip.
         val found = repo.findFlag(cat = 23, topicId = 35395)
-        assertNull(found)
+        assertEquals(FlagLookup.Absent, found)
         coVerify(exactly = 0) {
             apiClient.getCategoryFlagTopics(
                 cat = any(), bucket = any(), page = any(), resultsPerPage = any(), useAuth = any(),
@@ -3675,6 +3967,8 @@ class DefaultFlagRepositoryTest {
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
         flagReadClock: FlagReadClock = FlagReadClock(),
         testDispatcher: CoroutineDispatcher = UnconfinedTestDispatcher(),
+        policy: kotlinx.coroutines.flow.StateFlow<FlagsRefreshPolicy> =
+            kotlinx.coroutines.flow.MutableStateFlow(FlagsRefreshPolicy()),
     ): DefaultFlagRepository = DefaultFlagRepository(
         apiClient = apiClient,
         hfrClient = hfrClient,
@@ -3693,6 +3987,10 @@ class DefaultFlagRepositoryTest {
         diagnostics = diagnostics,
         refreshDiagnostics = FlagRefreshDiagnostics(diagnostics),
         flagReadClock = flagReadClock,
+        preferences = mockk<fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository> {
+            every { observeFlagsRefreshPolicy() } returns policy
+        },
+        readLimiter = fr.forumhfr.redface2.core.network.FlagReadLimiter(),
     )
 
     private fun stubAuthRepository(pseudo: String = "XaT"): AuthRepository {
@@ -3714,7 +4012,16 @@ class DefaultFlagRepositoryTest {
             FlagCacheSnapshot(dao.getFlags(firstArg(), secondArg()), dao.getCoverage(firstArg(), secondArg()))
         }
         coEvery { dao.replaceSnapshot(any(), any(), any()) } coAnswers {
-            snapshots[firstArg<String>() to secondArg<FlagType>()] = thirdArg()
+            val snapshot = thirdArg<FlagCacheSnapshot>()
+            // Match Room's rollback-compatible source encoding, exercised by FlagCacheStoreTest.
+            snapshots[firstArg<String>() to secondArg<FlagType>()] = snapshot.copy(
+                rows = snapshot.rows.map {
+                    it.copy(source = if (it.source == FlagSource.GLOBAL) FlagSource.LEGACY_UNKNOWN else it.source)
+                },
+                coverage = snapshot.coverage.map {
+                    it.copy(source = if (it.source == FlagSource.GLOBAL) FlagSource.LEGACY_UNKNOWN else it.source)
+                },
+            )
         }
         coEvery { dao.deleteForType(any(), any()) } coAnswers {
             snapshots.remove(firstArg<String>() to secondArg<FlagType>())
