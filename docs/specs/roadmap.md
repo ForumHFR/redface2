@@ -32,7 +32,7 @@ Pour la liste des capabilities et des non-goals, voir le [scope fonctionnel]({{ 
 | **1 — Core** | Lecture du forum (drapeaux, topics, forum, deep links) | XL | Phase 0 | ✅ Livrée (AAB `0.1.0-phase1.7` / `app-v38` / specs v0.8.4) |
 | **2 — Écriture** | Post / edit / quote / create topic / recherche / proxy alpha | L | Phase 1 | ✅ Livrée |
 | **3 — Messages** | MPs classiques + MultiMPs (lecture + écriture + DT + sync de position) | M | Phase 2 | ✅ Livrée (clôture #598 ; sync MPStorage bidirectionnelle complète + cache Room reportés → #6, Phase 4) |
-| **4 — Extensions + refonte UI pré-1.0** | Bookmarks, Qualitay, Redflag + refonte Drapeaux (#603) / Topic (#604) + hygiène repo (#605) ; Blacklist déjà livrée | L | Phase 3 + **hfr-redflag Worker** | ◐ Refonte UI livrée (bêtas 0.18.0 → 0.70.0) ; extensions communautaires non commencées hors Blacklist. Milestones de phase fermés en 06/2026 : le suivi se fait par **milestones de vue** |
+| **4 — Extensions + refonte UI pré-1.0** | Bookmarks, Qualitay, Redflag + refonte Drapeaux (#603) / Topic (#604) / Éditeur (#1417) + hygiène repo (#605) ; Blacklist déjà livrée | L | Phase 3 + **hfr-redflag Worker** | ◐ Refonte UI livrée (bêtas 0.18.0 → 0.70.0) ; extensions communautaires non commencées hors Blacklist. Milestones de phase fermés en 06/2026 : le suivi se fait par **milestones de vue** |
 | **Polish & UX** | Animations, offline, thème dynamique, Play Store, raffinements UX | — | continu | ♾️ Backlog continu (pas une étape finale) |
 
 **Taille** : S = petit sous-chantier, M = quelques composants, L = plusieurs features indépendantes, XL = écran majeur + parseurs + cache (ex. `PostRenderer` natif).
@@ -212,6 +212,7 @@ Le PostRenderer sera développé de manière incrémentale : texte brut d'abord,
 Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
 - [x] **Refonte de la vue Drapeaux** — #603 (livrée, bêta 0.18.0 — [ADR-017]({{ site.baseurl }}/adr/017-refonte-vue-drapeaux))
 - [x] **Refonte de la vue Topic** — #604 (livrée, bêta 0.37.0 : cinq vagues, moteur de pagination in-VM #895, loupe #182, passe images #876 ; reliquats en Vue · Topic 2)
+- [x] **Refonte de la vue Éditeur** — [#1417](https://github.com/ForumHFR/redface2/issues/1417) (livrée, bêta 0.70.0 : app bar et barre d'action en bas, panneau d'en-tête, aperçu à côté du texte, feuilles Options et Formats, brouillons sous ↺, raccourci de la barre d'action ; spec et ADR-020 publiées sur [forumhfr.github.io/artifacts/editeur-spec](https://forumhfr.github.io/artifacts/editeur-spec/) ; reliquats en Vue · Éditeur 3)
 - [x] **Couleurs configurables** — #595/#883 : sous-page Réglages → Affichage → Couleurs, 8 presets
   d'accent + RGB custom `#RRGGBB`, tons de fond clair/sombre persistés, couleurs du système
   Android 12+ et aperçu live recordable par Roborazzi.
@@ -258,7 +259,7 @@ Mandat de refonte des écrans chauds avant la 1.0 (post HFR XaTriX 2788560) :
 
 ## Participation
 
-Les phases ont été trackées par des milestones GitHub jusqu'en juin 2026 ; depuis, le pilotage courant se fait par **milestones de vue** (*Vue · Topic 2*, *Vue · Éditeur 2*, *Vue · Drapeaux 2*, *Vue · MP 1*, *Vue · Réglages 1*, *Vue · Compte HFR 1*, *Infra & dette*, *Méta / long terme*) dans les [issues GitHub](https://github.com/ForumHFR/redface2/issues). Les contributions sont les bienvenues.
+Les phases ont été trackées par des milestones GitHub jusqu'en juin 2026 ; depuis, le pilotage courant se fait par **milestones de vue** (*Vue · Topic 2*, *Vue · Éditeur 3*, *Vue · Drapeaux 2*, *Vue · Forum 1*, *Vue · MP 1*, *Vue · Réglages 1*, *Vue · Compte HFR 1*, *Infra & dette*, *Méta / long terme*) dans les [issues GitHub](https://github.com/ForumHFR/redface2/issues). Les contributions sont les bienvenues.
 
 Pour contribuer :
 1. Choisir une issue non assignée
