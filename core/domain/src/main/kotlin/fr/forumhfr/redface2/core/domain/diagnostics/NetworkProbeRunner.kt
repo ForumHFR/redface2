@@ -16,6 +16,7 @@ enum class NetworkProbeOutcome { OK, HTTP_ERROR, NETWORK_ERROR, CANCELLED, DEADL
 
 /**
  * TCP/TLS describe the acquired route on success, observed failed phases otherwise.
+ * TCP includes HTTP proxy CONNECT negotiation before TLS (exported as tcpScope).
  * Headers and first body byte are offsets from call start, not an exact HTTP TTFB.
  */
 @Suppress("LongParameterList")
@@ -33,7 +34,7 @@ data class NetworkProbeRequestResult(
     fun line(): String = "tcpMs=${tcpMs ?: "-"} tlsMs=${tlsMs ?: "-"} " +
         "headersReceivedMs=${headersReceivedMs ?: "-"} firstBodyByteMs=${firstBodyByteMs ?: "-"} " +
         "totalMs=$totalMs outcome=${outcome.name.lowercase()} errno=${errno?.label ?: "-"} " +
-        "connectAttempts=$connectAttempts status=${status ?: "-"}"
+        "connectAttempts=$connectAttempts status=${status ?: "-"} tcpScope=tcp_and_proxy_connect"
 }
 
 data class NetworkProbeWave(

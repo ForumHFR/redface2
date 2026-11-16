@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** Shared by all HFR client factories, while image calls bypass it entirely. */
+/** Shared by HFR client factories; images contribute only to probe interference. */
 @Singleton
 class HfrNetworkDiagnostics internal constructor(
     private val log: DiagnosticsLog,
@@ -32,6 +32,9 @@ class HfrNetworkDiagnostics internal constructor(
     private var windowDetails = 0
 
     fun nextId(): Long = sequence.incrementAndGet()
+
+    internal fun imageStarted() { probeTraffic.started() }
+    internal fun imageFinished() { probeTraffic.finished() }
 
     @Synchronized
     fun started(id: Long): Int {

@@ -30,6 +30,8 @@ class HfrEventListenerFactory(
 ) : EventListener.Factory {
     fun withRole(role: HfrClientRole): HfrEventListenerFactory = HfrEventListenerFactory(diagnostics, role, nanoTime)
 
+    fun forImages(): EventListener.Factory = EventListener.Factory { HfrImageTrafficListener(diagnostics) }
+
     override fun create(call: Call): EventListener {
         val endpoint = classifyHfrEndpoint(call.request().url) ?: return EventListener.NONE
         return HfrTimingListener(diagnostics, role, endpoint, call.request().tag(HfrCallTag::class.java), nanoTime)

@@ -93,6 +93,11 @@ object NetworkModule {
     @ImageClient
     fun provideImageClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
         .eventListener(EventListener.NONE)
+        .apply {
+            (baseClient.eventListenerFactory as? HfrEventListenerFactory)?.let {
+                eventListenerFactory(it.forImages())
+            }
+        }
         .cookieJar(CookieJar.NO_COOKIES)
         .followRedirects(true)
         .followSslRedirects(true)

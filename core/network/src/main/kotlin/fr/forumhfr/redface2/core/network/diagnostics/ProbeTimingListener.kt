@@ -57,6 +57,7 @@ internal class ProbeTimingListener(private val nanoTime: () -> Long = System::na
     override fun connectEnd(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy, protocol: Protocol?) {
         val start = attempts.remove(inetSocketAddress to proxy) ?: return
         val handshake = handshakes.removeFirstOrNull()
+        // OkHttp's secureConnectStart follows proxy CONNECT; exported tcpScope names this boundary.
         val tcp = elapsed(start, handshake?.first ?: nanoTime())
         val tls = handshake?.let { elapsed(it.first, it.second) }
         connected[inetSocketAddress to proxy] = tcp to tls

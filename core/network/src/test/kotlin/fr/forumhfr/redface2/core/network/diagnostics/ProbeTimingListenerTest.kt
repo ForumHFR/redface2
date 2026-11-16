@@ -17,6 +17,7 @@ import okhttp3.Response
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ProbeTimingListenerTest {
@@ -48,6 +49,7 @@ class ProbeTimingListenerTest {
         assertEquals(210L, result.totalMs)
         assertEquals(1, result.connectAttempts)
         assertFalse(result.line().contains("TTFB"))
+        assertTrue(result.line().contains("tcpScope=tcp_and_proxy_connect"))
     }
 
     @Test
