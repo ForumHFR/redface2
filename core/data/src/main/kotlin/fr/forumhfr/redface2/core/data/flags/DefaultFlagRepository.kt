@@ -1169,7 +1169,8 @@ class DefaultFlagRepository @Inject constructor(
                     batch.cause ?: IllegalStateException("Flags refresh produced no available snapshot"),
                 )
                 val result = snapshot.toResult().let { result ->
-                    result.copy(issue = result.issue?.copy(stickyCategories = result.issue.stickyCategories.map {
+                    val issue = result.issue
+                    result.copy(issue = issue?.copy(stickyCategories = issue.stickyCategories.map {
                         it.copy(name = batch.categoryNames[it.id])
                     }))
                 }
