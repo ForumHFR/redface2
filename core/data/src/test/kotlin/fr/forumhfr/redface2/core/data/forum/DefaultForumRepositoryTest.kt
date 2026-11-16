@@ -49,6 +49,24 @@ class DefaultForumRepositoryTest {
     }
 
     @Test
+    fun `empty catalogue is not cached and the next request can retry - 984`() = runTest {
+        val api = mockk<HfrApiClient>()
+        val valid = fixture("rest_categories.json")
+        val envelope = json.decodeFromString<RestListEnvelope<RestCategory>>(valid)
+        val empty = json.encodeToString(envelope.copy(
+            resource = envelope.resource.copy(resources = emptyList(), resultsCount = 0),
+        ))
+        coEvery { api.getCategories(any()) } returnsMany listOf(empty, valid)
+        val repo = repository(api)
+        val first = repo.getCategories(forceRefreshIfStale = true) as ForumResult.Success
+        assertTrue(first.value.isEmpty())
+        assertNull(repo.observeCachedCategories().first())
+        val retried = repo.getCategories(forceRefreshIfStale = true) as ForumResult.Success
+        assertEquals(19, retried.value.size)
+        coVerify(exactly = 2) { api.getCategories(useAuth = false) }
+    }
+
+    @Test
     fun `categories cancellation propagates even when a stale fallback exists - 984`() = runTest {
         val cancellation = CancellationException("cancel catalogue")
         val api = mockk<HfrApiClient>()

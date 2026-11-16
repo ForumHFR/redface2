@@ -6,6 +6,8 @@ import androidx.compose.ui.test.performClick
 import fr.forumhfr.redface2.core.domain.flags.FlagCategoryCoverage
 import fr.forumhfr.redface2.core.domain.flags.FlagCoverage
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshCategory
 import fr.forumhfr.redface2.core.model.FlagFailureKind
 import fr.forumhfr.redface2.core.model.FlagSource
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -22,6 +24,23 @@ import org.robolectric.annotation.Config
 class FlagsRefreshBannerTest {
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun `missing sticky categories are named with singular wording in the banner - 984`() {
+        mount(state(FlagRefreshStatus.PARTIAL).copy(refreshIssue = FlagRefreshIssue(
+            stickyCategories = listOf(FlagRefreshCategory(13, "Discussions")),
+        )))
+        compose.onNodeWithText("Épinglés non chargés pour la catégorie Discussions.").assertExists()
+    }
+
+    @Test
+    fun `missing sticky categories use plural fallback names and a bounded list - 984`() {
+        mount(state(FlagRefreshStatus.PARTIAL).copy(refreshIssue = FlagRefreshIssue(
+            stickyCategories = listOf(FlagRefreshCategory(13, "Discussions"),
+                FlagRefreshCategory(23, null), FlagRefreshCategory(32, "IA")),
+        )))
+        compose.onNodeWithText("Épinglés non chargés pour les catégories Discussions, Catégorie 23 +1.").assertExists()
+    }
 
     @Test
     fun `unverified migrated snapshot has no failure banner`() {

@@ -1,5 +1,11 @@
 package fr.forumhfr.redface2.core.network
 
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagFetchTrace
+import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.network.diagnostics.HfrEventListenerFactory
+import fr.forumhfr.redface2.core.network.diagnostics.HfrNetworkDiagnostics
+import fr.forumhfr.redface2.core.network.diagnostics.HfrCallTag
 import io.mockk.coEvery
 import io.mockk.mockk
 import java.io.IOException
@@ -31,6 +37,7 @@ import okhttp3.EventListener
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -43,6 +50,40 @@ class FlagReadExecutorTest {
     private val executor = FlagReadExecutor(limiter, jitter)
     private val request = Request.Builder().url("https://forum.hardware.fr/").build()
     private val client = OkHttpClient()
+
+    @Test
+    fun `retry diagnostics measure each Call with its own queue and execution times - 984`() = runTest {
+        val log = DiagnosticsLog()
+        val fetch = FlagFetchTrace(
+            1, FlagType.CYAN)
+        val factory = HfrEventListenerFactory(
+            HfrNetworkDiagnostics(log),
+        ) { testScheduler.currentTime * NANOS_PER_MS }
+        var calls = 0
+        val measuredClient = tcpFailureClient(onConnect = {
+            advanceTimeBy(if (++calls == 1) 5_000 else 100)
+        }).newBuilder().eventListenerFactory(factory).build()
+        val original = HfrCallTag(0, fetch)
+        val tagged = request.newBuilder()
+            .url("https://forum.hardware.fr/hfr-gm/forums/hardwarefr/categories/23/topics/read/")
+            .tag(HfrCallTag::class.java, original).build()
+        val session = FlagReadSession { testScheduler.currentTime * NANOS_PER_MS }
+        session.succeeded(retry = false)
+        coEvery { jitter.pause() } coAnswers { delay(200) }
+        val error = runCatching {
+            executor.execute(measuredClient, tagged, FlagReadOperation.CATEGORY_BUCKET, session) { call ->
+                requireNotNull(call.request().tag(HfrCallTag::class.java))
+                    .executing(testScheduler.currentTime * NANOS_PER_MS)
+                call.execute().use { }
+            }
+        }.exceptionOrNull()
+        assertTrue(error is ConnectException)
+        val summaries = fetch.callSnapshot()
+        assertEquals(2, summaries.size)
+        assertEquals(listOf(0L, 0L), summaries.map { it.waitMs })
+        assertEquals(listOf(5_000L, 100L), summaries.map { it.totalMs })
+        assertNull(original.executeNanos)
+    }
 
     @Test
     fun `five Calls across sessions retain their permits through the response lifetime`() = runTest {
@@ -263,7 +304,10 @@ class FlagReadExecutorTest {
     }
 
     /** Real OkHttp event ordering with a deterministic TCP failure, no OS connect or DNS lookup. */
-    private fun tcpFailureClient(timeouts: MutableList<Int> = mutableListOf()): OkHttpClient =
+    private fun tcpFailureClient(
+        timeouts: MutableList<Int> = mutableListOf(),
+        onConnect: () -> Unit = {},
+    ): OkHttpClient =
         OkHttpClient.Builder()
             .proxy(Proxy.NO_PROXY)
             .dns { listOf(ADDRESS.address) }
@@ -273,6 +317,7 @@ class FlagReadExecutorTest {
                     override fun setSoTimeout(timeout: Int) = Unit
                     override fun connect(endpoint: SocketAddress?, timeout: Int) {
                         timeouts += timeout
+                        onConnect()
                         throw ConnectException("simulated TCP refusal")
                     }
                 }

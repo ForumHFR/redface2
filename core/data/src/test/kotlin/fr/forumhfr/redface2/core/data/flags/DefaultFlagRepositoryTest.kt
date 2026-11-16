@@ -29,6 +29,7 @@ import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
+import fr.forumhfr.redface2.core.network.FlagReadDeadlineException
 import fr.forumhfr.redface2.core.network.FlagReadClock
 import fr.forumhfr.redface2.core.network.FlagReadSession
 import fr.forumhfr.redface2.core.network.HfrApiClient
@@ -3402,27 +3403,30 @@ class DefaultFlagRepositoryTest {
 
     @Test
     fun `joined caller cannot extend admitted collection deadline - 984`() = runTest {
-        val (api, forum) = wireDeps {
-            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
-            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        for (joinDelay in listOf(0L, 10_000L)) {
+            val (api, forum) = wireDeps {
+                stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+                stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+            }
+            val monotonic = mockk<FlagReadClock>()
+            every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+            val repo = buildRepository(api, forum, flagReadClock = monotonic,
+                    testDispatcher = UnconfinedTestDispatcher(testScheduler))
+            coEvery {
+                api.getTopicList(any(), null, page = 1, resultsPerPage = any(), useAuth = true)
+            } coAnswers { awaitCancellation() }
+            val startedAt = testScheduler.currentTime
+            val first = async { repo.refresh(FlagType.CYAN) }
+            advanceTimeBy(joinDelay)
+            val joined = async { repo.refresh(FlagType.CYAN) }
+            advanceTimeBy(12_000 - joinDelay)
+            runCurrent()
+            assertTrue(first.isCompleted)
+            assertTrue(joined.isCompleted)
+            assertEquals(startedAt + 12_000L, testScheduler.currentTime)
+            assertEquals((first.await() as FlagsResult.Success).coverage,
+                (joined.await() as FlagsResult.Success).coverage)
         }
-        val monotonic = mockk<FlagReadClock>()
-        every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
-        val repo = buildRepository(api, forum, flagReadClock = monotonic,
-                testDispatcher = UnconfinedTestDispatcher(testScheduler))
-        coEvery {
-            api.getTopicList(any(), null, page = 1, resultsPerPage = any(), useAuth = true)
-        } coAnswers { awaitCancellation() }
-        val first = async { repo.refresh(FlagType.CYAN) }
-        advanceTimeBy(10_000)
-        val joined = async { repo.refresh(FlagType.CYAN) }
-        advanceTimeBy(2_000)
-        runCurrent()
-        assertTrue(first.isCompleted)
-        assertTrue(joined.isCompleted)
-        assertEquals(12_000L, testScheduler.currentTime)
-        assertEquals((first.await() as FlagsResult.Success).coverage,
-            (joined.await() as FlagsResult.Success).coverage)
     }
 
     @Test
@@ -3455,6 +3459,84 @@ class DefaultFlagRepositoryTest {
         assertTrue(joined.isCompleted)
         assertEquals(12_000L, testScheduler.currentTime)
         assertEquals(FlagRefreshStatus.PARTIAL, (joined.await() as FlagsResult.Success).refreshStatus)
+    }
+
+    @Test
+    fun `shared sticky deadline preserves a later consumers completed buckets - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+            stubFlagsCall(13, HfrRestFlagBucket.READ, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.READ, capturedParticipatedFixture)
+        }
+        val monotonic = mockk<FlagReadClock>()
+        every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, forum, flagDao = dao, flagReadClock = monotonic,
+            testDispatcher = UnconfinedTestDispatcher(testScheduler))
+        var cancelled = false
+        coEvery { api.getTopicList(23, null, 1, any(), true) } coAnswers {
+            try { awaitCancellation() } finally { cancelled = true }
+        }
+        // Observations share the generation without a pull fencing the earlier consumer.
+        val first = async { repo.observe(FlagType.CYAN).first { it is FlagsResult.Success } }
+        runCurrent()
+        advanceTimeBy(4_000)
+        val later = async { repo.observe(FlagType.RED).first { it is FlagsResult.Success } }
+        runCurrent()
+        advanceTimeBy(8_000)
+        runCurrent()
+        assertTrue(first.isCompleted)
+        assertTrue("a shared deadline must finish the later refresh without cancelling it", later.isCompleted)
+        val result = later.await() as FlagsResult.Success
+        assertEquals(12_000L, testScheduler.currentTime)
+        assertTrue(cancelled)
+        assertEquals(FlagRefreshStatus.PARTIAL, result.refreshStatus)
+        assertEquals(35395, result.flags.single().topicId)
+        assertTrue(result.coverage.categories.filter { it.source == FlagSource.BUCKET }
+            .all { it.failure == null && it.lastSuccessAt != null })
+        assertEquals(FlagFailureKind.DEADLINE, result.coverage.categories.single {
+            it.cat == 23 && it.source == FlagSource.STICKY
+        }.failure)
+        assertNull(result.coverage.categories.single { it.cat == 13 && it.source == FlagSource.STICKY }.failure)
+        val disk = dao.getSnapshot("xat", FlagType.RED)
+        assertEquals(35395, disk.rows.single().topicId)
+        assertEquals(result.coverage.categories.map { it.failure }, disk.coverage.map { it.failure })
+        coVerify(exactly = 1) { dao.replaceSnapshot("xat", FlagType.RED, any()) }
+        coVerify(exactly = 1) { api.getTopicList(23, null, 1, any(), true) }
+        first.await()
+    }
+
+    @Test
+    fun `observation joining a pulls replacement cannot outlive its original deadline - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
+        }
+        val monotonic = mockk<FlagReadClock>()
+        every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
+        val dao = stubFlagDao()
+        // A queued dispatcher lets the pull start its replacement before the observer rejoins.
+        val repo = buildRepository(api, forum, flagDao = dao, flagReadClock = monotonic,
+            testDispatcher = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        coEvery { api.getTopicList(23, null, 1, any(), true) } coAnswers { awaitCancellation() }
+        val observation = async { repo.observe(FlagType.CYAN).first { it !is FlagsResult.Loading } }
+        runCurrent()
+        advanceTimeBy(10_000)
+        val pull = async { repo.refresh(FlagType.CYAN) }
+        runCurrent()
+        advanceTimeBy(2_000)
+        runCurrent()
+        assertTrue("original observer must stop at t=12s, not t=22s", observation.isCompleted)
+        val result = observation.await()
+        assertTrue(result is FlagsResult.Failure && result.cause is FlagReadDeadlineException)
+        assertFalse("the newer pull still owns its independent budget", pull.isCompleted)
+        coVerify(exactly = 0) { dao.replaceSnapshot("xat", FlagType.CYAN, any()) }
+        advanceTimeBy(10_000)
+        runCurrent()
+        assertTrue(pull.isCompleted)
+        assertEquals(FlagRefreshStatus.PARTIAL, (pull.await() as FlagsResult.Success).refreshStatus)
+        coVerify(exactly = 1) { dao.replaceSnapshot("xat", FlagType.CYAN, any()) }
     }
 
     @Test

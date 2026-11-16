@@ -296,7 +296,9 @@ class DefaultForumRepository @Inject constructor(
             RestForumMappers.toCategories(envelope)
         }.fold(
             onSuccess = { list ->
-                cachedCategories = CachedEntry(list, clock.instant(), trace)
+                // An empty public catalogue cannot certify flags coverage. Let Retry fetch again
+                // immediately rather than retaining this response for the 24-hour cache lifetime.
+                if (list.isNotEmpty()) cachedCategories = CachedEntry(list, clock.instant(), trace)
                 ForumResult.Success(list)
             },
             onFailure = { throwable ->

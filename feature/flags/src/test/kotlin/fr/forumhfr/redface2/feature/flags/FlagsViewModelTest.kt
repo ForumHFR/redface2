@@ -159,11 +159,13 @@ class FlagsViewModelTest {
     fun `coverage and failed status survive unread filtering of every retained row - 984`() = runTest {
         val flags = FakeFlagRepository()
         val at = Instant.parse("2026-05-03T12:00:00Z")
+        val issue = FlagRefreshIssue(stickyCategories = listOf(FlagRefreshCategory(13, "Discussions")))
         val coverage = FlagCoverage(listOf(FlagCategoryCoverage(13, FlagSource.BUCKET, at, at,
             FlagFailureKind.NETWORK)))
         flags.observationResults = mapOf(FlagType.CYAN to FlagsResult.Success(
             listOf(stubFlag(1, FlagType.CYAN).copy(hasUnread = false)), coverage = coverage,
             refreshStatus = FlagRefreshStatus.FAILED, cachedAt = at,
+            issue = issue,
         ))
         val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
         advanceUntilIdle()
@@ -172,6 +174,9 @@ class FlagsViewModelTest {
         assertEquals(coverage, displayed.coverage)
         assertEquals(FlagRefreshStatus.FAILED, displayed.refreshStatus)
         assertEquals(at, displayed.cachedAt)
+        assertEquals(issue, displayed.refreshIssue)
+        vm.refreshWarning.value?.let(vm::consumeRefreshWarning)
+        assertEquals(issue, (vm.flagsState.value as FlagsListUiState.Success).refreshIssue)
     }
 
     @Test

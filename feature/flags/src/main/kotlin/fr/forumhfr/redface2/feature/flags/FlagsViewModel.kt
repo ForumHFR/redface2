@@ -1458,6 +1458,7 @@ class FlagsViewModel @Inject constructor(
             coverage = flagsResult.coverage,
             refreshStatus = flagsResult.refreshStatus,
             cachedAt = flagsResult.cachedAt,
+            refreshIssue = flagsResult.issue,
         )
     }
 
@@ -1670,6 +1671,7 @@ sealed interface FlagsListUiState {
         val coverage: FlagCoverage = FlagCoverage(),
         val refreshStatus: FlagRefreshStatus = FlagRefreshStatus.COMPLETE,
         val cachedAt: Instant? = null,
+        val refreshIssue: FlagRefreshIssue? = null,
     ) : FlagsListUiState
 
     /** A flags fetch failed; [cause] drives the reconnect/retry CTA (e.g. SessionExpiredException). */

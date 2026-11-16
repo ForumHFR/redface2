@@ -150,6 +150,10 @@
         <item quantity="one">Liste partiellement actualisée : %1$d catégorie non actualisée.</item>
         <item quantity="other">Liste partiellement actualisée : %1$d catégories non actualisées.</item>
     </plurals>
+    <plurals name="flags_missing_stickies">
+        <item quantity="one">Épinglés non chargés pour la catégorie %1$s.</item>
+        <item quantity="other">Épinglés non chargés pour les catégories %1$s.</item>
+    </plurals>
     <string name="flags_cached_update_failed">Liste du %1$s. Actualisation impossible.</string>
     <string name="flags_update_failed">Actualisation impossible. Les données disponibles sont affichées.</string>
     <string name="flags_invalid_response">Réponse HFR non reconnue. Les données disponibles sont affichées.</string>

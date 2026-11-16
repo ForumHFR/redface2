@@ -9,6 +9,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -28,6 +29,7 @@ internal fun FlagsRefreshBanner(
     onLogin: () -> Unit,
 ) {
     if (!state.hasRefreshBanner) return
+    val resources = LocalContext.current.resources
     val failures = state.coverage.categories.filter { it.failure != null }
     val sessionExpired = failures.any { it.failure == FlagFailureKind.SESSION }
     val message = when {
@@ -48,6 +50,15 @@ internal fun FlagsRefreshBanner(
     Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text(message, style = MaterialTheme.typography.bodyMedium)
+            state.refreshIssue?.takeIf { it.stickyCategories.isNotEmpty() }?.let { issue ->
+                val categories = issue.stickyCategoryLabels {
+                    resources.getString(R.string.flags_category_fallback, it)
+                }
+                Text(
+                    pluralStringResource(R.plurals.flags_missing_stickies, issue.stickyCategories.size, categories),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
             TextButton(onClick = if (sessionExpired) onLogin else onRetry) {
                 Text(stringResource(if (sessionExpired) R.string.flags_login_cta else R.string.flags_retry))
             }

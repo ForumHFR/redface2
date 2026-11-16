@@ -212,6 +212,8 @@ class DefaultFlagRepository @Inject constructor(
 
     private class SupersededFetchException : CancellationException("Flags fetch generation superseded")
 
+    private class StickyDeadlineException : CancellationException("Shared sticky sweep deadline reached")
+
     private val inFlightFetches: MutableMap<FetchKey, ObservedFetch> = mutableMapOf()
 
     /**
@@ -924,9 +926,9 @@ class DefaultFlagRepository @Inject constructor(
                 val observed = joinOrStartFetch(key, caller, admission)
                 key to observed
             }
-            if (observed.session.remainingNanos() < admission.remainingNanos()) admission = observed.session
+            if (observed.session.remainingNanos() <= admission.remainingNanos()) admission = observed.session
             try {
-                val result = awaitFetchResult(observed, userId)
+                val result = awaitFetchResult(observed, userId, admission)
                 val ownedResult = cacheWriteMutexes.getValue(type).withLock {
                     acceptFetchedResult(key, result, observed.trace, caller, publish)
                 }
@@ -937,8 +939,20 @@ class DefaultFlagRepository @Inject constructor(
         }
     }
 
-    private suspend fun awaitFetchResult(observed: ObservedFetch, userId: String): FlagsResult? = try {
-        observed.deferred.await()
+    private suspend fun awaitFetchResult(
+        observed: ObservedFetch,
+        userId: String,
+        admission: FlagReadSession,
+    ): FlagsResult? = try {
+        if (observed.session === admission) {
+            // Its collection owns this deadline and commits completed partitions before returning.
+            observed.deferred.await()
+        } else {
+            // A replacement already admitted by another caller may have a later deadline.
+            // Stop waiting without cancelling work still owned by that caller.
+            withTimeoutOrNull(admission.remainingMillis().coerceAtLeast(1)) { observed.deferred.await() }
+                ?: FlagsResult.Failure(FlagReadDeadlineException())
+        }
     } catch (superseded: SupersededFetchException) {
         // This repository cancelled obsolete work, not the caller's refresh. Its
         // transport remains cancelled, but only the replacement sets the outcome.
@@ -1353,6 +1367,10 @@ class DefaultFlagRepository @Inject constructor(
         var deadline = false
         try {
             sweep.deferred.await()
+        } catch (_: StickyDeadlineException) {
+            // Another consumer exhausted the shared sweep's budget, not this refresh's Job.
+            // stickyOutcomes keeps finished partitions and marks missing bodies DEADLINE.
+            currentCoroutineContext().ensureActive()
         } catch (timeout: TimeoutCancellationException) {
             deadline = true
             throw timeout
@@ -1408,7 +1426,7 @@ class DefaultFlagRepository @Inject constructor(
             val stop = (sweep.callers == 0 || deadline) && !sweep.deferred.isCompleted
             if (stop) {
                 stickySweeps.entries.removeAll { it.value === sweep }
-                sweep.deferred.cancel()
+                sweep.deferred.cancel(if (deadline) StickyDeadlineException() else null)
             }
             stop
         }

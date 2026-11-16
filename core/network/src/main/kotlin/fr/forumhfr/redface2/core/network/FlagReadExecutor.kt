@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.network
 
+import fr.forumhfr.redface2.core.network.diagnostics.HfrCallTag
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -64,26 +65,32 @@ class FlagReadExecutor @Inject constructor(
         phase: FlagReadConnectionPhase,
         retry: Boolean,
         executeCall: suspend (Call) -> T,
-    ): T = limiter.withPermit(this) {
-        val session = this
-        currentCoroutineContext().ensureActive()
-        val factory = client.eventListenerFactory
-        val bounded = client.newBuilder()
-            .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-            .eventListenerFactory { call -> FlagReadEventListener(phase, factory.create(call)) }
+    ): T {
+        val tag = request.tag(HfrCallTag::class.java)
+        val attemptRequest = if (tag == null) request else request.newBuilder()
+            .tag(HfrCallTag::class.java, tag.forCall(if (retry) nowNanos() else tag.queuedNanos))
             .build()
-        val call = bounded.newCall(request)
-        val configuredNanos = TimeUnit.MILLISECONDS.toNanos(client.callTimeoutMillis.toLong())
-        val remaining = session.remainingNanos()
-        if (remaining == 0L) throw FlagReadDeadlineException()
-        call.timeout().timeout(
-            if (configuredNanos == 0L) remaining else minOf(remaining, configuredNanos),
-            TimeUnit.NANOSECONDS,
-        )
-        session.applicationCall(retry)
-        executeCall(call).also {
-            session.checkBudget()
-            session.succeeded(retry)
+        return limiter.withPermit(this) {
+            val session = this
+            currentCoroutineContext().ensureActive()
+            val factory = client.eventListenerFactory
+            val bounded = client.newBuilder()
+                .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .eventListenerFactory { call -> FlagReadEventListener(phase, factory.create(call)) }
+                .build()
+            val call = bounded.newCall(attemptRequest)
+            val configuredNanos = TimeUnit.MILLISECONDS.toNanos(client.callTimeoutMillis.toLong())
+            val remaining = session.remainingNanos()
+            if (remaining == 0L) throw FlagReadDeadlineException()
+            call.timeout().timeout(
+                if (configuredNanos == 0L) remaining else minOf(remaining, configuredNanos),
+                TimeUnit.NANOSECONDS,
+            )
+            session.applicationCall(retry)
+            executeCall(call).also {
+                session.checkBudget()
+                session.succeeded(retry)
+            }
         }
     }
 
