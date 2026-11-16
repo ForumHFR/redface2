@@ -1,6 +1,9 @@
 package fr.forumhfr.redface2.core.model
 
-/** Persisted names: changing an entry requires a database migration. */
+/**
+ * Persisted names: changing an entry requires a database migration.
+ * GLOBAL is an in-memory observation; Room writes LEGACY_UNKNOWN for v23 build rollback.
+ */
 enum class FlagSource { BUCKET, STICKY, LEGACY_UNKNOWN, GLOBAL }
 
 /**

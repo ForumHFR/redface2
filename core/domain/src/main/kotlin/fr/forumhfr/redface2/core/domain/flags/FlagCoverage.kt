@@ -4,7 +4,7 @@ import fr.forumhfr.redface2.core.model.FlagFailureKind
 import fr.forumhfr.redface2.core.model.FlagSource
 import java.time.Instant
 
-/** One attempted source in the catalogue used by this snapshot (including successful empty lists). */
+/** A catalogue source, including successful empty lists and known but unverified categories. */
 data class FlagCategoryCoverage(
     val cat: Int,
     val source: FlagSource,
@@ -14,7 +14,13 @@ data class FlagCategoryCoverage(
 )
 
 data class FlagCoverage(val categories: List<FlagCategoryCoverage> = emptyList()) {
-    val isGlobalObservation: Boolean get() = categories.any { it.source == FlagSource.GLOBAL }
+    /**
+     * Category zero is a neutral observation marker, never a verified HFR category.
+     * Room encodes its source as LEGACY_UNKNOWN so baseline v23 builds can read it.
+     */
+    val isGlobalObservation: Boolean get() = categories.any {
+        it.source == FlagSource.GLOBAL || (it.cat == 0 && it.source == FlagSource.LEGACY_UNKNOWN)
+    }
 
     val isComplete: Boolean
         get() = !isGlobalObservation && categories.isNotEmpty() &&

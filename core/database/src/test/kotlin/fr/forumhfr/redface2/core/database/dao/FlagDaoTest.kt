@@ -45,6 +45,20 @@ class FlagDaoTest {
     }
 
     @Test
+    fun `unknown persisted row and coverage sources are neutral instead of crashing - P2c fix`() = runTest {
+        val now = Instant.parse("2026-11-16T12:00:00Z")
+        dao.upsertAll(listOf(row("alice", 1, FlagType.CYAN)))
+        dao.upsertCoverage(listOf(FlagCategoryCoverageEntity(
+            "alice", FlagType.CYAN, 23, FlagSource.BUCKET, now, now, null,
+        )))
+        database.openHelper.writableDatabase.execSQL("UPDATE flag_topics SET source = 'FUTURE_SOURCE'")
+        database.openHelper.writableDatabase.execSQL("UPDATE flag_category_coverage SET source = 'FUTURE_SOURCE'")
+        val snapshot = dao.getSnapshot("alice", FlagType.CYAN)
+        assertEquals(FlagSource.LEGACY_UNKNOWN, snapshot.rows.single().source)
+        assertEquals(FlagSource.LEGACY_UNKNOWN, snapshot.coverage.single().source)
+    }
+
+    @Test
     fun `unknown persisted failure remains a neutral failed partition - 984`() = runTest {
         val now = Instant.parse("2026-05-03T12:00:00Z")
         dao.upsertCoverage(listOf(FlagCategoryCoverageEntity(

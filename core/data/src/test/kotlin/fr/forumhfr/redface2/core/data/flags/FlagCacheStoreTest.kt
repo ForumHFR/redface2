@@ -61,7 +61,7 @@ class FlagCacheStoreTest {
     }
 
     @Test
-    fun `global empty coverage and received rows remain limited after reopening Room - P2c`() = runTest {
+    fun `global positives use baseline source vocabulary and stay limited after reopening Room - P2c`() = runTest {
         val initial = FlagCacheSnapshot(listOf(row(13).copy(source = FlagSource.STICKY)), coverage(listOf(13)))
         database.flagDao().replaceSnapshot("alice", FlagType.CYAN, initial)
         val observation = row(23).toFlag()
@@ -74,7 +74,13 @@ class FlagCacheStoreTest {
         assertFalse(loaded.isFresh)
         val disk = database.flagDao().getSnapshot("alice", FlagType.CYAN)
         assertEquals(initial.rows.single(), disk.rows.single { it.cat == 13 })
-        assertEquals(FlagSource.GLOBAL, disk.rows.single { it.cat == 23 }.source)
+        // 94379fcc0's generated DAO uses an exhaustive enum reader (no tolerant converter).
+        for (table in listOf("flag_topics", "flag_category_coverage")) {
+            database.openHelper.readableDatabase.query("SELECT source FROM $table").use { cursor ->
+                while (cursor.moveToNext()) BaselineFlagSource.valueOf(cursor.getString(0))
+            }
+        }
+        assertEquals(FlagSource.LEGACY_UNKNOWN, disk.rows.single { it.cat == 23 }.source)
         store.save("alice", FlagType.CYAN, store.merge("alice", FlagType.CYAN,
             FlagRefreshBatch(null, emptyList(), now.plusSeconds(1), globalOnly = true)))
         assertEquals(disk.rows, database.flagDao().getSnapshot("alice", FlagType.CYAN).rows)
@@ -188,6 +194,8 @@ class FlagCacheStoreTest {
         database.flagDao().deleteAll()
         assertNull(store.load(FlagType.CYAN, "bob"))
     }
+
+    private enum class BaselineFlagSource { BUCKET, STICKY, LEGACY_UNKNOWN }
 
     private fun coverage(cats: List<Int>, at: Instant = old): List<FlagCategoryCoverageEntity> = cats.flatMap { cat ->
         listOf(FlagSource.BUCKET, FlagSource.STICKY).map { source ->

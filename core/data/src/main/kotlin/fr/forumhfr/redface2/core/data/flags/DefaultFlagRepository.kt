@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.core.data.flags
 
 import android.util.Log
+import fr.forumhfr.redface2.core.data.forum.RestListEnvelope
+import fr.forumhfr.redface2.core.data.forum.RestTopic
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
@@ -1142,11 +1144,12 @@ class DefaultFlagRepository @Inject constructor(
     private suspend fun collectRefresh(key: FetchKey): FlagRefreshBatch {
         val session = checkNotNull(currentCoroutineContext()[FlagReadSession])
         val collection = FlagRefreshCollection(clock)
+        var catalogueIds: List<Int> = emptyList()
         val completed = try {
             withTimeoutOrNull(session.remainingMillis().coerceAtLeast(1)) {
                 session.checkBudget()
                 val cats = measured(FlagRefreshPhase.CATALOGUE) {
-                    loadCategories().let { cats ->
+                    loadCategories().also { catalogueIds = it.map { cat -> cat.id } }.let { cats ->
                         key.resolutionCat?.let { cat -> cats.filter { it.id == cat }.ifEmpty {
                             throw SerializationException("Missing lookup category")
                         } } ?: cats
@@ -1177,7 +1180,8 @@ class DefaultFlagRepository @Inject constructor(
         }
         session.expiredCategories(batch.outcomes.filter { it.failure == FlagFailureKind.DEADLINE }
             .map { it.cat }.distinct().size)
-        return if (key.resolutionCat == null) batch else batch.copy(categoryIds = null)
+        return if (key.resolutionCat == null) batch else
+            batch.copy(categoryIds = null, unverifiedCategoryIds = catalogueIds)
     }
 
     private fun resolutionBuckets(key: FetchKey, cats: List<Category>): List<Category> {
@@ -1238,7 +1242,9 @@ class DefaultFlagRepository @Inject constructor(
                 currentCoroutineContext()[FlagReadSession]?.expiredCategories(
                     snapshot.coverage.filter { it.failure == FlagFailureKind.DEADLINE }.map { it.cat }.distinct().size,
                 )
-                val hasContent = snapshot.rows.isNotEmpty() || snapshot.coverage.any { it.lastSuccessAt != null }
+                val emptyGlobal = batch.isEmptyGlobalSuccess
+                val hasContent = emptyGlobal || snapshot.rows.isNotEmpty() ||
+                    snapshot.coverage.any { it.lastSuccessAt != null }
                 if (!hasContent) return@commit FlagsResult.Failure(
                     batch.cause ?: IllegalStateException("Flags refresh produced no available snapshot"),
                 )
@@ -1248,7 +1254,7 @@ class DefaultFlagRepository @Inject constructor(
                         it.copy(name = batch.categoryNames[it.id])
                     }))
                 }
-                measured(FlagRefreshPhase.ROOM) { persistFlags(key.userId, type, snapshot) }
+                if (!emptyGlobal) measured(FlagRefreshPhase.ROOM) { persistFlags(key.userId, type, snapshot) }
                 val committed = synchronized(cachedSuccesses) {
                     if (fetchKey(type, key.userId).copy(resolutionCat = key.resolutionCat) == key) {
                         cachedSuccesses[type] = result

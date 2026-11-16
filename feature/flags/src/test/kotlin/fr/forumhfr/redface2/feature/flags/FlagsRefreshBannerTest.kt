@@ -26,6 +26,35 @@ class FlagsRefreshBannerTest {
     val compose = createComposeRule()
 
     @Test
+    fun `global marker never masks schema or transport failures - P2c fix`() {
+        mount(withGlobalMarker(state(FlagRefreshStatus.PARTIAL, FlagFailureKind.SCHEMA)))
+        compose.onNodeWithText("Réponse HFR non reconnue", substring = true).assertExists()
+        compose.onNodeWithText("Couverture limitée", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun `partial transport error takes priority over limited global coverage - P2c fix`() {
+        mount(withGlobalMarker(state(FlagRefreshStatus.PARTIAL)))
+        compose.onNodeWithText("Liste partiellement actualisée : 1 catégorie non actualisée.").assertExists()
+        compose.onNodeWithText("Couverture limitée", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun `targeted lookup banner counts unverified categories instead of claiming zero missing - P2c fix`() {
+        val initial = state(FlagRefreshStatus.PARTIAL)
+        mount(initial.copy(coverage = FlagCoverage(initial.coverage.categories.map {
+            it.copy(lastSuccessAt = null, failure = null)
+        })))
+        compose.onNodeWithText("Liste partiellement actualisée : 1 catégorie non actualisée.").assertExists()
+    }
+
+    private fun withGlobalMarker(state: FlagsListUiState.Success) = state.copy(
+        coverage = FlagCoverage(state.coverage.categories + FlagCategoryCoverage(
+            0, FlagSource.GLOBAL, Instant.parse("2026-05-03T10:00:00Z"), Instant.parse("2026-05-03T10:00:00Z"),
+        )),
+    )
+
+    @Test
     fun `missing sticky categories are named with singular wording in the banner - 984`() {
         mount(state(FlagRefreshStatus.PARTIAL).copy(refreshIssue = FlagRefreshIssue(
             stickyCategories = listOf(FlagRefreshCategory(13, "Discussions")),

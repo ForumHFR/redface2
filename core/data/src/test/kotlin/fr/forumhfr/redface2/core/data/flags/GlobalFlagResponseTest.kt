@@ -64,10 +64,10 @@ class GlobalFlagResponseTest {
         val merged = mergeFlagSnapshot(old, "agent", FlagType.CYAN,
             FlagRefreshBatch(null, emptyList(), now, globalOnly = true))
         assertEquals(rows, merged.rows)
-        assertEquals(old.coverage.single(), merged.coverage.first())
+        assertEquals(old, merged)
         assertFalse(merged.toResult().coverage.isComplete)
-        assertTrue(merged.toResult().coverage.isGlobalObservation)
-        assertEquals(FlagRefreshStatus.PARTIAL, merged.toResult().refreshStatus)
+        assertFalse(merged.toResult().coverage.isGlobalObservation)
+        assertEquals(FlagRefreshStatus.FAILED, merged.toResult().refreshStatus)
     }
 
     @Test
@@ -84,6 +84,60 @@ class GlobalFlagResponseTest {
         assertTrue(reconciled.rows.none { it.cat == cat && it.source == FlagSource.GLOBAL })
         assertTrue(reconciled.rows.contains(sticky))
         assertEquals(global.rows.filter { it.cat != cat }, reconciled.rows.filter { it.cat != cat })
+    }
+
+    @Test
+    fun `contradictory subcategory category or posts subcategory rejects the whole global batch`() {
+        val original = "categories/1/subcategories/109/"
+        for (replacement in listOf("categories/23/subcategories/484/", "categories/1/subcategories/484/")) {
+            val body = fixture("participated").replaceFirst(original, replacement)
+            assertTrue(runCatching { decodeGlobalFlags(json, body, FlagType.CYAN) }.exceptionOrNull()
+                is SerializationException)
+        }
+    }
+
+    @Test
+    fun `global read page seven cannot overwrite an unread favorite at page two`() {
+        val observed = decodeGlobalFlags(json, fixture("favorites"), FlagType.FAVORITE).first()
+            .copy(hasUnread = false, isFavorite = false, lastReadPage = 7, lastPosition = 280,
+                lastPostReadId = 700L, totalPages = 7, replyCount = 280)
+        val previous = observed.copy(hasUnread = true, isFavorite = true, lastReadPage = 2,
+            lastPosition = 60, lastPostReadId = 200L, totalPages = 9, replyCount = 350)
+            .toEntity("agent", now.minusSeconds(60), FlagSource.BUCKET)
+        val merged = mergeFlagSnapshot(FlagCacheSnapshot(listOf(previous), emptyList()), "agent", FlagType.FAVORITE,
+            FlagRefreshBatch(null, emptyList(), now, globalOnly = true, observations = listOf(observed)))
+        assertEquals(previous, merged.rows.single())
+    }
+
+    @Test
+    fun `global may signal unread favorite and growth but never move a reading anchor backwards`() {
+        val observed = decodeGlobalFlags(json, fixture("participated"), FlagType.CYAN).first()
+            .copy(hasUnread = true, isFavorite = true, lastReadPage = 1, lastPosition = null,
+                lastPostReadId = null, totalPages = 12, replyCount = 450, lastReplyAt = "2026-11-16 12:00",
+                lastReplyAuthor = "new author")
+        val previous = observed.copy(hasUnread = false, isFavorite = false, lastReadPage = 8,
+            lastPosition = 310, lastPostReadId = 800L, totalPages = 10, replyCount = 380,
+            lastReplyAt = "2026-11-15 12:00", lastReplyAuthor = "old author")
+            .toEntity("agent", now.minusSeconds(60), FlagSource.BUCKET)
+        val merged = mergeFlagSnapshot(FlagCacheSnapshot(listOf(previous), emptyList()), "agent", FlagType.CYAN,
+            FlagRefreshBatch(null, emptyList(), now, globalOnly = true, observations = listOf(observed)))
+        assertEquals(previous.copy(hasUnread = true, isFavorite = true, totalPages = 12, replyCount = 450,
+            lastReplyAt = observed.lastReplyAt, lastReplyAuthor = observed.lastReplyAuthor), merged.rows.single())
+    }
+
+    @Test
+    fun `baseline catalogue failure removes live and persisted global markers and reports failure`() {
+        val observed = decodeGlobalFlags(json, fixture("participated"), FlagType.CYAN).first()
+        val global = mergeFlagSnapshot(FlagCacheSnapshot(emptyList(), emptyList()), "agent", FlagType.CYAN,
+            FlagRefreshBatch(null, emptyList(), now, globalOnly = true, observations = listOf(observed)))
+        for (source in listOf(FlagSource.GLOBAL, FlagSource.LEGACY_UNKNOWN)) {
+            val old = global.copy(coverage = global.coverage.map { it.copy(source = source) })
+            val failed = mergeFlagSnapshot(old, "agent", FlagType.CYAN,
+                FlagRefreshBatch(null, emptyList(), now.plusSeconds(1), cause = java.io.IOException("offline")))
+            assertFalse(failed.toResult().coverage.isGlobalObservation)
+            assertEquals(FlagRefreshStatus.FAILED, failed.toResult().refreshStatus)
+            assertTrue(failed.coverage.all { it.cat > 0 && it.failure != null })
+        }
     }
 
     private fun fixture(name: String): String = checkNotNull(javaClass.classLoader)

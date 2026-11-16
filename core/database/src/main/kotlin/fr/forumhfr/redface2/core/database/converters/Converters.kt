@@ -4,6 +4,7 @@ import androidx.room.TypeConverter
 import fr.forumhfr.redface2.core.database.entities.FetchMode
 import fr.forumhfr.redface2.core.database.serialization.PostContentSerializer
 import fr.forumhfr.redface2.core.model.FlagFailureKind
+import fr.forumhfr.redface2.core.model.FlagSource
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.PostContent
 import java.time.Instant
@@ -102,6 +103,18 @@ internal object Converters {
     @JvmStatic
     fun flagTypeFromString(value: String): FlagType =
         runCatching { FlagType.valueOf(value) }.getOrDefault(FlagType.CYAN)
+
+    /** Never introduce a source name that the v23 baseline cannot read on build rollback. */
+    @TypeConverter
+    @JvmStatic
+    fun flagSourceToString(value: FlagSource): String =
+        if (value == FlagSource.GLOBAL) FlagSource.LEGACY_UNKNOWN.name else value.name
+
+    /** Unknown provenance cannot certify either a bucket or a sticky partition. */
+    @TypeConverter
+    @JvmStatic
+    fun flagSourceFromString(value: String): FlagSource =
+        runCatching { FlagSource.valueOf(value) }.getOrDefault(FlagSource.LEGACY_UNKNOWN)
 
     /** Keep the v23 failure vocabulary readable by P1a builds on rollback. */
     @TypeConverter
