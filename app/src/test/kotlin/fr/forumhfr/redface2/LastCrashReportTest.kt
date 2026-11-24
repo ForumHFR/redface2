@@ -319,7 +319,7 @@ class LastCrashReportTest {
                 StackTraceElement(EDITOR, "open", "Cookie.kt", 123456),
                 StackTraceElement("fr.forumhfr.redface2.Class/SecretClass", "open", "Editor.kt", 20),
                 StackTraceElement(EDITOR, "method=SecretMethod", "Editor.kt", 21),
-                StackTraceElement("loader", "module/SecretModule", "1", EDITOR, "open", "Editor.kt", 22),
+                StackTraceElement(EDITOR, "open", "Editor.kt", 22),
             ) + privateFields.map { StackTraceElement(PARSER, "parse", it, 23) }
         }
         capture(LastCrashReport(folder.root, environment), failure, Thread(privateText))
