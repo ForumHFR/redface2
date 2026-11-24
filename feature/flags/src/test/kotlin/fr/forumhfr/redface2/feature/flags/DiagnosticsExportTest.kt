@@ -31,6 +31,30 @@ import org.junit.Test
 
 class DiagnosticsExportTest {
     @Test
+    fun `copy includes the crash timestamp and stack while removing URLs from messages and frames`() {
+        val log = DiagnosticsLog()
+        log.recordCrash(0, """
+            java.lang.IllegalStateException: https://forum.hardware.fr/mp/?pseudo=SecretUser&hash_check=SecretHash
+            ${'\t'}at Editor.open(Editor.kt:19)
+            Caused by: java.io.IOException: failed
+            ${'\t'}at Parser.parse(https://forum.hardware.fr/mp/654321)
+        """.trimIndent())
+        val format = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+        val environment = DiagnosticsEnvironment("0.71.0", 75, "beta", 34, "Google", "Test")
+
+        val export = formatDiagnosticsExport(log.entries.value, format, environment)
+
+        assertTrue(export.contains("00:00:00.000  E  Crash  crashedAt=1970-01-01T00:00:00Z"))
+        assertTrue(export.contains("java.lang.IllegalStateException: <url>"))
+        assertTrue(export.contains("at Editor.open(Editor.kt:19)"))
+        assertTrue(export.contains("Caused by: java.io.IOException: failed"))
+        listOf("https://", "SecretUser", "hash_check", "SecretHash", "654321").forEach {
+            assertFalse(export, export.contains(it))
+        }
+        assertTrue(export.endsWith("0 entrées locales non exportées"))
+    }
+
+    @Test
     fun `probe structured waves and summary survive export allowlist`() {
         val log = DiagnosticsLog()
         val result = fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeRequestResult(

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.domain.diagnostics
 
+import java.time.Instant
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -16,9 +17,9 @@ import kotlinx.coroutines.flow.update
  * Thread-safety: backed by a single [MutableStateFlow]; atomic [update] is enough since
  * the buffer state is never read-then-write across coroutines.
  *
- * Volume: capped at [CAPACITY]. Older entries are dropped when full. Process death
- * resets the buffer — there is no persistence, by design (we don't want a tester's
- * device shipping a long-lived auth trace to disk).
+ * Volume: capped at [CAPACITY]. Older entries are dropped when full, except for the
+ * previous process's crash report, which stays available until cleared or this process ends.
+ * This buffer is never persisted.
  *
  * Identity: each entry carries a monotonic [Entry.id] so Compose lists can use stable
  * keys even when two identical messages land in the same millisecond.
@@ -28,6 +29,8 @@ class DiagnosticsLog @Inject constructor() {
 
     private val _entries = MutableStateFlow<List<Entry>>(emptyList())
     private val sequence = AtomicLong()
+    private val crashLock = Any()
+    private var acceptsStartupCrash = true
     val entries: StateFlow<List<Entry>> = _entries.asStateFlow()
 
     @Volatile private var submissionTraceSink: ((String) -> Unit)? = null
@@ -45,11 +48,40 @@ class DiagnosticsLog @Inject constructor() {
         )
         if (tag == EditorSubmissionTrace.TAG) submissionTraceSink?.invoke(message)
         _entries.update { current ->
-            (current + entry).takeLast(CAPACITY)
+            if (current.size == CAPACITY && current.first().tag == CRASH_TAG) {
+                buildList(CAPACITY) {
+                    add(current.first())
+                    addAll(current.subList(2, current.size))
+                    add(entry)
+                }
+            } else {
+                (current + entry).takeLast(CAPACITY)
+            }
         }
     }
 
-    fun clear() {
+    fun recordCrash(timestampMillis: Long, details: String) {
+        val redacted = details.lineSequence().joinToString("\n") { line ->
+            DiagnosticRedactor.redact(line, maxLength = line.length)
+        }
+        synchronized(crashLock) {
+            if (acceptsStartupCrash) {
+                acceptsStartupCrash = false
+                val entry = Entry(
+                    id = sequence.incrementAndGet(),
+                    level = Level.ERROR,
+                    tag = CRASH_TAG,
+                    message = "crashedAt=${Instant.ofEpochMilli(timestampMillis)}\n$redacted".trimEnd(),
+                    timestampMillis = timestampMillis,
+                )
+                _entries.update { listOf(entry) + it.takeLast(CAPACITY - 1) }
+            }
+        }
+    }
+
+    fun clear() = synchronized(crashLock) {
+        // Startup consumes the file on IO and may finish after the user presses Clear.
+        acceptsStartupCrash = false
         _entries.value = emptyList()
     }
 
@@ -65,5 +97,6 @@ class DiagnosticsLog @Inject constructor() {
 
     companion object {
         const val CAPACITY = 200
+        const val CRASH_TAG = "Crash"
     }
 }

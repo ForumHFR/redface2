@@ -59,7 +59,17 @@ fun DiagnosticsScreen(
     versionCode: Int,
     channel: String,
 ) {
-    val viewModel: DiagnosticsViewModel = hiltViewModel()
+    DiagnosticsScreen(onClose, versionName, versionCode, channel, hiltViewModel())
+}
+
+@Composable
+internal fun DiagnosticsScreen(
+    onClose: () -> Unit,
+    versionName: String,
+    versionCode: Int,
+    channel: String,
+    viewModel: DiagnosticsViewModel,
+) {
     val activity = LocalActivity.current
     DisposableEffect(viewModel, activity) {
         onDispose {
@@ -171,10 +181,8 @@ fun DiagnosticsScreen(
 }
 
 /**
- * Copy the allowed network and smiley-picker diagnostics to the clipboard as plain text. Format:
- * `HH:mm:ss.SSS  L  TAG  message` per line — same shape rendered by [DiagnosticsRow]
- * but flat, so the alpha tester can paste it into a bug report or a HFR post without
- * losing context.
+ * Copy the allowed diagnostics to the clipboard as plain text. Each entry starts with
+ * `HH:mm:ss.SSS  L  TAG  message`. A crash entry can span multiple lines for its stack trace.
  *
  * Android 13+ shows the system "copied to clipboard" overlay automatically; on older
  * devices we surface a Toast so the tester gets immediate feedback.
