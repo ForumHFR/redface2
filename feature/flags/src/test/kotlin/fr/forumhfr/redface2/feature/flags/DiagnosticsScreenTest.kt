@@ -11,6 +11,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import fr.forumhfr.redface2.core.domain.diagnostics.CrashReportStack
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeService
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeState
@@ -44,9 +45,17 @@ class DiagnosticsScreenTest {
     fun clearViewModels() = viewModels.clear()
 
     @Test
-    fun `copy includes the redacted crash and clear removes it from the screen and the next export`() {
+    fun `copy includes the structured crash and clear removes it from the screen and the next export`() {
         val log = DiagnosticsLog()
-        log.recordCrash(0, "Editor failed at https://forum.hardware.fr/mp/654321?hash_check=SecretHash")
+        val error = IllegalStateException("Editor failed at https://forum.hardware.fr/mp/654321?hash_check=SecretHash")
+            .apply { stackTrace = arrayOf(StackTraceElement("Editor", "open", "Cookie.kt", 19)) }
+        val details = buildString {
+            CrashReportStack.write(Thread.currentThread(), Thread.currentThread(), error) {
+                appendLine(it)
+                true
+            }
+        }
+        log.recordCrash(0, details)
         val probe = mockk<NetworkProbeService> {
             every { state } returns MutableStateFlow(NetworkProbeState())
             coEvery { remainingSeconds() } returns 0L
@@ -72,7 +81,8 @@ class DiagnosticsScreenTest {
         compose.onNodeWithText(DiagnosticsLog.CRASH_TAG).assertIsDisplayed()
         compose.onNodeWithText("Copier").performClick()
         val exportedCrash = clipboardText()
-        assertTrue(exportedCrash.contains("Editor failed at <url>"))
+        assertTrue(exportedCrash.contains("java.lang.IllegalStateException: message omitted"))
+        assertTrue(exportedCrash.contains("at Editor.open(Cookie.kt:19)"))
         assertFalse(exportedCrash.contains("SecretHash"))
 
         compose.onNodeWithText("Vider").performClick()
@@ -83,7 +93,7 @@ class DiagnosticsScreenTest {
         compose.onNodeWithText("Copier").performClick()
         val nextExport = clipboardText()
         assertTrue(nextExport.contains("next event"))
-        assertFalse(nextExport.contains("Editor failed"))
+        assertFalse(nextExport.contains("Cookie.kt:19"))
     }
 
     private fun clipboardText(): String {

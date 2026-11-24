@@ -18,7 +18,9 @@ import fr.forumhfr.redface2.core.domain.diagnostics.EditorSubmissionTrace
 import fr.forumhfr.redface2.core.network.qualifiers.ImageClient
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 
 /**
@@ -75,9 +77,16 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
         val crashReport = if (getProcessName() == packageName) installCrashHandler() else null
         super.onCreate()
         if (crashReport != null) {
-            diagnostics.registerCrashReportClear(crashReport::clear)
-            applicationScope.launch {
-                crashReport.importStartup()?.let { diagnostics.recordCrash(it.timestampMillis, it.details) }
+            diagnostics.registerCrashReportClear {
+                applicationScope.launch(Dispatchers.IO) {
+                    if (!crashReport.clear()) {
+                        Log.w(DiagnosticsLog.CRASH_TAG, "Could not delete the retained crash report")
+                    }
+                }
+            }
+            applicationScope.launch(Dispatchers.Main) {
+                val capture = withContext(Dispatchers.IO) { crashReport.importStartup() }
+                capture?.let { diagnostics.recordCrash(it.timestampMillis, it.details) }
             }
         }
         if (BuildConfig.DEBUG || BuildConfig.FLAVOR == "dev") {

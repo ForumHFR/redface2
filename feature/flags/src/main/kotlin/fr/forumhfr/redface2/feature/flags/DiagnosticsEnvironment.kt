@@ -17,8 +17,8 @@ internal data class DiagnosticsEnvironment(
     val model: String,
 )
 
-// Entire messages of these tags are exported. Crash details are redacted by DiagnosticsLog on
-// import. Other exported fields use closed values such as errno categories and IP families.
+// Entire messages of these tags are exported. Crash details are structured at capture.
+// Other exported fields use closed values such as errno categories and IP families.
 private val diagnosticsExportTags = setOf(
     "FlagsRefresh", "HfrCall", "AppForeground", SmileyPickerDiagnostics.TAG, NetworkProbeService.TAG,
     DiagnosticsLog.CRASH_TAG,

@@ -1,6 +1,6 @@
 package fr.forumhfr.redface2
 
-import fr.forumhfr.redface2.core.domain.diagnostics.CrashReportRedactor
+import fr.forumhfr.redface2.core.domain.diagnostics.CrashReportStack
 import java.io.DataOutputStream
 import java.io.File
 import java.io.IOException
@@ -10,7 +10,11 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /** The latest crash, kept privately until cleared or replaced by another crash. */
-internal class LastCrashReport(directory: File, private val environment: String) {
+internal class LastCrashReport(
+    directory: File,
+    private val environment: String,
+    private val mainThread: Thread = Thread.currentThread(),
+) {
     private val report = File(directory, "last-crash")
     private val temporary = File(directory, "last-crash.tmp")
     private val fileLock = ReentrantLock()
@@ -38,9 +42,7 @@ internal class LastCrashReport(directory: File, private val environment: String)
         try {
             skipStartupImport = true
             replaceReport(System.currentTimeMillis()) { writer ->
-                writer.line(environment)
-                writer.line("thread=${thread.name.reportField()}")
-                writer.stack(error)
+                if (writer.line(environment)) CrashReportStack.write(thread, mainThread, error, writer::line)
             }
         } finally {
             fileLock.unlock()
@@ -50,6 +52,7 @@ internal class LastCrashReport(directory: File, private val environment: String)
     private fun replaceReport(timestampMillis: Long, write: (ReportWriter) -> Unit) {
         try {
             DataOutputStream(temporary.outputStream()).use { output ->
+                output.writeInt(STRUCTURED_REPORT_MAGIC)
                 output.writeLong(timestampMillis)
                 write(ReportWriter(output))
             }
@@ -60,23 +63,14 @@ internal class LastCrashReport(directory: File, private val environment: String)
         }
     }
 
-    fun importStartup(): Capture? = fileLock.withLock {
+    fun importStartup(
+        openReport: (File) -> RandomAccessFile = { RandomAccessFile(it, "r") },
+    ): Capture? = fileLock.withLock {
         // Import only once, and leave any crash from this process for the next one.
         if (skipStartupImport) return null
         skipStartupImport = true
-        temporary.delete()
-        val capture = read() ?: return null
-        val redacted = CrashReportRedactor.redact(capture.details)
-        if (redacted == capture.details) return capture
-        try {
-            replaceReport(capture.timestampMillis) { writer ->
-                redacted.removeSuffix("\n").lineSequence().forEach(writer::line)
-            }
-            // Read back the committed text so the in-memory entry sees the same size limit.
-            read()
-        } catch (_: IOException) {
-            null
-        }
+        delete(temporary)
+        read(openReport)
     }
 
     fun clear(): Boolean = fileLock.withLock {
@@ -90,14 +84,19 @@ internal class LastCrashReport(directory: File, private val environment: String)
         true
     } catch (_: IOException) {
         false
+    } catch (_: SecurityException) {
+        false
     }
 
-    private fun read(): Capture? = try {
-        RandomAccessFile(report, "r").use { input ->
+    private fun read(openReport: (File) -> RandomAccessFile): Capture? = try {
+        openReport(report).use { input ->
             val length = input.length()
-            if (length in (Long.SIZE_BYTES + 1L)..MAX_REPORT_BYTES.toLong()) {
+            // Earlier formats allowed free text and cannot be imported.
+            if (length in (HEADER_BYTES + 1L)..MAX_REPORT_BYTES.toLong() &&
+                input.readInt() == STRUCTURED_REPORT_MAGIC
+            ) {
                 val timestamp = input.readLong()
-                val details = ByteArray(length.toInt() - Long.SIZE_BYTES)
+                val details = ByteArray(length.toInt() - HEADER_BYTES)
                 input.readFully(details)
                 Capture(timestamp, details.toString(Charsets.UTF_8))
             } else {
@@ -111,10 +110,9 @@ internal class LastCrashReport(directory: File, private val environment: String)
     data class Capture(val timestampMillis: Long, val details: String)
 
     private class ReportWriter(private val output: DataOutputStream) {
-        private var remaining = MAX_REPORT_BYTES - Long.SIZE_BYTES - TRUNCATED.size
+        private var remaining = MAX_REPORT_BYTES - HEADER_BYTES - TRUNCATED.size
 
-        fun line(text: String) {
-            if (remaining <= 0) return
+        fun line(text: String): Boolean {
             val bytes = "$text\n".toByteArray(Charsets.UTF_8)
             if (bytes.size < remaining) {
                 output.write(bytes)
@@ -123,37 +121,15 @@ internal class LastCrashReport(directory: File, private val environment: String)
                 output.write(TRUNCATED)
                 remaining = 0
             }
-        }
-
-        fun stack(error: Throwable) {
-            var current: Throwable? = error
-            var depth = 0
-            while (current != null && remaining > 0 && depth < MAX_THROWABLES) {
-                val prefix = if (depth == 0) "" else "Caused by: "
-                val message = current.message?.reportField()?.let { ": $it" }.orEmpty()
-                line("$prefix${current.javaClass.name}$message")
-                val frames = current.stackTrace
-                for (index in 0 until minOf(frames.size, MAX_FRAMES)) {
-                    if (remaining <= 0) return
-                    line("\tat ${frames[index].toString().reportField()}")
-                }
-                if (frames.size > MAX_FRAMES) line("\t... ${frames.size - MAX_FRAMES} frames omitted")
-                current = current.cause
-                depth++
-            }
-            if (current != null) line("... further causes omitted")
+            return remaining > 0
         }
     }
 
     companion object {
         private const val CRASH_EXIT_CODE = 10
         private const val MAX_REPORT_BYTES = 16 * 1024
-        private const val MAX_FIELD_CHARS = 512
-        private const val MAX_THROWABLES = 8
-        private const val MAX_FRAMES = 40
+        private const val STRUCTURED_REPORT_MAGIC = 0x52464331 // RFC1
+        private const val HEADER_BYTES = Int.SIZE_BYTES + Long.SIZE_BYTES
         private val TRUNCATED = "... crash report truncated\n".toByteArray(Charsets.UTF_8)
-
-        private fun String.reportField(): String = take(MAX_FIELD_CHARS).replace('\n', ' ').replace('\r', ' ') +
-            if (length > MAX_FIELD_CHARS) "..." else ""
     }
 }

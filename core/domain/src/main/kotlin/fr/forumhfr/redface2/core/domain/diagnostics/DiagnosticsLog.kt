@@ -14,8 +14,8 @@ import kotlinx.coroutines.flow.update
  * viewer can render them live. Alpha-only crutch: contributors who don't have `adb`
  * on hand can read the same trail that lands in logcat without leaving the app.
  *
- * Thread-safety: backed by a single [MutableStateFlow]; atomic [update] is enough since
- * the buffer state is never read-then-write across coroutines.
+ * Ordinary recording is thread-safe through atomic [update]. Startup crash publication and
+ * clearing run on the main thread, so a completed disk import cannot repopulate a cleared log.
  *
  * Volume: capped at [CAPACITY]. Older entries are dropped when full, except for the
  * previous process's crash report, which stays available until cleared or this process ends.
@@ -29,18 +29,17 @@ class DiagnosticsLog @Inject constructor() {
 
     private val _entries = MutableStateFlow<List<Entry>>(emptyList())
     private val sequence = AtomicLong()
-    private val crashLock = Any()
     private var acceptsStartupCrash = true
     val entries: StateFlow<List<Entry>> = _entries.asStateFlow()
 
     @Volatile private var submissionTraceSink: ((String) -> Unit)? = null
-    @Volatile private var clearCrashReport: (() -> Boolean)? = null
+    private var scheduleCrashReportClear: (() -> Unit)? = null
 
     /** Installed only by debug/dev app startup; prod/beta release keeps the volatile buffer. */
     fun exportSubmissionTraces(sink: (String) -> Unit) { submissionTraceSink = sink }
 
-    /** Registers the app's durable crash deletion before launching its startup import. */
-    fun registerCrashReportClear(clear: () -> Boolean) { clearCrashReport = clear }
+    /** Registers the app's asynchronous disk deletion on the main thread before startup import. */
+    fun registerCrashReportClear(scheduleClear: () -> Unit) { scheduleCrashReportClear = scheduleClear }
 
     fun record(level: Level, tag: String, message: String) {
         val entry = Entry(
@@ -64,29 +63,25 @@ class DiagnosticsLog @Inject constructor() {
         }
     }
 
+    /** Publishes a structured crash report on the main thread after its disk import. */
     fun recordCrash(timestampMillis: Long, details: String) {
-        val redacted = CrashReportRedactor.redact(details)
-        synchronized(crashLock) {
-            if (acceptsStartupCrash) {
-                acceptsStartupCrash = false
-                val entry = Entry(
-                    id = sequence.incrementAndGet(),
-                    level = Level.ERROR,
-                    tag = CRASH_TAG,
-                    message = "crashedAt=${Instant.ofEpochMilli(timestampMillis)}\n$redacted".trimEnd(),
-                    timestampMillis = timestampMillis,
-                )
-                _entries.update { listOf(entry) + it.takeLast(CAPACITY - 1) }
-            }
-        }
+        if (!acceptsStartupCrash) return
+        acceptsStartupCrash = false
+        val entry = Entry(
+            id = sequence.incrementAndGet(),
+            level = Level.ERROR,
+            tag = CRASH_TAG,
+            message = "crashedAt=${Instant.ofEpochMilli(timestampMillis)}\n$details".trimEnd(),
+            timestampMillis = timestampMillis,
+        )
+        _entries.update { listOf(entry) + it.takeLast(CAPACITY - 1) }
     }
 
-    fun clear() = synchronized(crashLock) {
-        // Startup releases the file lock before publishing, so pending imports cannot race clear.
-        if (clearCrashReport?.invoke() != false) {
-            acceptsStartupCrash = false
-            _entries.value = emptyList()
-        }
+    /** Clears the visible log on the main thread before scheduling durable deletion. */
+    fun clear() {
+        acceptsStartupCrash = false
+        _entries.value = emptyList()
+        scheduleCrashReportClear?.invoke()
     }
 
     data class Entry(

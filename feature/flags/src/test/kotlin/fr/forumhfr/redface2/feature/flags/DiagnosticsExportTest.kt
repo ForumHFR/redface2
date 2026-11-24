@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.flags
 
 import fr.forumhfr.redface2.core.domain.diagnostics.AppForegroundDiagnostics
+import fr.forumhfr.redface2.core.domain.diagnostics.CrashReportStack
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsDataSaver
@@ -21,6 +22,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrConnectErrno
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrEndpoint
 import fr.forumhfr.redface2.core.model.FlagType
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -31,35 +33,45 @@ import org.junit.Test
 
 class DiagnosticsExportTest {
     @Test
-    fun `copy includes the crash timestamp and stack while removing private messages and frame fields`() {
+    fun `copy exports allowlisted crash fields without the private crash input`() {
+        val privateFields = listOf(
+            "md_pass=deadbeef",
+            "Proxy-Authorization: Basic ProbeProxyToken",
+            "/mp/42/Alice",
+            "https://forum.hardware.fr/mp/d'Alice/42",
+            "Cookie: md_user=Alice",
+            "/forum2.php?post=42&hash_check=Secret",
+        )
+        val privateText = privateFields.joinToString("\n")
+        val approved = IllegalArgumentException("Failed requirement.").apply { stackTrace = emptyArray() }
+        val cause = IOException(privateText, approved).apply { stackTrace = emptyArray() }
+        val failure = IllegalStateException(privateText, cause).apply {
+            stackTrace = arrayOf(StackTraceElement("Editor", "open", "Cookie.kt", 19)) +
+                privateFields.map { StackTraceElement("Parser", "parse", it, 7) }
+        }
+        val details = buildString {
+            CrashReportStack.write(Thread(privateText), Thread.currentThread(), failure) {
+                appendLine(it)
+                true
+            }
+        }
         val log = DiagnosticsLog()
-        log.recordCrash(0, """
-            java.lang.IllegalStateException: https://forum.hardware.fr/mp/?pseudo=SecretUser&hash_check=SecretHash
-            ${'\t'}at Editor.open(Editor.kt:19)
-            Caused by: java.io.IOException: failed
-            ${'\t'}at Parser.parse(https://forum.hardware.fr/mp/654321)
-            ${'\t'}at Parser.parse(/forum2.php?post=42&hash_check=SecretRelative)
-            Caused by: java.lang.IllegalArgumentException: Cookie: md_user=Alice; custom=SecretCookie
-            ${'\t'}at Parser.parse(Set-Cookie: custom=SecretHeader)
-            ${'\t'}at Parser.parse(md_id=SecretId)
-            ${'\t'}at Parser.parse(MD_PASSS=SecretPass)
-            ${'\t'}at Parser.parse(hash_check=SecretHash)
-            ${'\t'}at Parser.parse(pseudo=SecretPseudo)
-            ${'\t'}at Parser.parse(password=SecretPassword)
-        """.trimIndent())
+        log.recordCrash(0, details)
         val format = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
         val environment = DiagnosticsEnvironment("0.71.0", 75, "beta", 34, "Google", "Test")
 
         val export = formatDiagnosticsExport(log.entries.value, format, environment)
 
-        assertTrue(export.contains("00:00:00.000  E  Crash  crashedAt=1970-01-01T00:00:00Z"))
-        assertTrue(export.contains("java.lang.IllegalStateException: <url>"))
-        assertTrue(export.contains("at Editor.open(Editor.kt:19)"))
-        assertTrue(export.contains("Caused by: java.io.IOException: failed"))
-        listOf("https://", "Secret", "Alice", "Cookie:", "hash_check", "654321", "?post=42").forEach {
-            assertFalse(export, export.contains(it))
+        val fragments = listOf("deadbeef", "ProbeProxyToken", "Alice", "md_user", "hash_check", "Secret")
+        (privateFields + fragments).forEach {
+            assertFalse("Exported: $it", export.contains(it))
         }
-        assertTrue(export.contains("Caused by: java.lang.IllegalArgumentException: <redacted>"))
+        assertTrue(export.contains("00:00:00.000  E  Crash  crashedAt=1970-01-01T00:00:00Z"))
+        assertTrue(export.contains("thread=other"))
+        assertTrue(export.contains("java.lang.IllegalStateException: message omitted (${privateText.length} chars)"))
+        assertTrue(export.contains("at Editor.open(Cookie.kt:19)"))
+        assertTrue(export.contains("Caused by: java.io.IOException: message omitted (${privateText.length} chars)"))
+        assertTrue(export.contains("Caused by: java.lang.IllegalArgumentException: Failed requirement."))
         assertTrue(export.endsWith("0 entrées locales non exportées"))
     }
 
