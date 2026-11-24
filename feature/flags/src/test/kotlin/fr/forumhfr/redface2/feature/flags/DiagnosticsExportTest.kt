@@ -29,7 +29,11 @@ import java.util.TimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.AssumptionViolatedException
 import org.junit.Test
+
+private const val EDITOR = "fr.forumhfr.redface2.feature.editor.Editor"
+private const val PARSER = "fr.forumhfr.redface2.core.parser.Parser"
 
 class DiagnosticsExportTest {
     @Test
@@ -46,8 +50,8 @@ class DiagnosticsExportTest {
         val approved = IllegalArgumentException("Failed requirement.").apply { stackTrace = emptyArray() }
         val cause = IOException(privateText, approved).apply { stackTrace = emptyArray() }
         val failure = IllegalStateException(privateText, cause).apply {
-            stackTrace = arrayOf(StackTraceElement("Editor", "open", "Cookie.kt", 19)) +
-                privateFields.map { StackTraceElement("Parser", "parse", it, 7) }
+            stackTrace = arrayOf(StackTraceElement(EDITOR, "open", "Cookie.kt", 42)) +
+                privateFields.map { StackTraceElement(PARSER, "parse", it, 7) }
         }
         val details = buildString {
             CrashReportStack.write(Thread(privateText), Thread.currentThread(), failure) {
@@ -69,10 +73,55 @@ class DiagnosticsExportTest {
         assertTrue(export.contains("00:00:00.000  E  Crash  crashedAt=1970-01-01T00:00:00Z"))
         assertTrue(export.contains("thread=other"))
         assertTrue(export.contains("java.lang.IllegalStateException: message omitted (${privateText.length} chars)"))
-        assertTrue(export.contains("at Editor.open(Cookie.kt:19)"))
+        assertTrue(export.contains("\tat $EDITOR.open(Cookie.kt:42)\n\tat <omitted frame> (x6)\n"))
         assertTrue(export.contains("Caused by: java.io.IOException: message omitted (${privateText.length} chars)"))
         assertTrue(export.contains("Caused by: java.lang.IllegalArgumentException: Failed requirement."))
         assertTrue(export.endsWith("0 entrées locales non exportées"))
+    }
+
+    @Test
+    fun `copy omits crash symbols of unknown origin and keeps known frames`() {
+        // JUnit stands for any class outside the known packages, such as a name shaped by user data.
+        val cause = AssumptionViolatedException("Alice").apply {
+            stackTrace = arrayOf(StackTraceElement("Alice", "Alice", "Alice.kt", 1))
+        }
+        val failure = AssumptionViolatedException("Alice", cause).apply {
+            stackTrace = arrayOf(
+                StackTraceElement("fr.forumhfr.redface2.core.network.CookieJar", "load", "Cookie.kt", 42),
+                StackTraceElement("Alice", "open", "Alice.kt", 1),
+                StackTraceElement("com.example.Alice", "Alice", "Editor.kt", 2),
+                StackTraceElement(EDITOR, "open", "Alice.txt", 3),
+                StackTraceElement(EDITOR, "open", "Alice", 4),
+                StackTraceElement("okio.RealBufferedSource", "read", "RealBufferedSource.kt", 5),
+            )
+        }
+        val details = buildString {
+            CrashReportStack.write(Thread.currentThread(), Thread.currentThread(), failure) {
+                appendLine(it)
+                true
+            }
+        }
+        val log = DiagnosticsLog()
+        log.recordCrash(0, details)
+        val format = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+        val environment = DiagnosticsEnvironment("0.71.0", 75, "beta", 34, "Google", "Test")
+
+        val export = formatDiagnosticsExport(log.entries.value, format, environment)
+
+        listOf("Alice", "junit", "AssumptionViolatedException", "com.example").forEach {
+            assertFalse("Exported: $it", export.contains(it))
+        }
+        val omittedMessage = "message omitted (${failure.message!!.length} chars)"
+        assertTrue(
+            export.contains(
+                "thread=main\n<omitted exception class>: $omittedMessage\n" +
+                    "\tat fr.forumhfr.redface2.core.network.CookieJar.load(Cookie.kt:42)\n" +
+                    "\tat <omitted frame> (x4)\n" +
+                    "\tat okio.RealBufferedSource.read(RealBufferedSource.kt:5)\n" +
+                    "Caused by: <omitted exception class>: $omittedMessage\n" +
+                    "\tat <omitted frame>\n",
+            ),
+        )
     }
 
     @Test

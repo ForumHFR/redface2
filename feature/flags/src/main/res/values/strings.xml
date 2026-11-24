@@ -259,6 +259,10 @@
     <string name="diagnostics_copy">Copier</string>
     <string name="diagnostics_clear">Vider</string>
     <string name="diagnostics_close">Fermer</string>
+    <string name="diagnostics_clear_pending">Suppression du dernier plantage en cours…</string>
+    <string name="diagnostics_clear_done">Aucun rapport de plantage n’est conservé sur l’appareil.</string>
+    <string name="diagnostics_clear_failed">Le rapport du dernier plantage n’a pas pu être supprimé de l’appareil. Veuillez réessayer.</string>
+    <string name="diagnostics_clear_retry">Réessayer</string>
     <string name="diagnostics_empty">Aucun journal pour le moment. Connectez-vous pour voir les premières entrées.</string>
     <string name="diagnostics_probe_start">Tester la connexion</string>
     <string name="diagnostics_probe_cancel">Annuler</string>

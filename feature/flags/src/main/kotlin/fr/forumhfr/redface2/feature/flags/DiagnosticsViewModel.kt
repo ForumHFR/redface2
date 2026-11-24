@@ -47,7 +47,11 @@ class DiagnosticsViewModel @Inject constructor(
         }
     }
 
+    val crashReportClear = log.crashReportClear
+
     fun clear() = log.clear()
+
+    fun retryCrashReportClear() = log.retryCrashReportClear()
 
     fun savePolicy(policy: FlagsRefreshPolicy, onSaved: () -> Unit) {
         viewModelScope.launch {

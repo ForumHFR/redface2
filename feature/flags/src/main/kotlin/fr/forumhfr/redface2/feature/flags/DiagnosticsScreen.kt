@@ -78,6 +78,7 @@ internal fun DiagnosticsScreen(
         }
     }
     val entries by viewModel.entries.collectAsStateWithLifecycle()
+    val crashReportClear by viewModel.crashReportClear.collectAsStateWithLifecycle()
     val cooldownSeconds by viewModel.cooldownSeconds.collectAsStateWithLifecycle()
     val probeState by viewModel.probeState.collectAsStateWithLifecycle()
     val policy by viewModel.policy.collectAsStateWithLifecycle()
@@ -147,6 +148,7 @@ internal fun DiagnosticsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
+            CrashReportClearStatus(crashReportClear, viewModel::retryCrashReportClear)
             NetworkProbePanel(probeState, cooldownSeconds, viewModel::startProbe, viewModel::cancelProbe)
             TextButton(
                 onClick = { showPolicy = true },
@@ -175,6 +177,34 @@ internal fun DiagnosticsScreen(
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     }
                 }
+            }
+        }
+    }
+}
+
+/** Tells whether the retained crash report really left the device, and offers a retry if not. */
+@Composable
+private fun CrashReportClearStatus(state: DiagnosticsLog.CrashReportClear, onRetry: () -> Unit) {
+    val message = when (state) {
+        DiagnosticsLog.CrashReportClear.IDLE -> return
+        DiagnosticsLog.CrashReportClear.CLEARING -> R.string.diagnostics_clear_pending
+        DiagnosticsLog.CrashReportClear.CLEARED -> R.string.diagnostics_clear_done
+        DiagnosticsLog.CrashReportClear.FAILED -> R.string.diagnostics_clear_failed
+    }
+    val failed = state == DiagnosticsLog.CrashReportClear.FAILED
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(message),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f).padding(vertical = 4.dp),
+        )
+        if (failed) {
+            TextButton(onClick = onRetry) {
+                Text(stringResource(R.string.diagnostics_clear_retry), softWrap = false)
             }
         }
     }

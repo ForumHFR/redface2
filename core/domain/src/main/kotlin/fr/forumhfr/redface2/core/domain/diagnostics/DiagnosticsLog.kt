@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.update
  *
  * Ordinary recording is thread-safe through atomic [update]. Startup crash publication and
  * clearing run on the main thread, so a completed disk import cannot repopulate a cleared log.
+ * The durable deletion of the crash report runs elsewhere and reports back through
+ * [crashReportClear], which is the only confirmation the viewer may show.
  *
  * Volume: capped at [CAPACITY]. Older entries are dropped when full, except for the
  * previous process's crash report, which stays available until cleared or this process ends.
@@ -33,13 +35,23 @@ class DiagnosticsLog @Inject constructor() {
     val entries: StateFlow<List<Entry>> = _entries.asStateFlow()
 
     @Volatile private var submissionTraceSink: ((String) -> Unit)? = null
-    private var scheduleCrashReportClear: (() -> Unit)? = null
+    private var scheduleCrashReportClear: ((onResult: (Boolean) -> Unit) -> Unit)? = null
+    private val crashReportClearRequests = AtomicLong()
+    private val _crashReportClear = MutableStateFlow(CrashReportClear.IDLE)
+
+    /** Outcome of the latest durable deletion requested by [clear] or [retryCrashReportClear]. */
+    val crashReportClear: StateFlow<CrashReportClear> = _crashReportClear.asStateFlow()
 
     /** Installed only by debug/dev app startup; prod/beta release keeps the volatile buffer. */
     fun exportSubmissionTraces(sink: (String) -> Unit) { submissionTraceSink = sink }
 
-    /** Registers the app's asynchronous disk deletion on the main thread before startup import. */
-    fun registerCrashReportClear(scheduleClear: () -> Unit) { scheduleCrashReportClear = scheduleClear }
+    /**
+     * Registers the app's asynchronous disk deletion on the main thread before startup import.
+     * [scheduleClear] must return at once and call its argument from any thread with the outcome.
+     */
+    fun registerCrashReportClear(scheduleClear: (onResult: (Boolean) -> Unit) -> Unit) {
+        scheduleCrashReportClear = scheduleClear
+    }
 
     fun record(level: Level, tag: String, message: String) {
         val entry = Entry(
@@ -77,11 +89,36 @@ class DiagnosticsLog @Inject constructor() {
         _entries.update { listOf(entry) + it.takeLast(CAPACITY - 1) }
     }
 
-    /** Clears the visible log on the main thread before scheduling durable deletion. */
+    /**
+     * Clears the visible log on the main thread, then schedules the durable deletion. The crash
+     * report is only gone once [crashReportClear] reaches [CrashReportClear.CLEARED]: if the process
+     * dies during the few milliseconds of the deletion, the next start imports the report again.
+     */
     fun clear() {
         acceptsStartupCrash = false
         _entries.value = emptyList()
-        scheduleCrashReportClear?.invoke()
+        requestCrashReportClear()
+    }
+
+    /** Runs the durable deletion again after a failure, keeping the entries recorded since. */
+    fun retryCrashReportClear() {
+        if (_crashReportClear.value == CrashReportClear.FAILED) requestCrashReportClear()
+    }
+
+    private fun requestCrashReportClear() {
+        val request = crashReportClearRequests.incrementAndGet()
+        val schedule = scheduleCrashReportClear
+        if (schedule == null) {
+            // No report is kept by this process (tests, secondary process): nothing to wait for.
+            _crashReportClear.value = CrashReportClear.CLEARED
+            return
+        }
+        _crashReportClear.value = CrashReportClear.CLEARING
+        schedule { deleted ->
+            val outcome = if (deleted) CrashReportClear.CLEARED else CrashReportClear.FAILED
+            // Only the latest request may settle the state; an older outcome is stale.
+            _crashReportClear.update { if (crashReportClearRequests.get() == request) outcome else it }
+        }
     }
 
     data class Entry(
@@ -93,6 +130,9 @@ class DiagnosticsLog @Inject constructor() {
     )
 
     enum class Level { INFO, DEBUG, WARN, ERROR }
+
+    /** Durable deletion of the retained crash report, as shown next to the cleared log. */
+    enum class CrashReportClear { IDLE, CLEARING, CLEARED, FAILED }
 
     companion object {
         const val CAPACITY = 200

@@ -15,9 +15,13 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.AssumptionViolatedException
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+
+private const val EDITOR = "fr.forumhfr.redface2.feature.editor.Editor"
+private const val PARSER = "fr.forumhfr.redface2.core.parser.Parser"
 
 class LastCrashReportTest {
     @get:Rule val folder = TemporaryFolder()
@@ -30,10 +34,10 @@ class LastCrashReportTest {
         val thread = Thread("editor-main")
         val report = LastCrashReport(folder.root, environment, thread)
         val cause = IOException("cause message").apply {
-            stackTrace = arrayOf(StackTraceElement("Parser", "parse", "Parser.kt", 7))
+            stackTrace = arrayOf(StackTraceElement(PARSER, "parse", "Parser.kt", 7))
         }
         val failure = IllegalStateException("editor failure", cause).apply {
-            stackTrace = arrayOf(StackTraceElement("Editor", "open", "Editor.kt", 19))
+            stackTrace = arrayOf(StackTraceElement(EDITOR, "open", "Editor.kt", 19))
         }
         var calls = 0
         val before = System.currentTimeMillis()
@@ -50,8 +54,9 @@ class LastCrashReportTest {
         assertTrue(capture.timestampMillis in before..System.currentTimeMillis())
         assertEquals(
             "$environment\nthread=main\njava.lang.IllegalStateException: message omitted (14 chars)\n" +
-                "\tat Editor.open(Editor.kt:19)\nCaused by: java.io.IOException: message omitted (13 chars)\n" +
-                "\tat Parser.parse(Parser.kt:7)\n",
+                "\tat $EDITOR.open(Editor.kt:19)\n" +
+                "Caused by: java.io.IOException: message omitted (13 chars)\n" +
+                "\tat $PARSER.parse(Parser.kt:7)\n",
             capture.details,
         )
     }
@@ -82,7 +87,7 @@ class LastCrashReportTest {
         val report = LastCrashReport(folder.root, environment)
         val failure = IllegalStateException("é".repeat(60_000) + "message end").apply {
             stackTrace = Array(100) { index ->
-                StackTraceElement("Frame${"界".repeat(140)}", "open", "Editor.kt", index)
+                StackTraceElement("fr.forumhfr.redface2.Frame${"界".repeat(140)}", "open", "Editor.kt", index)
             }
         }
 
@@ -160,10 +165,10 @@ class LastCrashReportTest {
         val ui = Executors.newSingleThreadExecutor()
         val log = DiagnosticsLog().apply {
             record(DiagnosticsLog.Level.INFO, "HfrCall", "event before clear")
-            registerCrashReportClear {
+            registerCrashReportClear { onResult ->
                 disk.execute {
                     deleting.countDown()
-                    deleted.complete(startup.clear())
+                    deleted.complete(startup.clear().also(onResult))
                 }
             }
         }
@@ -185,6 +190,7 @@ class LastCrashReportTest {
             assertTrue(deleting.await(5, SECONDS))
             assertTrue(reportFile.exists())
             assertFalse(deleted.isDone)
+            assertEquals(DiagnosticsLog.CrashReportClear.CLEARING, log.crashReportClear.value)
 
             release.countDown()
             val pending = checkNotNull(importing.get(5, SECONDS))
@@ -193,12 +199,106 @@ class LastCrashReportTest {
                 assertTrue(log.entries.value.isEmpty())
             }.get(5, SECONDS)
             assertTrue(deleted.get(5, SECONDS))
+            assertEquals(DiagnosticsLog.CrashReportClear.CLEARED, log.crashReportClear.value)
         } finally {
             release.countDown()
             disk.shutdownNow()
             ui.shutdownNow()
         }
         assertNull(LastCrashReport(folder.root, environment).importStartup())
+    }
+
+    @Test
+    fun `clear is confirmed only after the report is deleted off the calling thread`() {
+        capture(LastCrashReport(folder.root, environment), IllegalStateException("editor failed"))
+        val startup = LastCrashReport(folder.root, environment)
+        val pendingDeletions = ArrayDeque<() -> Unit>()
+        val log = DiagnosticsLog().apply {
+            registerCrashReportClear { onResult -> pendingDeletions += { onResult(startup.clear()) } }
+        }
+        importCrash(startup, log)
+        assertEquals(DiagnosticsLog.CrashReportClear.IDLE, log.crashReportClear.value)
+
+        log.clear()
+
+        // The click has returned: memory is empty, but nothing is confirmed while the file exists.
+        assertTrue(log.entries.value.isEmpty())
+        assertTrue(reportFile.exists())
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARING, log.crashReportClear.value)
+
+        pendingDeletions.removeFirst()()
+
+        assertFalse(reportFile.exists())
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARED, log.crashReportClear.value)
+        assertTrue(pendingDeletions.isEmpty())
+    }
+
+    @Test
+    fun `a failed deletion is reported and a retry deletes the report`() {
+        // A non-empty directory in place of the report makes the deletion fail without mocks.
+        val blocker = File(folder.newFolder("last-crash"), "blocker").apply { writeText("x") }
+        val startup = LastCrashReport(folder.root, environment)
+        val log = startupLog(startup)
+        log.record(DiagnosticsLog.Level.INFO, "HfrCall", "event before clear")
+
+        log.clear()
+
+        assertTrue(log.entries.value.isEmpty())
+        assertTrue(reportFile.exists())
+        assertEquals(DiagnosticsLog.CrashReportClear.FAILED, log.crashReportClear.value)
+
+        log.record(DiagnosticsLog.Level.INFO, "HfrCall", "event after clear")
+        assertTrue(blocker.delete())
+        log.retryCrashReportClear()
+
+        assertFalse(reportFile.exists())
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARED, log.crashReportClear.value)
+        assertEquals("event after clear", log.entries.value.single().message)
+    }
+
+    @Test
+    fun `symbols of unknown origin are omitted from the kept file and the published entry`() {
+        // JUnit stands for any class outside the known packages, such as a name shaped by user data.
+        val cause = AssumptionViolatedException("Alice").apply {
+            stackTrace = arrayOf(StackTraceElement(PARSER, "parse", "Parser.java", 7))
+        }
+        val failure = AssumptionViolatedException("Alice", cause).apply {
+            stackTrace = arrayOf(
+                StackTraceElement("fr.forumhfr.redface2.core.network.CookieJar", "load", "Cookie.kt", 42),
+                StackTraceElement("Alice", "open", "Alice.kt", 1),
+                StackTraceElement("com.example.Alice", "open", "Editor.kt", 2),
+                StackTraceElement("fr.forumhfr.redface3.Editor", "Alice", "Editor.kt", 3),
+                StackTraceElement(EDITOR, "open", "Alice", 4),
+                StackTraceElement(EDITOR, "open", "Alice.txt", 5),
+                StackTraceElement(EDITOR, "open", null, 6),
+                StackTraceElement("okhttp3.internal.connection.RealCall", "execute", "RealCall.kt", 8),
+                StackTraceElement("Alice", "Alice", "Alice.java", 9),
+            )
+        }
+        capture(LastCrashReport(folder.root, environment), failure)
+
+        val kept = reportFile.readBytes().decodeToString()
+        val startup = LastCrashReport(folder.root, environment)
+        val log = startupLog(startup)
+        importCrash(startup, log)
+        val published = log.entries.value.single().message
+
+        listOf("Alice", "junit", "AssumptionViolatedException").forEach {
+            assertFalse("Kept $it: $kept", kept.contains(it))
+            assertFalse("Published $it: $published", published.contains(it))
+        }
+        val omittedMessage = "message omitted (${failure.message!!.length} chars)"
+        assertTrue(
+            published.endsWith(
+                "thread=main\n<omitted exception class>: $omittedMessage\n" +
+                    "\tat fr.forumhfr.redface2.core.network.CookieJar.load(Cookie.kt:42)\n" +
+                    "\tat <omitted frame> (x6)\n" +
+                    "\tat okhttp3.internal.connection.RealCall.execute(RealCall.kt:8)\n" +
+                    "\tat <omitted frame>\n" +
+                    "Caused by: <omitted exception class>: $omittedMessage\n" +
+                    "\tat $PARSER.parse(Parser.java:7)",
+            ),
+        )
     }
 
     @Test
@@ -216,11 +316,11 @@ class LastCrashReportTest {
         val cause = IOException(privateText, approved).apply { stackTrace = emptyArray() }
         val failure = IllegalStateException("Failed requirement. $privateText", cause).apply {
             stackTrace = arrayOf(
-                StackTraceElement("fr.forumhfr.Editor", "open", "Cookie.kt", 123456),
-                StackTraceElement("Class/SecretClass", "open", "Editor.kt", 20),
-                StackTraceElement("Editor", "method=SecretMethod", "Editor.kt", 21),
-                StackTraceElement("loader", "module/SecretModule", "1", "Editor", "open", "Editor.kt", 22),
-            ) + privateFields.map { StackTraceElement("Parser", "parse", it, 23) }
+                StackTraceElement(EDITOR, "open", "Cookie.kt", 123456),
+                StackTraceElement("fr.forumhfr.redface2.Class/SecretClass", "open", "Editor.kt", 20),
+                StackTraceElement(EDITOR, "method=SecretMethod", "Editor.kt", 21),
+                StackTraceElement("loader", "module/SecretModule", "1", EDITOR, "open", "Editor.kt", 22),
+            ) + privateFields.map { StackTraceElement(PARSER, "parse", it, 23) }
         }
         capture(LastCrashReport(folder.root, environment), failure, Thread(privateText))
 
@@ -242,7 +342,8 @@ class LastCrashReportTest {
         assertEquals(
             "$environment\nthread=other\njava.lang.IllegalStateException: " +
                 "message omitted (${failure.message!!.length} chars)\n" +
-                "\tat fr.forumhfr.Editor.open(Cookie.kt:123456)\n\tat Editor.open(Editor.kt:22)\n" +
+                "\tat $EDITOR.open(Cookie.kt:123456)\n\tat <omitted frame> (x2)\n" +
+                "\tat $EDITOR.open(Editor.kt:22)\n\tat <omitted frame> (x6)\n" +
                 "Caused by: java.io.IOException: message omitted (${privateText.length} chars)\n" +
                 "Caused by: java.lang.IllegalArgumentException: Failed requirement.\n",
             retained,
@@ -341,7 +442,7 @@ class LastCrashReportTest {
     }
 
     private fun startupLog(report: LastCrashReport) = DiagnosticsLog().apply {
-        registerCrashReportClear { assertTrue(report.clear()) }
+        registerCrashReportClear { onResult -> onResult(report.clear()) }
     }
 
     private fun importCrash(report: LastCrashReport, log: DiagnosticsLog) {

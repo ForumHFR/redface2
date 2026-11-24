@@ -77,11 +77,12 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
         val crashReport = if (getProcessName() == packageName) installCrashHandler() else null
         super.onCreate()
         if (crashReport != null) {
-            diagnostics.registerCrashReportClear {
+            // "Vider" returns at once; the screen confirms only after this deletion reports success.
+            diagnostics.registerCrashReportClear { onResult ->
                 applicationScope.launch(Dispatchers.IO) {
-                    if (!crashReport.clear()) {
-                        Log.w(DiagnosticsLog.CRASH_TAG, "Could not delete the retained crash report")
-                    }
+                    val deleted = crashReport.clear()
+                    if (!deleted) Log.w(DiagnosticsLog.CRASH_TAG, "Could not delete the retained crash report")
+                    onResult(deleted)
                 }
             }
             applicationScope.launch(Dispatchers.Main) {

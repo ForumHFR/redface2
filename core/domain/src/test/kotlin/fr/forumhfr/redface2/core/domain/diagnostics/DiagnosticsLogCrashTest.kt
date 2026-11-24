@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.domain.diagnostics
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.AssumptionViolatedException
 import org.junit.Test
 
 class DiagnosticsLogCrashTest {
@@ -29,5 +30,114 @@ class DiagnosticsLogCrashTest {
         log.record(DiagnosticsLog.Level.INFO, "HfrCall", "event after clear")
 
         assertEquals("event after clear", log.entries.value.single().message)
+    }
+
+    @Test
+    fun `clear confirms the deletion only when the scheduled work reports success`() {
+        val log = DiagnosticsLog()
+        val results = mutableListOf<(Boolean) -> Unit>()
+        log.registerCrashReportClear { results += it }
+        log.recordCrash(0, "editor failed")
+        assertEquals(DiagnosticsLog.CrashReportClear.IDLE, log.crashReportClear.value)
+
+        log.clear()
+
+        assertTrue(log.entries.value.isEmpty())
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARING, log.crashReportClear.value)
+        results.single()(true)
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARED, log.crashReportClear.value)
+    }
+
+    @Test
+    fun `a failed deletion stays visible until a retry succeeds and keeps newer entries`() {
+        val log = DiagnosticsLog()
+        val results = mutableListOf<(Boolean) -> Unit>()
+        log.registerCrashReportClear { results += it }
+
+        log.clear()
+        results.removeAt(0)(false)
+        assertEquals(DiagnosticsLog.CrashReportClear.FAILED, log.crashReportClear.value)
+
+        log.record(DiagnosticsLog.Level.INFO, "HfrCall", "event after clear")
+        log.retryCrashReportClear()
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARING, log.crashReportClear.value)
+        // A second request while one is in flight is ignored.
+        log.retryCrashReportClear()
+        results.single()(true)
+
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARED, log.crashReportClear.value)
+        assertEquals("event after clear", log.entries.value.single().message)
+    }
+
+    @Test
+    fun `a stale deletion outcome cannot settle a newer request`() {
+        val log = DiagnosticsLog()
+        val results = mutableListOf<(Boolean) -> Unit>()
+        log.registerCrashReportClear { results += it }
+
+        log.clear()
+        log.clear()
+        results[0](true)
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARING, log.crashReportClear.value)
+        results[1](false)
+        assertEquals(DiagnosticsLog.CrashReportClear.FAILED, log.crashReportClear.value)
+    }
+
+    @Test
+    fun `unknown classes files and methods become anonymous and consecutive omissions are grouped`() {
+        // JUnit stands for any class outside the known packages, such as a name shaped by user data.
+        val known = "fr.forumhfr.redface2.core.network.CookieJar"
+        val cause = AssumptionViolatedException("private").apply {
+            stackTrace = arrayOf(StackTraceElement("Alice", "Alice", "Alice.kt", 1))
+        }
+        val failure = AssumptionViolatedException("private", cause).apply {
+            stackTrace = arrayOf(
+                StackTraceElement(known, "load", "Cookie.kt", 42),
+                StackTraceElement("Alice", "open", "Alice.kt", 1),
+                StackTraceElement("com.example.Alice", "Alice", "Alice.java", 2),
+                StackTraceElement(known, "load", "Alice.txt", 3),
+                StackTraceElement(known, "load", "Alice", 4),
+                StackTraceElement(known, "load", null, 5),
+                StackTraceElement("java.lang.Thread", "run", "Thread.java", 1012),
+                StackTraceElement("javafake.Alice", "run", "Alice.kt", 6),
+            )
+        }
+        val lines = mutableListOf<String>()
+        val omittedMessage = "message omitted (${failure.message!!.length} chars)"
+
+        CrashReportStack.write(Thread.currentThread(), Thread.currentThread(), failure) { lines.add(it) }
+
+        assertEquals(
+            listOf(
+                "thread=main",
+                "<omitted exception class>: $omittedMessage",
+                "\tat $known.load(Cookie.kt:42)",
+                "\tat <omitted frame> (x5)",
+                "\tat java.lang.Thread.run(Thread.java:1012)",
+                "\tat <omitted frame>",
+                "Caused by: <omitted exception class>: $omittedMessage",
+                "\tat <omitted frame>",
+            ),
+            lines,
+        )
+    }
+
+    @Test
+    fun `an exhausted sink stops the report while flushing omitted frames`() {
+        val failure = IllegalStateException().apply {
+            stackTrace = arrayOf(
+                StackTraceElement("Alice", "open", "Alice.kt", 1),
+                StackTraceElement("java.lang.Thread", "run", "Thread.java", 1012),
+            )
+        }
+        val lines = mutableListOf<String>()
+
+        CrashReportStack.write(Thread.currentThread(), Thread.currentThread(), failure) {
+            lines.add(it)
+            lines.size < 3
+        }
+
+        assertEquals("\tat <omitted frame>", lines.last())
+        assertEquals(3, lines.size)
     }
 }
