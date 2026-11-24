@@ -24,6 +24,8 @@ class AndroidNetworkDiagnosticsContextProvider @Inject constructor(
     override fun observe(listener: (NetworkDiagnosticsEvent) -> Unit): DiagnosticsSubscription =
         monitor.observe(listener)
 
+    override fun defaultNetworkChangeCount(): Long? = monitor.defaultNetworkChangeCount()
+
     override fun restrictions(): NetworkDiagnosticsRestrictions {
         val dataSaver = runCatching {
             when (context.getSystemService(ConnectivityManager::class.java)?.restrictBackgroundStatus) {

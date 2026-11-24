@@ -57,7 +57,7 @@ internal constructor(
     override suspend fun run(onWaveStarted: (Int) -> Unit, onWaveFinished: (NetworkProbeWave) -> Unit) {
         val client = anonymousProbeClient(baseClient)
         val observation = traffic.snapshot()
-        val environment = ProbeEnvironment()
+        val environment = ProbeEnvironment(network)
         val foregroundSubscription = foreground.observe(environment::visibilityChanged)
         val networkSubscription = runCatching { network.observe(environment::networkChanged) }.getOrNull()
         try {
@@ -168,16 +168,19 @@ internal constructor(
     private class ExchangeLimitExceeded : IOException("Probe exchange limit")
 }
 
-/** Callbacks and wave boundaries share a lock so brief transitions survive until the drain. */
-private class ProbeEnvironment {
+/** Remembers brief transitions until the drain, even when the environment recovers during the wave. */
+private class ProbeEnvironment(private val network: NetworkDiagnosticsContextProvider) {
     private var visibility = AppVisibility.UNKNOWN
     private var sawBackground = false
     private var sawNetworkChange = false
+    private var networkChangesAtStart: Long? = null
 
-    @Synchronized
     fun startWave() {
-        sawBackground = visibility == AppVisibility.BACKGROUND
-        sawNetworkChange = false
+        synchronized(this) {
+            sawBackground = visibility == AppVisibility.BACKGROUND
+            sawNetworkChange = false
+        }
+        networkChangesAtStart = readNetworkChangeCount()
     }
 
     @Synchronized
@@ -191,12 +194,22 @@ private class ProbeEnvironment {
         if (event.defaultNetworkChanged) sawNetworkChange = true
     }
 
-    @Synchronized
-    fun disturbances(hfrTraffic: Boolean): Set<NetworkProbeDisturbance> = buildSet {
-        if (hfrTraffic) add(NetworkProbeDisturbance.HFR_TRAFFIC)
-        if (sawBackground) add(NetworkProbeDisturbance.BACKGROUND)
-        if (sawNetworkChange) add(NetworkProbeDisturbance.NETWORK_CHANGE)
+    fun disturbances(hfrTraffic: Boolean): Set<NetworkProbeDisturbance> {
+        val networkChangesAtDrain = readNetworkChangeCount()
+        return synchronized(this) {
+            val networkChanged = if (networkChangesAtStart != null && networkChangesAtDrain != null) {
+                networkChangesAtStart != networkChangesAtDrain
+            } else sawNetworkChange
+            buildSet {
+                if (hfrTraffic) add(NetworkProbeDisturbance.HFR_TRAFFIC)
+                if (sawBackground) add(NetworkProbeDisturbance.BACKGROUND)
+                if (networkChanged) add(NetworkProbeDisturbance.NETWORK_CHANGE)
+            }
+        }
     }
+
+    // The Android monitor calls networkChanged with its own lock held.
+    private fun readNetworkChangeCount(): Long? = runCatching { network.defaultNetworkChangeCount() }.getOrNull()
 }
 
 /** Retains proxy routing, DNS and platform TLS verification, but carries no account-capable hooks. */

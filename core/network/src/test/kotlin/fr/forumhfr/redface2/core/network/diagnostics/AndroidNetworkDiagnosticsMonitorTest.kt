@@ -105,6 +105,32 @@ class AndroidNetworkDiagnosticsMonitorTest {
     }
 
     @Test
+    fun `first callback sets the baseline when the initial default cannot be read`() {
+        every { manager.activeNetwork } throws SecurityException()
+        val changes = mutableListOf<Boolean>()
+        val subscription = provider.observe { changes += it.defaultNetworkChanged }
+        callback.captured.onAvailable(network)
+        callback.captured.onAvailable(mockk())
+
+        assertEquals(listOf(false, true), changes)
+        assertEquals(1L, provider.defaultNetworkChangeCount())
+        subscription.close()
+    }
+
+    @Test
+    fun `first callback is a change after a confirmed absence of default network`() {
+        every { manager.activeNetwork } returns null
+        val changes = mutableListOf<Boolean>()
+        val subscription = provider.observe { changes += it.defaultNetworkChanged }
+        every { manager.activeNetwork } returns network
+        callback.captured.onAvailable(network)
+
+        assertEquals(listOf(true), changes)
+        assertEquals(1L, provider.defaultNetworkChangeCount())
+        subscription.close()
+    }
+
+    @Test
     fun `late callbacks from an old registration cannot pollute a later refresh`() {
         val oldEvents = mutableListOf<String>()
         val first = provider.observe { oldEvents += it.line() }

@@ -7,6 +7,9 @@ fun interface NetworkDiagnosticsContextProvider {
     fun restrictions(): NetworkDiagnosticsRestrictions = NetworkDiagnosticsRestrictions()
 
     fun observe(listener: (NetworkDiagnosticsEvent) -> Unit): DiagnosticsSubscription = DiagnosticsSubscription { }
+
+    /** Refreshes the default network and returns its change count for the active observation, if available. */
+    fun defaultNetworkChangeCount(): Long? = null
 }
 
 /** Stable ordering keeps VPN visible even when capabilities also expose another transport. */

@@ -1,5 +1,8 @@
 package fr.forumhfr.redface2.core.network.diagnostics
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
 import fr.forumhfr.redface2.core.domain.diagnostics.AppForegroundDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsSubscription
@@ -11,8 +14,11 @@ import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsEventKind
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeDisturbance
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeOutcome
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeWave
+import io.mockk.Runs
 import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
 import java.net.Proxy
 import java.net.UnknownHostException
@@ -78,7 +84,10 @@ class OkHttpNetworkProbeEnvironmentTest {
         runner().run(onWaveStarted = { size ->
             when (size) {
                 1 -> network.emit(NetworkDiagnosticsEvent(NetworkDiagnosticsEventKind.AVAILABLE))
-                5 -> network.emit(NetworkDiagnosticsEvent(NetworkDiagnosticsEventKind.AVAILABLE, becameDefault = true))
+                5 -> network.emit(NetworkDiagnosticsEvent(
+                    NetworkDiagnosticsEventKind.AVAILABLE,
+                    defaultNetworkChanged = true,
+                ))
                 10 -> network.emit(NetworkDiagnosticsEvent(NetworkDiagnosticsEventKind.VALIDATED))
                 20 -> network.emit(NetworkDiagnosticsEvent(NetworkDiagnosticsEventKind.LOST))
             }
@@ -91,6 +100,61 @@ class OkHttpNetworkProbeEnvironmentTest {
         assertEquals(listOf(emptySet(), changed, emptySet(), changed), waves.map { it.disturbedBy })
         assertEquals(1, network.observations)
         assertEquals(1, network.closes)
+    }
+
+    @Test
+    fun `a change during wave 10 is counted there even when the callback arrives in wave 20`() = runBlocking {
+        val changed = setOf(NetworkProbeDisturbance.NETWORK_CHANGE)
+        assertEquals(listOf(emptySet(), emptySet(), changed, emptySet()), delayedDefaultChange())
+    }
+
+    @Test
+    fun `a late callback does not mask another brief switch during wave 20`() = runBlocking {
+        val changed = setOf(NetworkProbeDisturbance.NETWORK_CHANGE)
+        assertEquals(listOf(emptySet(), emptySet(), changed, changed), delayedDefaultChange(switchAgain = true))
+    }
+
+    @Test
+    fun `a change between waves does not disturb the next wave when its callback arrives`() = runBlocking {
+        assertEquals(List(4) { emptySet<NetworkProbeDisturbance>() }, delayedDefaultChange(betweenWaves = true))
+    }
+
+    private suspend fun delayedDefaultChange(
+        switchAgain: Boolean = false,
+        betweenWaves: Boolean = false,
+    ): List<Set<NetworkProbeDisturbance>> {
+        val initial = mockk<Network>()
+        val replacement = mockk<Network>()
+        var active = initial
+        val context = mockk<Context>()
+        val manager = mockk<ConnectivityManager>()
+        val callback = slot<ConnectivityManager.NetworkCallback>()
+        every { context.getSystemService(ConnectivityManager::class.java) } returns manager
+        every { manager.activeNetwork } answers { active }
+        every { manager.registerDefaultNetworkCallback(capture(callback)) } just Runs
+        every { manager.unregisterNetworkCallback(any<ConnectivityManager.NetworkCallback>()) } just Runs
+
+        val waves = mutableListOf<NetworkProbeWave>()
+        runner(network = AndroidNetworkDiagnosticsContextProvider(context)).run(onWaveStarted = { size ->
+            when (size) {
+                10 -> if (!betweenWaves) active = replacement
+                20 -> {
+                    callback.captured.onAvailable(initial)
+                    callback.captured.onAvailable(replacement)
+                    if (switchAgain) {
+                        // A brief switch reported by the callbacks leaves the same default at the drain.
+                        active = mockk()
+                        callback.captured.onAvailable(active)
+                        active = replacement
+                        callback.captured.onAvailable(active)
+                    }
+                }
+            }
+        }, onWaveFinished = { wave ->
+            waves += wave
+            if (wave.size == 10 && betweenWaves) active = replacement
+        })
+        return waves.map { it.disturbedBy }
     }
 
     @Test(timeout = 10_000)
@@ -127,6 +191,7 @@ class OkHttpNetworkProbeEnvironmentTest {
     private fun runner(
         dns: Dns = Dns { throw UnknownHostException() },
         foreground: AppForegroundDiagnostics = this.foreground,
+        network: NetworkDiagnosticsContextProvider = this.network,
     ): OkHttpNetworkProbeRunner {
         val client = OkHttpClient.Builder().proxy(Proxy.NO_PROXY).dns(dns).build()
         return OkHttpNetworkProbeRunner(client, "https://probe.invalid/".toHttpUrl(), Dispatchers.IO, traffic,
