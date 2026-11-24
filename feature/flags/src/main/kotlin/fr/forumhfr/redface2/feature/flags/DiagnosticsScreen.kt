@@ -148,7 +148,7 @@ internal fun DiagnosticsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
-            CrashReportClearStatus(crashReportClear, viewModel::retryCrashReportClear)
+            CrashReportClearStatus(crashReportClear.status, viewModel::retryCrashReportClear)
             NetworkProbePanel(probeState, cooldownSeconds, viewModel::startProbe, viewModel::cancelProbe)
             TextButton(
                 onClick = { showPolicy = true },

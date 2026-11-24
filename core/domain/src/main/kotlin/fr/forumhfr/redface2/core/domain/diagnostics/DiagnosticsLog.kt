@@ -37,10 +37,10 @@ class DiagnosticsLog @Inject constructor() {
     @Volatile private var submissionTraceSink: ((String) -> Unit)? = null
     private var scheduleCrashReportClear: ((onResult: (Boolean) -> Unit) -> Unit)? = null
     private val crashReportClearRequests = AtomicLong()
-    private val _crashReportClear = MutableStateFlow(CrashReportClear.IDLE)
+    private val _crashReportClear = MutableStateFlow(CrashReportClearState(0, CrashReportClear.IDLE))
 
     /** Outcome of the latest durable deletion requested by [clear] or [retryCrashReportClear]. */
-    val crashReportClear: StateFlow<CrashReportClear> = _crashReportClear.asStateFlow()
+    val crashReportClear: StateFlow<CrashReportClearState> = _crashReportClear.asStateFlow()
 
     /** Installed only by debug/dev app startup; prod/beta release keeps the volatile buffer. */
     fun exportSubmissionTraces(sink: (String) -> Unit) { submissionTraceSink = sink }
@@ -102,7 +102,7 @@ class DiagnosticsLog @Inject constructor() {
 
     /** Runs the durable deletion again after a failure, keeping the entries recorded since. */
     fun retryCrashReportClear() {
-        if (_crashReportClear.value == CrashReportClear.FAILED) requestCrashReportClear()
+        if (_crashReportClear.value.status == CrashReportClear.FAILED) requestCrashReportClear()
     }
 
     private fun requestCrashReportClear() {
@@ -110,15 +110,23 @@ class DiagnosticsLog @Inject constructor() {
         val schedule = scheduleCrashReportClear
         if (schedule == null) {
             // No report is kept by this process (tests, secondary process): nothing to wait for.
-            _crashReportClear.value = CrashReportClear.CLEARED
+            _crashReportClear.value = CrashReportClearState(request, CrashReportClear.CLEARED)
             return
         }
-        _crashReportClear.value = CrashReportClear.CLEARING
-        schedule { deleted ->
-            val outcome = if (deleted) CrashReportClear.CLEARED else CrashReportClear.FAILED
-            // Only the latest request may settle the state; an older outcome is stale.
-            _crashReportClear.update { if (crashReportClearRequests.get() == request) outcome else it }
-        }
+        val pending = CrashReportClearState(request, CrashReportClear.CLEARING)
+        _crashReportClear.value = pending
+        schedule { deleted -> settleCrashReportClear(pending, deleted) }
+    }
+
+    /**
+     * Publishes the outcome of the request seen as [checked], from any thread. Request and status
+     * are compared and replaced as one value, so a click that lands after the check and before this
+     * publication makes the comparison fail and keeps its own pending state.
+     */
+    internal fun settleCrashReportClear(checked: CrashReportClearState, deleted: Boolean): Boolean {
+        val outcome = if (deleted) CrashReportClear.CLEARED else CrashReportClear.FAILED
+        return checked.status == CrashReportClear.CLEARING &&
+            _crashReportClear.compareAndSet(checked, checked.copy(status = outcome))
     }
 
     data class Entry(
@@ -133,6 +141,9 @@ class DiagnosticsLog @Inject constructor() {
 
     /** Durable deletion of the retained crash report, as shown next to the cleared log. */
     enum class CrashReportClear { IDLE, CLEARING, CLEARED, FAILED }
+
+    /** A status and the request it belongs to, published together so a stale outcome cannot win. */
+    data class CrashReportClearState(val request: Long, val status: CrashReportClear)
 
     companion object {
         const val CAPACITY = 200

@@ -91,7 +91,7 @@ internal class LastCrashReport(
     private fun read(openReport: (File) -> RandomAccessFile): Capture? = try {
         openReport(report).use { input ->
             val length = input.length()
-            // Earlier formats allowed free text and cannot be imported.
+            // Earlier formats allowed free text or unfiltered symbols and cannot be imported.
             if (length in (HEADER_BYTES + 1L)..MAX_REPORT_BYTES.toLong() &&
                 input.readInt() == STRUCTURED_REPORT_MAGIC
             ) {
@@ -128,7 +128,9 @@ internal class LastCrashReport(
     companion object {
         private const val CRASH_EXIT_CODE = 10
         private const val MAX_REPORT_BYTES = 16 * 1024
-        private const val STRUCTURED_REPORT_MAGIC = 0x52464331 // RFC1
+        // Bump whenever the capture filter tightens: files written under an older marker (RFC1 kept
+        // symbols of unknown origin) or without one are never imported, and "Vider" deletes them.
+        private const val STRUCTURED_REPORT_MAGIC = 0x52464332 // RFC2
         private const val HEADER_BYTES = Int.SIZE_BYTES + Long.SIZE_BYTES
         private val TRUNCATED = "... crash report truncated\n".toByteArray(Charsets.UTF_8)
     }

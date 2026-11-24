@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.domain.diagnostics
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.AssumptionViolatedException
 import org.junit.Test
@@ -38,14 +39,14 @@ class DiagnosticsLogCrashTest {
         val results = mutableListOf<(Boolean) -> Unit>()
         log.registerCrashReportClear { results += it }
         log.recordCrash(0, "editor failed")
-        assertEquals(DiagnosticsLog.CrashReportClear.IDLE, log.crashReportClear.value)
+        assertEquals(DiagnosticsLog.CrashReportClear.IDLE, log.crashReportClear.value.status)
 
         log.clear()
 
         assertTrue(log.entries.value.isEmpty())
-        assertEquals(DiagnosticsLog.CrashReportClear.CLEARING, log.crashReportClear.value)
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARING, log.crashReportClear.value.status)
         results.single()(true)
-        assertEquals(DiagnosticsLog.CrashReportClear.CLEARED, log.crashReportClear.value)
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARED, log.crashReportClear.value.status)
     }
 
     @Test
@@ -56,31 +57,42 @@ class DiagnosticsLogCrashTest {
 
         log.clear()
         results.removeAt(0)(false)
-        assertEquals(DiagnosticsLog.CrashReportClear.FAILED, log.crashReportClear.value)
+        assertEquals(DiagnosticsLog.CrashReportClear.FAILED, log.crashReportClear.value.status)
 
         log.record(DiagnosticsLog.Level.INFO, "HfrCall", "event after clear")
         log.retryCrashReportClear()
-        assertEquals(DiagnosticsLog.CrashReportClear.CLEARING, log.crashReportClear.value)
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARING, log.crashReportClear.value.status)
         // A second request while one is in flight is ignored.
         log.retryCrashReportClear()
         results.single()(true)
 
-        assertEquals(DiagnosticsLog.CrashReportClear.CLEARED, log.crashReportClear.value)
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARED, log.crashReportClear.value.status)
         assertEquals("event after clear", log.entries.value.single().message)
     }
 
     @Test
-    fun `a stale deletion outcome cannot settle a newer request`() {
+    fun `an outcome checked before a second click cannot settle that click when it is published after`() {
         val log = DiagnosticsLog()
         val results = mutableListOf<(Boolean) -> Unit>()
         log.registerCrashReportClear { results += it }
+        log.clear()
 
+        // A's deletion ends and A checks that it is still the pending request.
+        val checkedByA = log.crashReportClear.value
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARING, checkedByA.status)
+        // B clicks before A publishes: the status is CLEARING again, for another request.
         log.clear()
-        log.clear()
-        results[0](true)
-        assertEquals(DiagnosticsLog.CrashReportClear.CLEARING, log.crashReportClear.value)
+        val pendingB = log.crashReportClear.value
+        assertEquals(DiagnosticsLog.CrashReportClearState(checkedByA.request + 1, checkedByA.status), pendingB)
+        // A publishes what it checked.
+        assertFalse(log.settleCrashReportClear(checkedByA, deleted = true))
+
+        assertEquals(pendingB, log.crashReportClear.value)
         results[1](false)
-        assertEquals(DiagnosticsLog.CrashReportClear.FAILED, log.crashReportClear.value)
+        assertEquals(pendingB.copy(status = DiagnosticsLog.CrashReportClear.FAILED), log.crashReportClear.value)
+        // A's own late callback changes nothing either.
+        results[0](true)
+        assertEquals(DiagnosticsLog.CrashReportClear.FAILED, log.crashReportClear.value.status)
     }
 
     @Test

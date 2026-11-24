@@ -190,7 +190,7 @@ class LastCrashReportTest {
             assertTrue(deleting.await(5, SECONDS))
             assertTrue(reportFile.exists())
             assertFalse(deleted.isDone)
-            assertEquals(DiagnosticsLog.CrashReportClear.CLEARING, log.crashReportClear.value)
+            assertEquals(DiagnosticsLog.CrashReportClear.CLEARING, log.crashReportClear.value.status)
 
             release.countDown()
             val pending = checkNotNull(importing.get(5, SECONDS))
@@ -199,7 +199,7 @@ class LastCrashReportTest {
                 assertTrue(log.entries.value.isEmpty())
             }.get(5, SECONDS)
             assertTrue(deleted.get(5, SECONDS))
-            assertEquals(DiagnosticsLog.CrashReportClear.CLEARED, log.crashReportClear.value)
+            assertEquals(DiagnosticsLog.CrashReportClear.CLEARED, log.crashReportClear.value.status)
         } finally {
             release.countDown()
             disk.shutdownNow()
@@ -217,19 +217,19 @@ class LastCrashReportTest {
             registerCrashReportClear { onResult -> pendingDeletions += { onResult(startup.clear()) } }
         }
         importCrash(startup, log)
-        assertEquals(DiagnosticsLog.CrashReportClear.IDLE, log.crashReportClear.value)
+        assertEquals(DiagnosticsLog.CrashReportClear.IDLE, log.crashReportClear.value.status)
 
         log.clear()
 
         // The click has returned: memory is empty, but nothing is confirmed while the file exists.
         assertTrue(log.entries.value.isEmpty())
         assertTrue(reportFile.exists())
-        assertEquals(DiagnosticsLog.CrashReportClear.CLEARING, log.crashReportClear.value)
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARING, log.crashReportClear.value.status)
 
         pendingDeletions.removeFirst()()
 
         assertFalse(reportFile.exists())
-        assertEquals(DiagnosticsLog.CrashReportClear.CLEARED, log.crashReportClear.value)
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARED, log.crashReportClear.value.status)
         assertTrue(pendingDeletions.isEmpty())
     }
 
@@ -245,14 +245,14 @@ class LastCrashReportTest {
 
         assertTrue(log.entries.value.isEmpty())
         assertTrue(reportFile.exists())
-        assertEquals(DiagnosticsLog.CrashReportClear.FAILED, log.crashReportClear.value)
+        assertEquals(DiagnosticsLog.CrashReportClear.FAILED, log.crashReportClear.value.status)
 
         log.record(DiagnosticsLog.Level.INFO, "HfrCall", "event after clear")
         assertTrue(blocker.delete())
         log.retryCrashReportClear()
 
         assertFalse(reportFile.exists())
-        assertEquals(DiagnosticsLog.CrashReportClear.CLEARED, log.crashReportClear.value)
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARED, log.crashReportClear.value.status)
         assertEquals("event after clear", log.entries.value.single().message)
     }
 
@@ -386,6 +386,37 @@ class LastCrashReportTest {
         assertTrue(reportFile.isFile)
         log.clear()
         assertFalse(reportFile.exists())
+    }
+
+    @Test
+    fun `startup never publishes a report kept under the previous marker with unfiltered symbols`() {
+        val unfiltered = "$environment\nthread=main\ncom.example.Alice: message omitted (5 chars)\n" +
+            "\tat com.example.Alice.open(Alice.kt:1)\n"
+        DataOutputStream(reportFile.outputStream()).use {
+            it.writeInt(0x52464331) // RFC1
+            it.writeLong(0)
+            it.write(unfiltered.toByteArray())
+        }
+        val startup = LastCrashReport(folder.root, environment)
+        val log = startupLog(startup)
+
+        assertNull(startup.importStartup())
+        importCrash(LastCrashReport(folder.root, environment), log)
+
+        // Copy exports only published entries, so nothing of the old report can reach the export.
+        assertTrue(log.entries.value.isEmpty())
+        assertTrue(reportFile.isFile)
+        log.clear()
+        assertFalse(reportFile.exists())
+        assertEquals(DiagnosticsLog.CrashReportClear.CLEARED, log.crashReportClear.value.status)
+    }
+
+    @Test
+    fun `the current marker is written and a report that carries it is imported`() {
+        capture(LastCrashReport(folder.root, environment), IllegalStateException("editor failed"))
+
+        assertEquals("RFC2", reportFile.readBytes().copyOf(4).decodeToString())
+        assertTrue(LastCrashReport(folder.root, environment).importStartup() != null)
     }
 
     @Test
