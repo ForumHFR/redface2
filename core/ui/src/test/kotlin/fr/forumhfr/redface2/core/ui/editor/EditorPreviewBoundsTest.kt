@@ -29,6 +29,13 @@ class EditorPreviewBoundsTest {
         assertNull(editorPreviewBounds(378f, Vertical, true, 160f, sourceExtra = 41f))
     }
 
+    @Test fun `exact fit keeps a valid range after pixel conversion`() {
+        // 687 px of height and a 242 px text field at 400 dpi.
+        val bounds = requireNotNull(editorPreviewBounds(687 / 2.5f, Vertical, false, 242 / 2.5f))
+        assertEquals(160f, bounds.restore(null), 0f)
+        assertEquals(160f, bounds.restore(300f), 0f)
+    }
+
     @Test fun `horizontal provisional width floor is independent of vertical stop`() {
         assertTrue(PREVIEW_HORIZONTAL_MIN_DP != PREVIEW_CLOSED_SOURCE_MIN_DP)
         assertNull(editorPreviewBounds(2 * PREVIEW_HORIZONTAL_MIN_DP + 17f, Horizontal, false, 110f))

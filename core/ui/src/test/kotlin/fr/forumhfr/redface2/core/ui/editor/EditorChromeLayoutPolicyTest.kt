@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -17,6 +19,33 @@ class EditorChromeLayoutPolicyTest {
         assertTrue(result.overflowSlots.isEmpty())
         assertEquals(88.dp, result.scrollingWidth)
         assertTrue(result.hasMinimumContentWidth)
+    }
+
+    @Test
+    fun `ED25 reserves the measured send width at fractional pixel densities`() {
+        listOf(471 to 141, 544 to 163, 546 to 164, 420 to 126).forEach { (dpi, expectedPixels) ->
+            val density = Density(dpi / 160f)
+            val submitWidth = with(density) {
+                val pixels = 48.dp.roundToPx()
+                assertEquals("Send width at $dpi dpi", expectedPixels, pixels)
+                pixels.toDp()
+            }
+            val result = allocateEditorChrome(compact.copy(submitWidth = submitWidth))
+            assertEquals(EditorFixedSlot.entries, result.fixedSlots)
+            assertTrue(result.overflowSlots.isEmpty())
+            assertTrue(result.hasMinimumContentWidth)
+            assertEquals("Scrolling width at $dpi dpi", 136f - submitWidth.value, result.scrollingWidth.value, 0.001f)
+        }
+    }
+
+    @Test
+    fun `ED25 falls back when there is no usable width`() {
+        listOf(0.dp, Dp.Infinity).forEach { width ->
+            val result = allocateEditorChrome(compact.copy(availableWidth = width, submitWidth = 0.dp))
+            assertTrue(result.fixedSlots.isEmpty())
+            assertEquals(0.dp, result.scrollingWidth)
+            assertFalse(result.hasMinimumContentWidth)
+        }
     }
 
     @Test

@@ -31,29 +31,32 @@ data class EditorChromeAllocation(
 fun allocateEditorChrome(request: EditorChromeLayoutRequest): EditorChromeAllocation {
     val widths = listOfNotNull(request.availableWidth, request.submitWidth, request.minimumContentWidth,
         request.firstStatusWidth, request.secondStatusWidth)
-    require(widths.all { it.value.isFinite() && it >= 0.dp })
+    if (widths.any { !it.value.isFinite() || it < 0.dp }) {
+        return EditorChromeAllocation(emptyList(), emptyList(), 0.dp, hasMinimumContentWidth = false)
+    }
     val target = EditorChromeMetrics.minimumTargetSize
-    require(request.submitWidth >= target && request.minimumContentWidth >= EditorChromeMetrics.minimumContentWidth)
+    val minimum = request.minimumContentWidth.coerceAtLeast(EditorChromeMetrics.minimumContentWidth)
     val candidates = if (request.compactHeight) buildList {
         if (request.hasHeader) add(EditorFixedSlot.Header to target)
         add(EditorFixedSlot.Preview to target)
         request.firstStatusWidth?.let { add(EditorFixedSlot.FirstStatus to maxOf(target, it)) }
         request.secondStatusWidth?.let { add(EditorFixedSlot.SecondStatus to maxOf(target, it)) }
     } else emptyList()
+    // A 48 dp touch target can measure slightly less after rounding to whole pixels.
     var remaining = (request.availableWidth - EditorChromeMetrics.horizontalGutters - request.submitWidth)
         .coerceAtLeast(0.dp)
     val fixed = mutableListOf<EditorFixedSlot>()
     val overflow = mutableListOf<EditorFixedSlot>()
     candidates.forEach { (slot, width) ->
         // Keep a priority prefix so masking a wide status never shifts a lower-priority status left.
-        if (overflow.isEmpty() && remaining - width >= request.minimumContentWidth) {
+        if (overflow.isEmpty() && remaining - width >= minimum) {
             fixed += slot
             remaining -= width
         } else {
             overflow += slot
         }
     }
-    return EditorChromeAllocation(fixed, overflow, remaining, remaining >= request.minimumContentWidth)
+    return EditorChromeAllocation(fixed, overflow, remaining, remaining >= minimum)
 }
 
 /** ED-38: the shortcut is the third secondary action, never an ED-25 fixed slot. */
