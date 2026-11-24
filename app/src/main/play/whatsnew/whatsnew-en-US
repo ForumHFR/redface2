@@ -1,5 +1,5 @@
-Redface 2 v0.71.0 — dev.
-- Flags: a partial failure keeps cached flags instead of an error.
-- Reads bounded to 5 in parallel, 12 s deadline.
-- Diagnostics: "Test the connection" button.
-- Diagnostics: experimental refresh strategies to compare.
+Redface 2 v0.71.1 — dev.
+- Editor: no more crash on opening at some screen densities.
+- Flags: reads bounded to 15 in parallel instead of 5.
+- Diagnostics: "Test the connection" flags disturbed waves.
+- Diagnostics: the export includes the last crash stack.

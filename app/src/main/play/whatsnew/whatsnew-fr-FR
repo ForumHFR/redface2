@@ -1,5 +1,5 @@
-Redface 2 v0.71.0 — dev.
-- Drapeaux : un échec partiel garde les drapeaux en cache au lieu d’une erreur.
-- Lectures bornées à 5 en parallèle, échéance de 12 s.
-- Diagnostics : bouton « Tester la connexion ».
-- Diagnostics : stratégies d’actualisation expérimentales à comparer.
+Redface 2 v0.71.1 — dev.
+- Éditeur : plus de plantage à l’ouverture sur certaines densités d’écran.
+- Drapeaux : lectures bornées à 15 en parallèle au lieu de 5.
+- Diagnostics : « Tester la connexion » signale les vagues perturbées.
+- Diagnostics : l’export inclut la pile du dernier plantage.
