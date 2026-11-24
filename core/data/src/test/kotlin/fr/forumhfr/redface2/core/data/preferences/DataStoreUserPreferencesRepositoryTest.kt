@@ -89,8 +89,11 @@ class DataStoreUserPreferencesRepositoryTest {
 
     @Test
     fun `refresh policy defaults and every strategy survive repository recreation`() = runTest(dispatcher) {
-        assertEquals(FlagsRefreshPolicy(),
+        assertEquals(FlagsRefreshPolicy(concurrency = 15),
             repository.observeFlagsRefreshPolicy().first())
+        val savedPolicy = FlagsRefreshPolicy(concurrency = 5)
+        repository.setFlagsRefreshPolicy(savedPolicy)
+        assertEquals(savedPolicy, repositoryWith(dataStore).observeFlagsRefreshPolicy().first())
         FlagsRefreshStrategy.entries.forEach { strategy ->
             val policy = FlagsRefreshPolicy(strategy, 1, false)
             repository.setFlagsRefreshPolicy(policy)

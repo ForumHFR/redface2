@@ -22,6 +22,6 @@ data class FlagsRefreshPolicy(
     companion object {
         const val MIN_CONCURRENCY = 1
         const val MAX_CONCURRENCY = 20
-        const val DEFAULT_CONCURRENCY = 5
+        const val DEFAULT_CONCURRENCY = 15
     }
 }

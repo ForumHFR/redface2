@@ -287,7 +287,7 @@
     <string name="diagnostics_probe_failed">Le test n’a pas pu se terminer. Réessayez plus tard.</string>
     <string name="diagnostics_flags_experimental">Actualisation expérimentale des drapeaux</string>
     <string name="diagnostics_flags_experimental_title">Actualisation expérimentale</string>
-    <string name="diagnostics_flags_experimental_help">Pour vos essais : choisissez une stratégie. Les données non actualisées sont conservées.</string>
+    <string name="diagnostics_flags_experimental_help">Pour vos essais, choisissez une stratégie. Le réglage par défaut est de %1$d requêtes simultanées. Les données non actualisées sont conservées.</string>
     <string name="diagnostics_flags_baseline">Socle (par défaut)</string>
     <string name="diagnostics_flags_legacy">Ancien</string>
     <string name="diagnostics_flags_global_only">Requête unique seule</string>
