@@ -10,6 +10,9 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AndroidNetworkDiagnosticsContextProviderTest {
@@ -101,6 +104,19 @@ class AndroidNetworkDiagnosticsContextProviderTest {
         every { manager.getNetworkCapabilities(network) } returns null
         every { manager.getLinkProperties(network) } returns null
         assertEquals("transport=unknown metered=? validated=? privateDns=?", provider.snapshot().line())
+    }
+
+    @Test
+    fun `default network comparison distinguishes unavailable readings and confirmed absence`() {
+        every { manager.activeNetwork } throws SecurityException()
+        assertNull(provider.defaultNetworkChangeCheck())
+
+        every { manager.activeNetwork } returns null
+        val changed = checkNotNull(provider.defaultNetworkChangeCheck())
+        every { manager.activeNetwork } throws SecurityException()
+        assertFalse(changed())
+        every { manager.activeNetwork } returns network
+        assertTrue(changed())
     }
 
     @Test

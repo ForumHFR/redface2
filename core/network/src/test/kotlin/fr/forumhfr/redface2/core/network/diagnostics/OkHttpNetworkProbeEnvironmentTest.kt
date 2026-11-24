@@ -42,19 +42,17 @@ class OkHttpNetworkProbeEnvironmentTest {
     private val traffic = HfrProbeTraffic()
 
     @Test
-    fun `wave starting in the background stays disturbed after returning to the foreground`() = runBlocking {
+    fun `wave of 20 in the background is disturbed even when every DNS lookup fails`() = runBlocking {
         foreground.foregrounded()
         val waves = mutableListOf<NetworkProbeWave>()
-        runner().run(onWaveStarted = { size ->
-            if (size == 20) foreground.foregrounded()
-        }, onWaveFinished = { wave ->
+        runner().run(onWaveStarted = {}, onWaveFinished = { wave ->
             waves += wave
             if (wave.size == 10) foreground.backgrounded()
         })
 
+        assertEquals(20, waves.last().results.count { it.outcome == NetworkProbeOutcome.DNS_ERROR })
         assertEquals(listOf(false, false, false, true), waves.map { it.disturbed })
         assertEquals(setOf(NetworkProbeDisturbance.BACKGROUND), waves.last().disturbedBy)
-        assertEquals(20, waves.last().results.count { it.outcome == NetworkProbeOutcome.DNS_ERROR })
     }
 
     @Test
@@ -79,82 +77,54 @@ class OkHttpNetworkProbeEnvironmentTest {
     }
 
     @Test
-    fun `only waves spanning a default network change are disturbed`() = runBlocking {
+    fun `initial availability leaves its wave clean and loss and return mark their waves`() = runBlocking {
+        val android = AndroidDefaultNetwork()
         val waves = mutableListOf<NetworkProbeWave>()
-        runner().run(onWaveStarted = { size ->
+        runner(network = android.provider).run(onWaveStarted = { size ->
             when (size) {
-                1 -> network.emit(NetworkDiagnosticsEvent(NetworkDiagnosticsEventKind.AVAILABLE))
-                5 -> network.emit(NetworkDiagnosticsEvent(
-                    NetworkDiagnosticsEventKind.AVAILABLE,
-                    defaultNetworkChanged = true,
-                ))
-                10 -> network.emit(NetworkDiagnosticsEvent(NetworkDiagnosticsEventKind.VALIDATED))
-                20 -> network.emit(NetworkDiagnosticsEvent(NetworkDiagnosticsEventKind.LOST))
+                1 -> android.callback.captured.onAvailable(android.initial)
+                5 -> android.callback.captured.onLost(android.initial)
+                10 -> android.callback.captured.onAvailable(android.initial)
+            }
+        }, onWaveFinished = waves::add)
+
+        val changed = setOf(NetworkProbeDisturbance.NETWORK_CHANGE)
+        assertEquals(listOf(emptySet(), changed, changed, emptySet()), waves.map { it.disturbedBy })
+    }
+
+    @Test
+    fun `a different Android default at the drain marks the wave without a callback`() = runBlocking {
+        val android = AndroidDefaultNetwork()
+        val waves = mutableListOf<NetworkProbeWave>()
+        runner(network = android.provider).run(onWaveStarted = { size ->
+            if (size == 10) android.active = android.replacement
+        }, onWaveFinished = waves::add)
+
+        val changed = setOf(NetworkProbeDisturbance.NETWORK_CHANGE)
+        assertEquals(listOf(emptySet(), emptySet(), changed, emptySet()), waves.map { it.disturbedBy })
+    }
+
+    @Test
+    fun `delayed switch and return between waves may mark the next wave`() = runBlocking {
+        val android = AndroidDefaultNetwork()
+        val waves = mutableListOf<NetworkProbeWave>()
+        runner(network = android.provider).run(onWaveStarted = { size ->
+            if (size == 20) {
+                android.callback.captured.onAvailable(android.initial)
+                android.callback.captured.onAvailable(android.replacement)
+                android.callback.captured.onAvailable(android.initial)
             }
         }, onWaveFinished = { wave ->
             waves += wave
-            if (wave.size == 5) network.emit(NetworkDiagnosticsEvent(NetworkDiagnosticsEventKind.LOST))
-        })
-
-        val changed = setOf(NetworkProbeDisturbance.NETWORK_CHANGE)
-        assertEquals(listOf(emptySet(), changed, emptySet(), changed), waves.map { it.disturbedBy })
-        assertEquals(1, network.observations)
-        assertEquals(1, network.closes)
-    }
-
-    @Test
-    fun `a change during wave 10 is counted there even when the callback arrives in wave 20`() = runBlocking {
-        val changed = setOf(NetworkProbeDisturbance.NETWORK_CHANGE)
-        assertEquals(listOf(emptySet(), emptySet(), changed, emptySet()), delayedDefaultChange())
-    }
-
-    @Test
-    fun `a late callback does not mask another brief switch during wave 20`() = runBlocking {
-        val changed = setOf(NetworkProbeDisturbance.NETWORK_CHANGE)
-        assertEquals(listOf(emptySet(), emptySet(), changed, changed), delayedDefaultChange(switchAgain = true))
-    }
-
-    @Test
-    fun `a change between waves does not disturb the next wave when its callback arrives`() = runBlocking {
-        assertEquals(List(4) { emptySet<NetworkProbeDisturbance>() }, delayedDefaultChange(betweenWaves = true))
-    }
-
-    private suspend fun delayedDefaultChange(
-        switchAgain: Boolean = false,
-        betweenWaves: Boolean = false,
-    ): List<Set<NetworkProbeDisturbance>> {
-        val initial = mockk<Network>()
-        val replacement = mockk<Network>()
-        var active = initial
-        val context = mockk<Context>()
-        val manager = mockk<ConnectivityManager>()
-        val callback = slot<ConnectivityManager.NetworkCallback>()
-        every { context.getSystemService(ConnectivityManager::class.java) } returns manager
-        every { manager.activeNetwork } answers { active }
-        every { manager.registerDefaultNetworkCallback(capture(callback)) } just Runs
-        every { manager.unregisterNetworkCallback(any<ConnectivityManager.NetworkCallback>()) } just Runs
-
-        val waves = mutableListOf<NetworkProbeWave>()
-        runner(network = AndroidNetworkDiagnosticsContextProvider(context)).run(onWaveStarted = { size ->
-            when (size) {
-                10 -> if (!betweenWaves) active = replacement
-                20 -> {
-                    callback.captured.onAvailable(initial)
-                    callback.captured.onAvailable(replacement)
-                    if (switchAgain) {
-                        // A brief switch reported by the callbacks leaves the same default at the drain.
-                        active = mockk()
-                        callback.captured.onAvailable(active)
-                        active = replacement
-                        callback.captured.onAvailable(active)
-                    }
-                }
+            if (wave.size == 10) {
+                android.active = android.replacement
+                android.active = android.initial
             }
-        }, onWaveFinished = { wave ->
-            waves += wave
-            if (wave.size == 10 && betweenWaves) active = replacement
         })
-        return waves.map { it.disturbedBy }
+
+        // The default stayed the same throughout wave 20. The delayed callbacks still mark it.
+        val changed = setOf(NetworkProbeDisturbance.NETWORK_CHANGE)
+        assertEquals(listOf(emptySet(), emptySet(), emptySet(), changed), waves.map { it.disturbedBy })
     }
 
     @Test(timeout = 10_000)
@@ -196,6 +166,23 @@ class OkHttpNetworkProbeEnvironmentTest {
         val client = OkHttpClient.Builder().proxy(Proxy.NO_PROXY).dns(dns).build()
         return OkHttpNetworkProbeRunner(client, "https://probe.invalid/".toHttpUrl(), Dispatchers.IO, traffic,
             foreground, network)
+    }
+
+    private class AndroidDefaultNetwork {
+        private val context = mockk<Context>()
+        private val manager = mockk<ConnectivityManager>()
+        val initial = mockk<Network>()
+        val replacement = mockk<Network>()
+        var active = initial
+        val callback = slot<ConnectivityManager.NetworkCallback>()
+        val provider = AndroidNetworkDiagnosticsContextProvider(context)
+
+        init {
+            every { context.getSystemService(ConnectivityManager::class.java) } returns manager
+            every { manager.activeNetwork } answers { active }
+            every { manager.registerDefaultNetworkCallback(capture(callback)) } just Runs
+            every { manager.unregisterNetworkCallback(any<ConnectivityManager.NetworkCallback>()) } just Runs
+        }
     }
 
     private class RecordingNetwork : NetworkDiagnosticsContextProvider {

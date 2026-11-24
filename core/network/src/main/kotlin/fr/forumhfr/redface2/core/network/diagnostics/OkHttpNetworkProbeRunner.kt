@@ -173,14 +173,14 @@ private class ProbeEnvironment(private val network: NetworkDiagnosticsContextPro
     private var visibility = AppVisibility.UNKNOWN
     private var sawBackground = false
     private var sawNetworkChange = false
-    private var networkChangesAtStart: Long? = null
+    private var defaultNetworkChangeCheck: (() -> Boolean)? = null
 
     fun startWave() {
         synchronized(this) {
             sawBackground = visibility == AppVisibility.BACKGROUND
             sawNetworkChange = false
         }
-        networkChangesAtStart = readNetworkChangeCount()
+        defaultNetworkChangeCheck = runCatching { network.defaultNetworkChangeCheck() }.getOrNull()
     }
 
     @Synchronized
@@ -195,21 +195,16 @@ private class ProbeEnvironment(private val network: NetworkDiagnosticsContextPro
     }
 
     fun disturbances(hfrTraffic: Boolean): Set<NetworkProbeDisturbance> {
-        val networkChangesAtDrain = readNetworkChangeCount()
+        val defaultNetworkChanged = runCatching { defaultNetworkChangeCheck?.invoke() }.getOrNull() == true
         return synchronized(this) {
-            val networkChanged = if (networkChangesAtStart != null && networkChangesAtDrain != null) {
-                networkChangesAtStart != networkChangesAtDrain
-            } else sawNetworkChange
             buildSet {
                 if (hfrTraffic) add(NetworkProbeDisturbance.HFR_TRAFFIC)
                 if (sawBackground) add(NetworkProbeDisturbance.BACKGROUND)
-                if (networkChanged) add(NetworkProbeDisturbance.NETWORK_CHANGE)
+                // Accept a false positive when delayed A -> B -> A callbacks from between waves arrive here.
+                if (defaultNetworkChanged || sawNetworkChange) add(NetworkProbeDisturbance.NETWORK_CHANGE)
             }
         }
     }
-
-    // The Android monitor calls networkChanged with its own lock held.
-    private fun readNetworkChangeCount(): Long? = runCatching { network.defaultNetworkChangeCount() }.getOrNull()
 }
 
 /** Retains proxy routing, DNS and platform TLS verification, but carries no account-capable hooks. */

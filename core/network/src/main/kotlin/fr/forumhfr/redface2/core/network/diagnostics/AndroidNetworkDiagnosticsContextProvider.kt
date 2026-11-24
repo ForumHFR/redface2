@@ -24,7 +24,12 @@ class AndroidNetworkDiagnosticsContextProvider @Inject constructor(
     override fun observe(listener: (NetworkDiagnosticsEvent) -> Unit): DiagnosticsSubscription =
         monitor.observe(listener)
 
-    override fun defaultNetworkChangeCount(): Long? = monitor.defaultNetworkChangeCount()
+    override fun defaultNetworkChangeCheck(): (() -> Boolean)? = runCatching {
+        val manager = context.getSystemService(ConnectivityManager::class.java) ?: return@runCatching null
+        val initial = manager.activeNetwork
+        val checkForChange = { runCatching { manager.activeNetwork != initial }.getOrDefault(false) }
+        checkForChange
+    }.getOrNull()
 
     override fun restrictions(): NetworkDiagnosticsRestrictions {
         val dataSaver = runCatching {

@@ -33,9 +33,6 @@ internal class AndroidNetworkDiagnosticsMonitor(private val context: Context) {
     }
 
     @Synchronized
-    fun defaultNetworkChangeCount(): Long? = registration?.checkpointDefaultNetwork()
-
-    @Synchronized
     private fun unsubscribe(token: Any) {
         listeners.remove(token)
         if (listeners.isEmpty()) {
@@ -45,56 +42,36 @@ internal class AndroidNetworkDiagnosticsMonitor(private val context: Context) {
         }
     }
 
-    // An absent reading means the identity is unknown. A reading containing null confirms no default.
+    // A failed read is unknown. A successful read can confirm that there is no default.
     private data class DefaultNetwork(val network: Network?)
 
     private inner class Registration(val manager: ConnectivityManager) : ConnectivityManager.NetworkCallback() {
-        private var defaultNetwork = readDefaultNetwork()
-        private var callbackDefault = defaultNetwork
-        private var changeCount = 0L
-        private var awaitingDefaultCallback = false
+        private var callbackDefault = runCatching { DefaultNetwork(manager.activeNetwork) }.getOrNull()
+        private var awaitingInitialCallback = true
         private var transports: Set<NetworkTransport>? = null
         private var validated: Boolean? = null
 
-        fun checkpointDefaultNetwork(): Long {
-            readDefaultNetwork()?.let { if (recordDefault(it)) awaitingDefaultCallback = true }
-            return changeCount
-        }
-
-        private fun readDefaultNetwork(): DefaultNetwork? =
-            runCatching { DefaultNetwork(manager.activeNetwork) }.getOrNull()
-
-        private fun recordDefault(observed: DefaultNetwork): Boolean {
-            val changed = defaultNetwork?.let { it != observed } ?: false
-            defaultNetwork = observed
-            if (changed) changeCount++
-            return changed
-        }
-
-        private fun recordCallbackDefault(observed: DefaultNetwork): Boolean {
-            callbackDefault = observed
-            // The ordered callbacks can still be catching up with a change counted by a checkpoint.
-            if (awaitingDefaultCallback) {
-                if (observed == defaultNetwork) awaitingDefaultCallback = false
-                return false
-            }
-            return recordDefault(observed)
-        }
-
         override fun onAvailable(network: Network) = synchronized(this@AndroidNetworkDiagnosticsMonitor) {
             if (registration !== this) return@synchronized
-            val changed = recordCallbackDefault(DefaultNetwork(network))
+            val changed = !awaitingInitialCallback || callbackDefault?.let { it.network != network } == true
+            awaitingInitialCallback = false
+            callbackDefault = DefaultNetwork(network)
             transports = null
             validated = null
             emit(NetworkDiagnosticsEventKind.AVAILABLE, changed)
         }
 
         override fun onLost(network: Network) = synchronized(this@AndroidNetworkDiagnosticsMonitor) {
-            if (registration !== this || callbackDefault?.let { it.network != network } == true) return@synchronized
-            val changed = recordCallbackDefault(DefaultNetwork(null))
-            emit(NetworkDiagnosticsEventKind.LOST, changed)
-            transports = null
-            validated = null
+            if (registration !== this) return@synchronized
+            awaitingInitialCallback = false
+            if (callbackDefault?.let { it.network != network } == true) {
+                emit(NetworkDiagnosticsEvent(NetworkDiagnosticsEventKind.LOST))
+            } else {
+                emit(NetworkDiagnosticsEventKind.LOST, defaultNetworkChanged = true)
+                callbackDefault = DefaultNetwork(null)
+                transports = null
+                validated = null
+            }
         }
 
         override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) =
@@ -112,7 +89,10 @@ internal class AndroidNetworkDiagnosticsMonitor(private val context: Context) {
             }
 
         private fun emit(kind: NetworkDiagnosticsEventKind, defaultNetworkChanged: Boolean = false) {
-            val event = NetworkDiagnosticsEvent(kind, transports, validated, defaultNetworkChanged)
+            emit(NetworkDiagnosticsEvent(kind, transports, validated, defaultNetworkChanged))
+        }
+
+        private fun emit(event: NetworkDiagnosticsEvent) {
             listeners.values.forEach { it(event) }
         }
     }

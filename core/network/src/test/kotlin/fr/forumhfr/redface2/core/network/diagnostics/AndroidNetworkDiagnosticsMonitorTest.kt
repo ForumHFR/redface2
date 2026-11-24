@@ -47,7 +47,7 @@ class AndroidNetworkDiagnosticsMonitorTest {
     }
 
     @Test
-    fun `events use callback capabilities deduplicate changes and ignore loss of a replaced default network`() {
+    fun `capability events are deduplicated and a late loss keeps the current capabilities`() {
         val events = mutableListOf<String>()
         val subscription = provider.observe { events += it.line() }
         val capabilities = mockk<NetworkCapabilities>(relaxed = true)
@@ -69,6 +69,7 @@ class AndroidNetworkDiagnosticsMonitorTest {
             "transport transport=wifi validated=1",
             "validated transport=wifi validated=0",
             "transport transport=cellular validated=0",
+            "lost transport=unknown validated=?",
             "lost transport=cellular validated=0",
         ), events)
         verify(exactly = 1) { manager.activeNetwork }
@@ -91,7 +92,7 @@ class AndroidNetworkDiagnosticsMonitorTest {
         callback.captured.onLost(network)
         callback.captured.onLost(replacement)
 
-        assertEquals(listOf(false, false, false, true, false, false, true), changes)
+        assertEquals(listOf(false, false, false, true, false, false, true, true), changes)
         subscription.close()
     }
 
@@ -113,7 +114,6 @@ class AndroidNetworkDiagnosticsMonitorTest {
         callback.captured.onAvailable(mockk())
 
         assertEquals(listOf(false, true), changes)
-        assertEquals(1L, provider.defaultNetworkChangeCount())
         subscription.close()
     }
 
@@ -126,7 +126,6 @@ class AndroidNetworkDiagnosticsMonitorTest {
         callback.captured.onAvailable(network)
 
         assertEquals(listOf(true), changes)
-        assertEquals(1L, provider.defaultNetworkChangeCount())
         subscription.close()
     }
 

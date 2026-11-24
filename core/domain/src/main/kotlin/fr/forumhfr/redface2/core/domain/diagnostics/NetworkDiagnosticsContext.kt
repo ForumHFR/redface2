@@ -8,8 +8,8 @@ fun interface NetworkDiagnosticsContextProvider {
 
     fun observe(listener: (NetworkDiagnosticsEvent) -> Unit): DiagnosticsSubscription = DiagnosticsSubscription { }
 
-    /** Refreshes the default network and returns its change count for the active observation, if available. */
-    fun defaultNetworkChangeCount(): Long? = null
+    /** Captures the default network and returns a check for a later change, if the initial read succeeds. */
+    fun defaultNetworkChangeCheck(): (() -> Boolean)? = null
 }
 
 /** Stable ordering keeps VPN visible even when capabilities also expose another transport. */
