@@ -7,6 +7,9 @@ fun interface NetworkDiagnosticsContextProvider {
     fun restrictions(): NetworkDiagnosticsRestrictions = NetworkDiagnosticsRestrictions()
 
     fun observe(listener: (NetworkDiagnosticsEvent) -> Unit): DiagnosticsSubscription = DiagnosticsSubscription { }
+
+    /** Captures the default network and returns a check for a later change, if the initial read succeeds. */
+    fun defaultNetworkChangeCheck(): (() -> Boolean)? = null
 }
 
 /** Stable ordering keeps VPN visible even when capabilities also expose another transport. */

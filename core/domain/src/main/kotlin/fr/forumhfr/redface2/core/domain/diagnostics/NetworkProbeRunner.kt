@@ -14,6 +14,10 @@ interface NetworkProbeRunner {
 
 enum class NetworkProbeOutcome { OK, HTTP_ERROR, NETWORK_ERROR, DNS_ERROR, EXCHANGE_LIMIT, CANCELLED, DEADLINE }
 
+enum class NetworkProbeDisturbance(val label: String) {
+    HFR_TRAFFIC("hfr_traffic"), BACKGROUND("background"), NETWORK_CHANGE("network_change"),
+}
+
 /**
  * TCP/TLS describe the acquired route on success, observed failed phases otherwise.
  * TCP includes HTTP proxy CONNECT negotiation before TLS (exported as tcpScope).
@@ -40,13 +44,14 @@ data class NetworkProbeRequestResult(
 data class NetworkProbeWave(
     val size: Int,
     val results: List<NetworkProbeRequestResult>,
-    val disturbed: Boolean = false,
+    val disturbedBy: Set<NetworkProbeDisturbance> = emptySet(),
 ) {
     init {
         require(size in NetworkProbeRunner.WAVE_SIZES)
         require(results.size == size)
     }
 
+    val disturbed: Boolean get() = disturbedBy.isNotEmpty()
     val successes: Int get() = results.count { it.outcome == NetworkProbeOutcome.OK }
     val failures: Int get() = size - successes
     val medianConnectionMs: Long? get() {

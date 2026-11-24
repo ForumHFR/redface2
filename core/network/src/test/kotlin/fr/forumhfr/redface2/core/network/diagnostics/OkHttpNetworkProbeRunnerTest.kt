@@ -1,8 +1,11 @@
 package fr.forumhfr.redface2.core.network.diagnostics
 
-import fr.forumhfr.redface2.core.domain.diagnostics.HfrProbeTraffic
+import fr.forumhfr.redface2.core.domain.diagnostics.AppForegroundDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrProbeTraffic
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrRefreshActivity
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsContext
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsContextProvider
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeOutcome
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeReservationStore
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeRunner
@@ -52,6 +55,8 @@ class OkHttpNetworkProbeRunnerTest {
     private val server = MockWebServer()
     private val connections = AtomicInteger()
     private val traffic = HfrProbeTraffic()
+    private val foreground = AppForegroundDiagnostics(DiagnosticsLog())
+    private val network = NetworkDiagnosticsContextProvider { NetworkDiagnosticsContext() }
     private val base = OkHttpClient.Builder().build()
 
     @Before
@@ -85,7 +90,7 @@ class OkHttpNetworkProbeRunnerTest {
         }.build()
         var previousTotal = 0
         val waves = mutableListOf<NetworkProbeWave>()
-        val runner = OkHttpNetworkProbeRunner(session, server.url("/"), Dispatchers.IO, traffic)
+        val runner = runner(client = session)
         runner.run(onWaveStarted = { size ->
             assertEquals(previousTotal, arrived.get())
             barrier.set(CountDownLatch(size))
@@ -169,7 +174,7 @@ class OkHttpNetworkProbeRunnerTest {
             .dns { throw UnknownHostException("Secret host address cookie") }.build()
         val url = server.url("/").newBuilder().host("probe.invalid").build()
         val waves = mutableListOf<NetworkProbeWave>()
-        OkHttpNetworkProbeRunner(client, url, Dispatchers.IO, traffic).run({}, waves::add)
+        runner(client = client, url = url).run({}, waves::add)
         assertEquals(36, waves.sumOf { it.failures })
         assertEquals(0, connections.get())
         waves.flatMap { it.results }.forEach { result ->
@@ -246,7 +251,7 @@ class OkHttpNetworkProbeRunnerTest {
             repeat(36) { secureServer.enqueue(MockResponse().setBody("catalogue")) }
             val waves = mutableListOf<NetworkProbeWave>()
             val url = secureServer.url("/").newBuilder().host("127.0.0.1").build()
-            OkHttpNetworkProbeRunner(client, url, Dispatchers.IO, traffic).run({}, waves::add)
+            runner(client = client, url = url).run({}, waves::add)
             assertEquals(36, connections.get())
             assertEquals(36, secureServer.requestCount)
             assertEquals(36, waves.sumOf { it.results.size })
@@ -274,7 +279,7 @@ class OkHttpNetworkProbeRunnerTest {
     ): NetworkProbeService {
         val client = base.newBuilder().dns(dns).proxy(Proxy.NO_PROXY).build()
         val url = server.url("/").newBuilder().host("probe.invalid").build()
-        val runner = OkHttpNetworkProbeRunner(client, url, Dispatchers.IO, traffic, waveTimeoutMs)
+        val runner = runner(client, url, waveTimeoutMs)
         val reservations = object : NetworkProbeReservationStore {
             override suspend fun reserve(): Long = 0
             override suspend fun remainingSeconds(): Long = 0
@@ -317,6 +322,9 @@ class OkHttpNetworkProbeRunnerTest {
             createServerSocket().apply { bind(InetSocketAddress(address, port), backlog) }
     }
 
-    private fun runner(waveTimeoutMs: Long = NetworkProbeRunner.WAVE_TIMEOUT_MS) =
-        OkHttpNetworkProbeRunner(base, server.url("/"), Dispatchers.IO, traffic, waveTimeoutMs)
+    private fun runner(
+        client: OkHttpClient = base,
+        url: HttpUrl = server.url("/"),
+        waveTimeoutMs: Long = NetworkProbeRunner.WAVE_TIMEOUT_MS,
+    ) = OkHttpNetworkProbeRunner(client, url, Dispatchers.IO, traffic, foreground, network, waveTimeoutMs)
 }

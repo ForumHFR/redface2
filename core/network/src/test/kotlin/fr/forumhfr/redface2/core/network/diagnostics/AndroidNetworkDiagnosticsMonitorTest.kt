@@ -27,6 +27,7 @@ class AndroidNetworkDiagnosticsMonitorTest {
 
     init {
         every { context.getSystemService(ConnectivityManager::class.java) } returns manager
+        every { manager.activeNetwork } returns network
         every { manager.registerDefaultNetworkCallback(capture(callback)) } just Runs
         every { manager.unregisterNetworkCallback(any<ConnectivityManager.NetworkCallback>()) } just Runs
     }
@@ -46,7 +47,7 @@ class AndroidNetworkDiagnosticsMonitorTest {
     }
 
     @Test
-    fun `events use callback capabilities deduplicate changes and ignore loss of a replaced default network`() {
+    fun `capability events are deduplicated and a late loss keeps the current capabilities`() {
         val events = mutableListOf<String>()
         val subscription = provider.observe { events += it.line() }
         val capabilities = mockk<NetworkCapabilities>(relaxed = true)
@@ -68,10 +69,63 @@ class AndroidNetworkDiagnosticsMonitorTest {
             "transport transport=wifi validated=1",
             "validated transport=wifi validated=0",
             "transport transport=cellular validated=0",
+            "lost transport=unknown validated=?",
             "lost transport=cellular validated=0",
         ), events)
-        verify(exactly = 0) { manager.activeNetwork }
+        verify(exactly = 1) { manager.activeNetwork }
         verify(exactly = 0) { manager.getNetworkCapabilities(any()) }
+        subscription.close()
+    }
+
+    @Test
+    fun `initial default is stable and replacement on the same transport is a change`() {
+        val changes = mutableListOf<Boolean>()
+        val subscription = provider.observe { changes += it.defaultNetworkChanged }
+        val replacement = mockk<Network>()
+        val wifi = mockk<NetworkCapabilities>(relaxed = true)
+        every { wifi.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) } returns true
+
+        callback.captured.onAvailable(network)
+        callback.captured.onCapabilitiesChanged(network, wifi)
+        callback.captured.onAvailable(replacement)
+        callback.captured.onCapabilitiesChanged(replacement, wifi)
+        callback.captured.onLost(network)
+        callback.captured.onLost(replacement)
+
+        assertEquals(listOf(false, false, false, true, false, false, true, true), changes)
+        subscription.close()
+    }
+
+    @Test
+    fun `loss of the seeded default is reported before its initial callback`() {
+        val changes = mutableListOf<Boolean>()
+        val subscription = provider.observe { changes += it.defaultNetworkChanged }
+        callback.captured.onLost(network)
+        assertEquals(listOf(true), changes)
+        subscription.close()
+    }
+
+    @Test
+    fun `first callback sets the baseline when the initial default cannot be read`() {
+        every { manager.activeNetwork } throws SecurityException()
+        val changes = mutableListOf<Boolean>()
+        val subscription = provider.observe { changes += it.defaultNetworkChanged }
+        callback.captured.onAvailable(network)
+        callback.captured.onAvailable(mockk())
+
+        assertEquals(listOf(false, true), changes)
+        subscription.close()
+    }
+
+    @Test
+    fun `first callback is a change after a confirmed absence of default network`() {
+        every { manager.activeNetwork } returns null
+        val changes = mutableListOf<Boolean>()
+        val subscription = provider.observe { changes += it.defaultNetworkChanged }
+        every { manager.activeNetwork } returns network
+        callback.captured.onAvailable(network)
+
+        assertEquals(listOf(true), changes)
         subscription.close()
     }
 

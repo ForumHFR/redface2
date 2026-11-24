@@ -13,6 +13,7 @@ class NetworkDiagnosticsEvent(
     private val kind: NetworkDiagnosticsEventKind,
     transports: Set<NetworkTransport>? = null,
     private val validated: Boolean? = null,
+    val defaultNetworkChanged: Boolean = kind == NetworkDiagnosticsEventKind.LOST,
 ) {
     private val transport = diagnosticTransportLabel(transports)
 

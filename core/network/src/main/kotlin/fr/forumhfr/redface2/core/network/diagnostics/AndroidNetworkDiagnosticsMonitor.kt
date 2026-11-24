@@ -42,30 +42,41 @@ internal class AndroidNetworkDiagnosticsMonitor(private val context: Context) {
         }
     }
 
+    // A failed read is unknown. A successful read can confirm that there is no default.
+    private data class DefaultNetwork(val network: Network?)
+
     private inner class Registration(val manager: ConnectivityManager) : ConnectivityManager.NetworkCallback() {
-        private var current: Network? = null
+        private var callbackDefault = runCatching { DefaultNetwork(manager.activeNetwork) }.getOrNull()
+        private var awaitingInitialCallback = true
         private var transports: Set<NetworkTransport>? = null
         private var validated: Boolean? = null
 
         override fun onAvailable(network: Network) = synchronized(this@AndroidNetworkDiagnosticsMonitor) {
             if (registration !== this) return@synchronized
-            current = network
+            val changed = !awaitingInitialCallback || callbackDefault?.let { it.network != network } == true
+            awaitingInitialCallback = false
+            callbackDefault = DefaultNetwork(network)
             transports = null
             validated = null
-            emit(NetworkDiagnosticsEventKind.AVAILABLE)
+            emit(NetworkDiagnosticsEventKind.AVAILABLE, changed)
         }
 
         override fun onLost(network: Network) = synchronized(this@AndroidNetworkDiagnosticsMonitor) {
-            if (registration !== this || current != network) return@synchronized
-            emit(NetworkDiagnosticsEventKind.LOST)
-            current = null
-            transports = null
-            validated = null
+            if (registration !== this) return@synchronized
+            awaitingInitialCallback = false
+            if (callbackDefault?.let { it.network != network } == true) {
+                emit(NetworkDiagnosticsEvent(NetworkDiagnosticsEventKind.LOST))
+            } else {
+                emit(NetworkDiagnosticsEventKind.LOST, defaultNetworkChanged = true)
+                callbackDefault = DefaultNetwork(null)
+                transports = null
+                validated = null
+            }
         }
 
         override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) =
             synchronized(this@AndroidNetworkDiagnosticsMonitor) {
-                if (registration !== this || current != network) return@synchronized
+                if (registration !== this || callbackDefault?.network != network) return@synchronized
                 // Use the callback's capabilities, never a racy read of activeNetwork here.
                 val nextTransports = capabilities.diagnosticTransports()
                 val nextValidated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
@@ -77,8 +88,11 @@ internal class AndroidNetworkDiagnosticsMonitor(private val context: Context) {
                 if (transportChanged) emit(NetworkDiagnosticsEventKind.TRANSPORT)
             }
 
-        private fun emit(kind: NetworkDiagnosticsEventKind) {
-            val event = NetworkDiagnosticsEvent(kind, transports, validated)
+        private fun emit(kind: NetworkDiagnosticsEventKind, defaultNetworkChanged: Boolean = false) {
+            emit(NetworkDiagnosticsEvent(kind, transports, validated, defaultNetworkChanged))
+        }
+
+        private fun emit(event: NetworkDiagnosticsEvent) {
             listeners.values.forEach { it(event) }
         }
     }

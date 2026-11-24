@@ -97,9 +97,11 @@ class NetworkProbeServiceTest {
         val service = service(runner { started, finished ->
             NetworkProbeRunner.WAVE_SIZES.forEach { size ->
                 started(size)
-                finished(NetworkProbeWave(size, List(size) { index ->
+                val results = List(size) { index ->
                     NetworkProbeRequestResult(tcpMs = 10L + index, tlsMs = 20, outcome = NetworkProbeOutcome.OK)
-                }, disturbed = size >= 5))
+                }
+                val disturbances = if (size >= 5) NetworkProbeDisturbance.entries.toSet() else emptySet()
+                finished(NetworkProbeWave(size, results, disturbances))
             }
         })
         service.run()
@@ -109,7 +111,11 @@ class NetworkProbeServiceTest {
         assertEquals(5, log.entries.value.size)
         assertTrue(log.entries.value.all { it.tag == NetworkProbeService.TAG })
         assertTrue(log.entries.value.last().message.contains("requests=36 disturbed=true"))
-        assertTrue(log.entries.value.filter { it.message.startsWith("wave") }.all { it.message.contains("results=[") })
+        val waves = log.entries.value.filter { it.message.startsWith("wave") }.map { it.message }
+        assertTrue(waves.first().contains("disturbed=false results=["))
+        assertTrue(waves.first().endsWith("disturbedBy=[]"))
+        assertTrue(waves.drop(1).all { it.contains("disturbed=true results=[") })
+        assertTrue(waves.drop(1).all { it.endsWith("disturbedBy=[hfr_traffic,background,network_change]") })
     }
 
     private fun service(runner: NetworkProbeRunner) = NetworkProbeService(runner, store, activity, log)
