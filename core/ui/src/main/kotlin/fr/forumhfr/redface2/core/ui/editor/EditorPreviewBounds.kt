@@ -32,7 +32,8 @@ internal fun editorPreviewBounds(
     } + sourceExtra
     val previewMin = if (horizontal) PREVIEW_HORIZONTAL_MIN_DP else threeLines
     return if (available >= sourceMin + previewMin) {
-        EditorPreviewBounds(sourceMin, available - previewMin, available)
+        // At an exact fit, subtracting the preview floor can round below the source floor.
+        EditorPreviewBounds(sourceMin, (available - previewMin).coerceAtLeast(sourceMin), available)
     } else null
 }
 
