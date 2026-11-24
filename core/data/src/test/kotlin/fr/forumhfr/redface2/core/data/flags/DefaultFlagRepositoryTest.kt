@@ -810,6 +810,7 @@ class DefaultFlagRepositoryTest {
             result.coverage.categories.single { it.cat == 23 && it.source == FlagSource.BUCKET }.failure)
         val summary = diagnostics.entries.value.last().message
         assertTrue(summary, summary.contains("strategy=baseline N=15 "))
+        assertTrue(summary, summary.contains(" readLimit=15 "))
         assertTrue(summary, summary.contains("bucketsFailures=1"))
         assertTrue(summary, !summary.contains("SecretCookie"))
     }
