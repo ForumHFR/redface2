@@ -13,8 +13,10 @@ class NetworkDiagnosticsEvent(
     private val kind: NetworkDiagnosticsEventKind,
     transports: Set<NetworkTransport>? = null,
     private val validated: Boolean? = null,
+    becameDefault: Boolean = false,
 ) {
     private val transport = diagnosticTransportLabel(transports)
+    val defaultNetworkChanged: Boolean = kind == NetworkDiagnosticsEventKind.LOST || becameDefault
 
     fun line(): String = "${kind.label} transport=$transport validated=${validated.diagnosticBit()}"
 }

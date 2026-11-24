@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeDisturbance
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeOutcome
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeRequestResult
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeState
@@ -150,6 +151,6 @@ class NetworkProbePanelTest {
                 outcome = if (index < successes) NetworkProbeOutcome.OK else NetworkProbeOutcome.NETWORK_ERROR,
             )
         },
-        disturbed = disturbed,
+        disturbedBy = if (disturbed) setOf(NetworkProbeDisturbance.BACKGROUND) else emptySet(),
     )
 }

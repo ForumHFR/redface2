@@ -88,7 +88,8 @@ class NetworkProbeService @Inject constructor(
         log.record(DiagnosticsLog.Level.INFO, TAG,
             "wave size=${wave.size} successes=${wave.successes} failures=${wave.failures} " +
                 "medianConnectionMs=${wave.medianConnectionMs ?: "-"} disturbed=${wave.disturbed} " +
-                "results=[${wave.results.joinToString(";") { it.line() }}]")
+                "results=[${wave.results.joinToString(";") { it.line() }}] " +
+                "disturbedBy=[${wave.disturbedBy.joinToString(",") { it.label }}]")
     }
 
     companion object { const val TAG = "NetworkProbe" }

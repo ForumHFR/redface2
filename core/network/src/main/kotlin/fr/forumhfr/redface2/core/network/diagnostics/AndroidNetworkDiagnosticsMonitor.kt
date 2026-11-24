@@ -43,16 +43,18 @@ internal class AndroidNetworkDiagnosticsMonitor(private val context: Context) {
     }
 
     private inner class Registration(val manager: ConnectivityManager) : ConnectivityManager.NetworkCallback() {
-        private var current: Network? = null
+        // The initial callback may arrive during a measurement even if the default never changed.
+        private var current = runCatching { manager.activeNetwork }.getOrNull()
         private var transports: Set<NetworkTransport>? = null
         private var validated: Boolean? = null
 
         override fun onAvailable(network: Network) = synchronized(this@AndroidNetworkDiagnosticsMonitor) {
             if (registration !== this) return@synchronized
+            val becameDefault = current != network
             current = network
             transports = null
             validated = null
-            emit(NetworkDiagnosticsEventKind.AVAILABLE)
+            emit(NetworkDiagnosticsEventKind.AVAILABLE, becameDefault)
         }
 
         override fun onLost(network: Network) = synchronized(this@AndroidNetworkDiagnosticsMonitor) {
@@ -77,8 +79,8 @@ internal class AndroidNetworkDiagnosticsMonitor(private val context: Context) {
                 if (transportChanged) emit(NetworkDiagnosticsEventKind.TRANSPORT)
             }
 
-        private fun emit(kind: NetworkDiagnosticsEventKind) {
-            val event = NetworkDiagnosticsEvent(kind, transports, validated)
+        private fun emit(kind: NetworkDiagnosticsEventKind, becameDefault: Boolean = false) {
+            val event = NetworkDiagnosticsEvent(kind, transports, validated, becameDefault)
             listeners.values.forEach { it(event) }
         }
     }

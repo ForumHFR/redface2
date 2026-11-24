@@ -279,7 +279,7 @@
     </plurals>
     <string name="diagnostics_probe_milliseconds">%1$d\u00a0ms</string>
     <string name="diagnostics_probe_no_measurement">indisponible</string>
-    <string name="diagnostics_probe_disturbed">Mesure perturbée : une autre activité HFR a eu lieu pendant le test.</string>
+    <string name="diagnostics_probe_disturbed">Mesure perturbée. Une autre activité HFR, l’application en arrière-plan ou un changement de réseau ont pu affecter le test.</string>
     <string name="diagnostics_probe_complete">Test terminé.</string>
     <string name="diagnostics_probe_cancelled">Test annulé.</string>
     <string name="diagnostics_probe_refresh_active">Veuillez attendre la fin du rafraîchissement des drapeaux.</string>

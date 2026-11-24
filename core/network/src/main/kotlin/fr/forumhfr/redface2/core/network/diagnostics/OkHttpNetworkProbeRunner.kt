@@ -1,7 +1,12 @@
 package fr.forumhfr.redface2.core.network.diagnostics
 
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.diagnostics.AppForegroundDiagnostics
+import fr.forumhfr.redface2.core.domain.diagnostics.AppVisibility
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrProbeTraffic
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsContextProvider
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsEvent
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeDisturbance
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeOutcome
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeRunner
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeWave
@@ -29,11 +34,15 @@ import okhttp3.OkHttpClient
 import okhttp3.Protocol
 import okhttp3.Request
 
-class OkHttpNetworkProbeRunner internal constructor(
+class OkHttpNetworkProbeRunner
+@Suppress("LongParameterList") // The primary constructor also accepts a shorter timeout for tests.
+internal constructor(
     private val baseClient: OkHttpClient,
     private val baseUrl: HttpUrl,
     private val ioDispatcher: CoroutineDispatcher,
     private val traffic: HfrProbeTraffic,
+    private val foreground: AppForegroundDiagnostics,
+    private val network: NetworkDiagnosticsContextProvider,
     private val waveTimeoutMs: Long,
 ) : NetworkProbeRunner {
     @Inject constructor(
@@ -41,18 +50,27 @@ class OkHttpNetworkProbeRunner internal constructor(
         @HfrBaseUrl baseUrl: HttpUrl,
         @IoDispatcher ioDispatcher: CoroutineDispatcher,
         traffic: HfrProbeTraffic,
-    ) : this(baseClient, baseUrl, ioDispatcher, traffic, NetworkProbeRunner.WAVE_TIMEOUT_MS)
+        foreground: AppForegroundDiagnostics,
+        network: NetworkDiagnosticsContextProvider,
+    ) : this(baseClient, baseUrl, ioDispatcher, traffic, foreground, network, NetworkProbeRunner.WAVE_TIMEOUT_MS)
 
     override suspend fun run(onWaveStarted: (Int) -> Unit, onWaveFinished: (NetworkProbeWave) -> Unit) {
         val client = anonymousProbeClient(baseClient)
         val observation = traffic.snapshot()
+        val environment = ProbeEnvironment()
+        val foregroundSubscription = foreground.observe(environment::visibilityChanged)
+        val networkSubscription = runCatching { network.observe(environment::networkChanged) }.getOrNull()
         try {
             for (size in NetworkProbeRunner.WAVE_SIZES) {
                 currentCoroutineContext().ensureActive()
+                environment.startWave()
                 onWaveStarted(size)
-                runWave(client, size, observation, onWaveFinished)
+                runWave(client, size, observation, environment, onWaveFinished)
             }
         } finally {
+            // Unsubscribe without holding the environment lock used by the callbacks.
+            runCatching { networkSubscription?.close() }
+            foregroundSubscription.close()
             client.connectionPool.evictAll()
         }
     }
@@ -61,6 +79,7 @@ class OkHttpNetworkProbeRunner internal constructor(
         client: OkHttpClient,
         size: Int,
         observation: HfrProbeTraffic.Snapshot,
+        environment: ProbeEnvironment,
         onWaveFinished: (NetworkProbeWave) -> Unit,
     ) {
         val timings = List(size) { ProbeTimingListener() }
@@ -79,12 +98,13 @@ class OkHttpNetworkProbeRunner internal constructor(
         } finally {
             dns.close()
             // Structured children have drained and every response is closed before the next wave.
+            val disturbances = environment.disturbances(traffic.disturbed(observation))
             val results = timings.map { it.result() }.map { result ->
                 if (deadline && result.outcome == NetworkProbeOutcome.CANCELLED) {
                     result.copy(outcome = NetworkProbeOutcome.DEADLINE)
                 } else result
             }
-            onWaveFinished(NetworkProbeWave(size, results, traffic.disturbed(observation)))
+            onWaveFinished(NetworkProbeWave(size, results, disturbances))
         }
     }
 
@@ -146,6 +166,37 @@ class OkHttpNetworkProbeRunner internal constructor(
     }
 
     private class ExchangeLimitExceeded : IOException("Probe exchange limit")
+}
+
+/** Callbacks and wave boundaries share a lock so brief transitions survive until the drain. */
+private class ProbeEnvironment {
+    private var visibility = AppVisibility.UNKNOWN
+    private var sawBackground = false
+    private var sawNetworkChange = false
+
+    @Synchronized
+    fun startWave() {
+        sawBackground = visibility == AppVisibility.BACKGROUND
+        sawNetworkChange = false
+    }
+
+    @Synchronized
+    fun visibilityChanged(value: AppVisibility) {
+        visibility = value
+        if (value == AppVisibility.BACKGROUND) sawBackground = true
+    }
+
+    @Synchronized
+    fun networkChanged(event: NetworkDiagnosticsEvent) {
+        if (event.defaultNetworkChanged) sawNetworkChange = true
+    }
+
+    @Synchronized
+    fun disturbances(hfrTraffic: Boolean): Set<NetworkProbeDisturbance> = buildSet {
+        if (hfrTraffic) add(NetworkProbeDisturbance.HFR_TRAFFIC)
+        if (sawBackground) add(NetworkProbeDisturbance.BACKGROUND)
+        if (sawNetworkChange) add(NetworkProbeDisturbance.NETWORK_CHANGE)
+    }
 }
 
 /** Retains proxy routing, DNS and platform TLS verification, but carries no account-capable hooks. */

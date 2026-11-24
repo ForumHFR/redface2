@@ -27,6 +27,7 @@ class AndroidNetworkDiagnosticsMonitorTest {
 
     init {
         every { context.getSystemService(ConnectivityManager::class.java) } returns manager
+        every { manager.activeNetwork } returns network
         every { manager.registerDefaultNetworkCallback(capture(callback)) } just Runs
         every { manager.unregisterNetworkCallback(any<ConnectivityManager.NetworkCallback>()) } just Runs
     }
@@ -70,8 +71,36 @@ class AndroidNetworkDiagnosticsMonitorTest {
             "transport transport=cellular validated=0",
             "lost transport=cellular validated=0",
         ), events)
-        verify(exactly = 0) { manager.activeNetwork }
+        verify(exactly = 1) { manager.activeNetwork }
         verify(exactly = 0) { manager.getNetworkCapabilities(any()) }
+        subscription.close()
+    }
+
+    @Test
+    fun `initial default is stable and replacement on the same transport is a change`() {
+        val changes = mutableListOf<Boolean>()
+        val subscription = provider.observe { changes += it.defaultNetworkChanged }
+        val replacement = mockk<Network>()
+        val wifi = mockk<NetworkCapabilities>(relaxed = true)
+        every { wifi.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) } returns true
+
+        callback.captured.onAvailable(network)
+        callback.captured.onCapabilitiesChanged(network, wifi)
+        callback.captured.onAvailable(replacement)
+        callback.captured.onCapabilitiesChanged(replacement, wifi)
+        callback.captured.onLost(network)
+        callback.captured.onLost(replacement)
+
+        assertEquals(listOf(false, false, false, true, false, false, true), changes)
+        subscription.close()
+    }
+
+    @Test
+    fun `loss of the seeded default is reported before its initial callback`() {
+        val changes = mutableListOf<Boolean>()
+        val subscription = provider.observe { changes += it.defaultNetworkChanged }
+        callback.captured.onLost(network)
+        assertEquals(listOf(true), changes)
         subscription.close()
     }
 
