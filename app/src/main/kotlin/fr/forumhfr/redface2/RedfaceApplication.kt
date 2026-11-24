@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2
 
 import android.app.Application
+import android.os.Build
 import android.util.Log
 import coil3.ImageLoader
 import coil3.PlatformContext
@@ -11,10 +12,15 @@ import coil3.svg.SvgDecoder
 import dagger.hilt.android.HiltAndroidApp
 import fr.forumhfr.redface2.core.data.cache.CacheInvalidator
 import fr.forumhfr.redface2.core.data.editor.DraftRetentionPurger
+import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.EditorSubmissionTrace
 import fr.forumhfr.redface2.core.network.qualifiers.ImageClient
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 
 /**
@@ -38,6 +44,8 @@ import okhttp3.OkHttpClient
 class RedfaceApplication : Application(), SingletonImageLoader.Factory {
 
     @Inject lateinit var diagnostics: DiagnosticsLog
+
+    @Inject @ApplicationScope lateinit var applicationScope: CoroutineScope
 
     @Inject lateinit var cacheInvalidator: CacheInvalidator
 
@@ -65,7 +73,23 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
             .build()
 
     override fun onCreate() {
+        // The launcher icon restart activity has its own process and shares this directory.
+        val crashReport = if (getProcessName() == packageName) installCrashHandler() else null
         super.onCreate()
+        if (crashReport != null) {
+            // "Vider" returns at once; the screen confirms only after this deletion reports success.
+            diagnostics.registerCrashReportClear { onResult ->
+                applicationScope.launch(Dispatchers.IO) {
+                    val deleted = crashReport.clear()
+                    if (!deleted) Log.w(DiagnosticsLog.CRASH_TAG, "Could not delete the retained crash report")
+                    onResult(deleted)
+                }
+            }
+            applicationScope.launch(Dispatchers.Main) {
+                val capture = withContext(Dispatchers.IO) { crashReport.importStartup() }
+                capture?.let { diagnostics.recordCrash(it.timestampMillis, it.details) }
+            }
+        }
         if (BuildConfig.DEBUG || BuildConfig.FLAVOR == "dev") {
             diagnostics.exportSubmissionTraces { Log.i(EditorSubmissionTrace.TAG, it) }
         }
@@ -76,5 +100,14 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
         // One-shot retention sweep dropping editor drafts older than the TTL (#405). Independent
         // of the auth state, so it runs alongside the invalidator rather than inside it.
         draftRetentionPurger.purge()
+    }
+
+    private fun installCrashHandler(): LastCrashReport {
+        val environment = "version=${BuildConfig.VERSION_NAME} build=${BuildConfig.VERSION_CODE} " +
+            "channel=${BuildConfig.FLAVOR}\n" +
+            "Android API=${Build.VERSION.SDK_INT} manufacturer=${Build.MANUFACTURER} model=${Build.MODEL}"
+        val report = LastCrashReport(noBackupFilesDir, environment)
+        Thread.setDefaultUncaughtExceptionHandler(report.handler(Thread.getDefaultUncaughtExceptionHandler()))
+        return report
     }
 }

@@ -59,7 +59,17 @@ fun DiagnosticsScreen(
     versionCode: Int,
     channel: String,
 ) {
-    val viewModel: DiagnosticsViewModel = hiltViewModel()
+    DiagnosticsScreen(onClose, versionName, versionCode, channel, hiltViewModel())
+}
+
+@Composable
+internal fun DiagnosticsScreen(
+    onClose: () -> Unit,
+    versionName: String,
+    versionCode: Int,
+    channel: String,
+    viewModel: DiagnosticsViewModel,
+) {
     val activity = LocalActivity.current
     DisposableEffect(viewModel, activity) {
         onDispose {
@@ -68,6 +78,7 @@ fun DiagnosticsScreen(
         }
     }
     val entries by viewModel.entries.collectAsStateWithLifecycle()
+    val crashReportClear by viewModel.crashReportClear.collectAsStateWithLifecycle()
     val cooldownSeconds by viewModel.cooldownSeconds.collectAsStateWithLifecycle()
     val probeState by viewModel.probeState.collectAsStateWithLifecycle()
     val policy by viewModel.policy.collectAsStateWithLifecycle()
@@ -137,6 +148,7 @@ fun DiagnosticsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
             )
+            CrashReportClearStatus(crashReportClear.status, viewModel::retryCrashReportClear)
             NetworkProbePanel(probeState, cooldownSeconds, viewModel::startProbe, viewModel::cancelProbe)
             TextButton(
                 onClick = { showPolicy = true },
@@ -170,11 +182,37 @@ fun DiagnosticsScreen(
     }
 }
 
+/** Tells whether the retained crash report really left the device, and offers a retry if not. */
+@Composable
+private fun CrashReportClearStatus(state: DiagnosticsLog.CrashReportClear, onRetry: () -> Unit) {
+    val message = when (state) {
+        DiagnosticsLog.CrashReportClear.IDLE -> return
+        DiagnosticsLog.CrashReportClear.CLEARING -> R.string.diagnostics_clear_pending
+        DiagnosticsLog.CrashReportClear.CLEARED -> R.string.diagnostics_clear_done
+        DiagnosticsLog.CrashReportClear.FAILED -> R.string.diagnostics_clear_failed
+    }
+    val failed = state == DiagnosticsLog.CrashReportClear.FAILED
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(message),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f).padding(vertical = 4.dp),
+        )
+        if (failed) {
+            TextButton(onClick = onRetry) {
+                Text(stringResource(R.string.diagnostics_clear_retry), softWrap = false)
+            }
+        }
+    }
+}
+
 /**
- * Copy the allowed network and smiley-picker diagnostics to the clipboard as plain text. Format:
- * `HH:mm:ss.SSS  L  TAG  message` per line — same shape rendered by [DiagnosticsRow]
- * but flat, so the alpha tester can paste it into a bug report or a HFR post without
- * losing context.
+ * Copy the allowed diagnostics to the clipboard as plain text. Each entry starts with
+ * `HH:mm:ss.SSS  L  TAG  message`. A crash entry can span multiple lines for its stack trace.
  *
  * Android 13+ shows the system "copied to clipboard" overlay automatically; on older
  * devices we surface a Toast so the tester gets immediate feedback.

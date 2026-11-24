@@ -1,6 +1,6 @@
 <resources>
-    <string name="diagnostics_copy_scope">Copier exporte les mesures réseau et les événements du sélecteur de smileys.</string>
-    <string name="diagnostics_network_copied">Diagnostics réseau et smileys copiés</string>
+    <string name="diagnostics_copy_scope">L’export inclut les mesures réseau, les événements du sélecteur de smileys et la pile du dernier plantage si elle est disponible.</string>
+    <string name="diagnostics_network_copied">Diagnostics copiés</string>
     <string name="flags_title">Drapeaux</string>
     <string name="flags_login_intro">Connecte-toi à HFR pour voir tes drapeaux, ton activité et tes MPs.</string>
     <string name="flags_login_cta">Se connecter à HFR</string>
@@ -259,6 +259,10 @@
     <string name="diagnostics_copy">Copier</string>
     <string name="diagnostics_clear">Vider</string>
     <string name="diagnostics_close">Fermer</string>
+    <string name="diagnostics_clear_pending">Suppression du dernier plantage en cours…</string>
+    <string name="diagnostics_clear_done">Aucun rapport de plantage n’est conservé sur l’appareil.</string>
+    <string name="diagnostics_clear_failed">Le rapport du dernier plantage n’a pas pu être supprimé de l’appareil. Veuillez réessayer.</string>
+    <string name="diagnostics_clear_retry">Réessayer</string>
     <string name="diagnostics_empty">Aucun journal pour le moment. Connectez-vous pour voir les premières entrées.</string>
     <string name="diagnostics_probe_start">Tester la connexion</string>
     <string name="diagnostics_probe_cancel">Annuler</string>

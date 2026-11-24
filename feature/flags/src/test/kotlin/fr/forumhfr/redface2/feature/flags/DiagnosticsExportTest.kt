@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.flags
 
 import fr.forumhfr.redface2.core.domain.diagnostics.AppForegroundDiagnostics
+import fr.forumhfr.redface2.core.domain.diagnostics.CrashReportStack
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsDataSaver
@@ -21,15 +22,108 @@ import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrConnectErrno
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrEndpoint
 import fr.forumhfr.redface2.core.model.FlagType
+import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.AssumptionViolatedException
 import org.junit.Test
 
+private const val EDITOR = "fr.forumhfr.redface2.feature.editor.Editor"
+private const val PARSER = "fr.forumhfr.redface2.core.parser.Parser"
+
 class DiagnosticsExportTest {
+    @Test
+    fun `copy exports allowlisted crash fields without the private crash input`() {
+        val privateFields = listOf(
+            "md_pass=deadbeef",
+            "Proxy-Authorization: Basic ProbeProxyToken",
+            "/mp/42/Alice",
+            "https://forum.hardware.fr/mp/d'Alice/42",
+            "Cookie: md_user=Alice",
+            "/forum2.php?post=42&hash_check=Secret",
+        )
+        val privateText = privateFields.joinToString("\n")
+        val approved = IllegalArgumentException("Failed requirement.").apply { stackTrace = emptyArray() }
+        val cause = IOException(privateText, approved).apply { stackTrace = emptyArray() }
+        val failure = IllegalStateException(privateText, cause).apply {
+            stackTrace = arrayOf(StackTraceElement(EDITOR, "open", "Cookie.kt", 42)) +
+                privateFields.map { StackTraceElement(PARSER, "parse", it, 7) }
+        }
+        val details = buildString {
+            CrashReportStack.write(Thread(privateText), Thread.currentThread(), failure) {
+                appendLine(it)
+                true
+            }
+        }
+        val log = DiagnosticsLog()
+        log.recordCrash(0, details)
+        val format = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+        val environment = DiagnosticsEnvironment("0.71.0", 75, "beta", 34, "Google", "Test")
+
+        val export = formatDiagnosticsExport(log.entries.value, format, environment)
+
+        val fragments = listOf("deadbeef", "ProbeProxyToken", "Alice", "md_user", "hash_check", "Secret")
+        (privateFields + fragments).forEach {
+            assertFalse("Exported: $it", export.contains(it))
+        }
+        assertTrue(export.contains("00:00:00.000  E  Crash  crashedAt=1970-01-01T00:00:00Z"))
+        assertTrue(export.contains("thread=other"))
+        assertTrue(export.contains("java.lang.IllegalStateException: message omitted (${privateText.length} chars)"))
+        assertTrue(export.contains("\tat $EDITOR.open(Cookie.kt:42)\n\tat <omitted frame> (x6)\n"))
+        assertTrue(export.contains("Caused by: java.io.IOException: message omitted (${privateText.length} chars)"))
+        assertTrue(export.contains("Caused by: java.lang.IllegalArgumentException: Failed requirement."))
+        assertTrue(export.endsWith("0 entrées locales non exportées"))
+    }
+
+    @Test
+    fun `copy omits crash symbols of unknown origin and keeps known frames`() {
+        // JUnit stands for any class outside the known packages, such as a name shaped by user data.
+        val cause = AssumptionViolatedException("Alice").apply {
+            stackTrace = arrayOf(StackTraceElement("Alice", "Alice", "Alice.kt", 1))
+        }
+        val failure = AssumptionViolatedException("Alice", cause).apply {
+            stackTrace = arrayOf(
+                StackTraceElement("fr.forumhfr.redface2.core.network.CookieJar", "load", "Cookie.kt", 42),
+                StackTraceElement("Alice", "open", "Alice.kt", 1),
+                StackTraceElement("com.example.Alice", "Alice", "Editor.kt", 2),
+                StackTraceElement(EDITOR, "open", "Alice.txt", 3),
+                StackTraceElement(EDITOR, "open", "Alice", 4),
+                StackTraceElement("okio.RealBufferedSource", "read", "RealBufferedSource.kt", 5),
+            )
+        }
+        val details = buildString {
+            CrashReportStack.write(Thread.currentThread(), Thread.currentThread(), failure) {
+                appendLine(it)
+                true
+            }
+        }
+        val log = DiagnosticsLog()
+        log.recordCrash(0, details)
+        val format = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+        val environment = DiagnosticsEnvironment("0.71.0", 75, "beta", 34, "Google", "Test")
+
+        val export = formatDiagnosticsExport(log.entries.value, format, environment)
+
+        listOf("Alice", "junit", "AssumptionViolatedException", "com.example").forEach {
+            assertFalse("Exported: $it", export.contains(it))
+        }
+        val omittedMessage = "message omitted (${failure.message!!.length} chars)"
+        assertTrue(
+            export.contains(
+                "thread=main\n<omitted exception class>: $omittedMessage\n" +
+                    "\tat fr.forumhfr.redface2.core.network.CookieJar.load(Cookie.kt:42)\n" +
+                    "\tat <omitted frame> (x4)\n" +
+                    "\tat okio.RealBufferedSource.read(RealBufferedSource.kt:5)\n" +
+                    "Caused by: <omitted exception class>: $omittedMessage\n" +
+                    "\tat <omitted frame>\n",
+            ),
+        )
+    }
+
     @Test
     fun `probe structured waves and summary survive export allowlist`() {
         val log = DiagnosticsLog()

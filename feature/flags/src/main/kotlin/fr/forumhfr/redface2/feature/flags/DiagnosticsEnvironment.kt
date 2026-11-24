@@ -17,11 +17,11 @@ internal data class DiagnosticsEnvironment(
     val model: String,
 )
 
-// Entire messages of these tags are exported. New fields must use closed values/numbers only,
-// including refresh timelines, saver states, errno categories, intent and IP family (never its address).
-// Legacy producers remain visible only in the local viewer.
+// Entire messages of these tags are exported. Crash details are structured at capture.
+// Other exported fields use closed values such as errno categories and IP families.
 private val diagnosticsExportTags = setOf(
     "FlagsRefresh", "HfrCall", "AppForeground", SmileyPickerDiagnostics.TAG, NetworkProbeService.TAG,
+    DiagnosticsLog.CRASH_TAG,
 )
 
 internal fun formatDiagnosticsExport(
