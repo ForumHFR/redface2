@@ -86,12 +86,12 @@ class FlagReadExecutorTest {
     }
 
     @Test
-    fun `five Calls across sessions retain their permits through the response lifetime`() = runTest {
+    fun `fifteen Calls across sessions retain their permits through the response lifetime`() = runTest {
         val close = CompletableDeferred<Unit>()
         val sessions = List(3) { FlagReadSession { testScheduler.currentTime * NANOS_PER_MS } }
         var running = 0
         var peak = 0
-        val calls = List(14) { index ->
+        val calls = List(18) { index ->
             async {
                 executor.execute(client, request, FlagReadOperation.CATEGORY_BUCKET, sessions[index % sessions.size]) {
                     running++
@@ -101,12 +101,12 @@ class FlagReadExecutorTest {
             }
         }
         runCurrent()
-        assertEquals(5, running)
-        assertEquals(5, limiter.heldPermits)
+        assertEquals(15, running)
+        assertEquals(15, limiter.heldPermits)
         advanceTimeBy(250)
         close.complete(Unit)
         calls.awaitAll()
-        assertEquals(5, peak)
+        assertEquals(15, peak)
         assertEquals(0, limiter.heldPermits)
         assertTrue(sessions.sumOf { it.counters().getValue("permitWaitMs") } >= 250)
     }
@@ -115,7 +115,7 @@ class FlagReadExecutorTest {
     fun `deadline cancels active transports and permit waiters at twelve virtual seconds`() = runTest {
         val session = FlagReadSession { testScheduler.currentTime * NANOS_PER_MS }
         var cancelled = 0
-        val calls = List(7) {
+        val calls = List(17) {
             async {
                 runCatching {
                     executor.execute(client, request, FlagReadOperation.CATEGORY_BUCKET, session) {
@@ -126,13 +126,13 @@ class FlagReadExecutorTest {
         }
         runCurrent()
         advanceTimeBy(11_999)
-        assertEquals(5, limiter.heldPermits)
+        assertEquals(15, limiter.heldPermits)
         advanceTimeBy(1)
         runCurrent()
         assertTrue(calls.awaitAll().all { it is FlagReadDeadlineException })
-        assertEquals(5, cancelled)
+        assertEquals(15, cancelled)
         assertEquals(0, limiter.heldPermits)
-        assertEquals(5L, session.counters().getValue("applicationCalls"))
+        assertEquals(15L, session.counters().getValue("applicationCalls"))
     }
 
     @Test

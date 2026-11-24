@@ -57,6 +57,14 @@ class FlagsRefreshPolicyDialogTest {
     }
 
     @Test
+    fun `dialog shows fifteen as the default concurrency`() {
+        mount()
+        compose.onNodeWithText("15 requêtes simultanées", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("N choisi : 15").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("N effectif : 15").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
     fun `legacy disables N and restores the retained value when leaving legacy`() {
         val initial = FlagsRefreshPolicy(concurrency = 7, applicationRetry = false)
         var saved: FlagsRefreshPolicy? = null

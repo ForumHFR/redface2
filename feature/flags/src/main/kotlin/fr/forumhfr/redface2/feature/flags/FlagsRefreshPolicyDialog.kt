@@ -54,7 +54,12 @@ internal fun FlagsRefreshPolicyDialog(
                 Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(stringResource(R.string.diagnostics_flags_experimental_help))
+                Text(
+                    stringResource(
+                        R.string.diagnostics_flags_experimental_help,
+                        FlagsRefreshPolicy.DEFAULT_CONCURRENCY,
+                    ),
+                )
                 Column(Modifier.selectableGroup()) {
                     FlagsRefreshStrategy.entries.forEach { strategy ->
                         Row(

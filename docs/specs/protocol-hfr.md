@@ -1538,7 +1538,7 @@ Implémenté de façon validante (host + scheme + préfixe `/api/` enforcés) da
 - Verbes : GET / POST / PUT supportés. PATCH renvoie 501 ; DELETE renvoie 501 sur les ressources existantes.
 - `hash_check` (CSRF) requis pour les POST / PUT, à extraire d'une page HTML auth.
 - Pagination : `?page=N&results_per_page=M`. Défaut HATEOAS = 25 ; cible Redface 2 = 50 (limite les requêtes sur les sous-cats actives).
-- Limite parallélisme : ≤ 10 connexions TCP simultanées vers HFR (saturation Apache mesurée à 20). OkHttp `maxRequestsPerHost = 5` par défaut reste sous le seuil.
+- Le relevé initial recommandait au plus 10 connexions TCP simultanées vers HFR, avec une saturation Apache mesurée à 20. Pour le parallélisme des appels de collecte des drapeaux, voir l’[ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride).
 - `name` / `title` peuvent contenir des entités HTML non décodées (`&amp;`) — décoder côté mapper.
 
 ### Champs présents en JSON / absents en HTML
