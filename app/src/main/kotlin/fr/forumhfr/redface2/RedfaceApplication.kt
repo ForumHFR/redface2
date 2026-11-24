@@ -75,8 +75,9 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
         val crashReport = if (getProcessName() == packageName) installCrashHandler() else null
         super.onCreate()
         if (crashReport != null) {
+            diagnostics.registerCrashReportClear(crashReport::clear)
             applicationScope.launch {
-                crashReport.consume()?.let { diagnostics.recordCrash(it.timestampMillis, it.details) }
+                crashReport.importStartup()?.let { diagnostics.recordCrash(it.timestampMillis, it.details) }
             }
         }
         if (BuildConfig.DEBUG || BuildConfig.FLAVOR == "dev") {

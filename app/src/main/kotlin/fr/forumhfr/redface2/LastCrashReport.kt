@@ -1,15 +1,20 @@
 package fr.forumhfr.redface2
 
+import fr.forumhfr.redface2.core.domain.diagnostics.CrashReportRedactor
 import java.io.DataOutputStream
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
+import java.nio.file.Files
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
-/** One private handoff file between the process that crashes and its next startup. */
+/** The latest crash, kept privately until cleared or replaced by another crash. */
 internal class LastCrashReport(directory: File, private val environment: String) {
     private val report = File(directory, "last-crash")
     private val temporary = File(directory, "last-crash.tmp")
-    private var crashStarted = false
+    private val fileLock = ReentrantLock()
+    private var skipStartupImport = false
 
     @Suppress("TooGenericExceptionCaught", "SwallowedException")
     fun handler(previous: Thread.UncaughtExceptionHandler?): Thread.UncaughtExceptionHandler =
@@ -19,34 +24,72 @@ internal class LastCrashReport(directory: File, private val environment: String)
             } catch (_: Throwable) {
                 // Crash capture is best effort, including when the VM is low on memory.
             } finally {
-                previous?.uncaughtException(thread, error)
+                if (previous != null) {
+                    previous.uncaughtException(thread, error)
+                } else {
+                    // End the whole process, including for a worker crash, without shutdown hooks.
+                    Runtime.getRuntime().halt(CRASH_EXIT_CODE)
+                }
             }
         }
 
-    @Synchronized
     private fun write(thread: Thread, error: Throwable) {
-        crashStarted = true
+        if (fileLock.isHeldByCurrentThread || !fileLock.tryLock()) return
         try {
-            DataOutputStream(temporary.outputStream()).use { output ->
-                output.writeLong(System.currentTimeMillis())
-                val writer = ReportWriter(output)
+            skipStartupImport = true
+            replaceReport(System.currentTimeMillis()) { writer ->
                 writer.line(environment)
                 writer.line("thread=${thread.name.reportField()}")
                 writer.stack(error)
             }
+        } finally {
+            fileLock.unlock()
+        }
+    }
+
+    private fun replaceReport(timestampMillis: Long, write: (ReportWriter) -> Unit) {
+        try {
+            DataOutputStream(temporary.outputStream()).use { output ->
+                output.writeLong(timestampMillis)
+                write(ReportWriter(output))
+            }
             // Both files are siblings. On Android the rename atomically replaces the old report.
-            temporary.renameTo(report)
+            if (!temporary.renameTo(report)) throw IOException("Could not replace the crash report")
         } finally {
             temporary.delete()
         }
     }
 
-    @Synchronized
-    fun consume(): Capture? {
-        // A background crash can race the startup import in this process.
-        if (crashStarted) return null
+    fun importStartup(): Capture? = fileLock.withLock {
+        // Import only once, and leave any crash from this process for the next one.
+        if (skipStartupImport) return null
+        skipStartupImport = true
         temporary.delete()
-        return if (report.exists()) read().takeIf { report.delete() } else null
+        val capture = read() ?: return null
+        val redacted = CrashReportRedactor.redact(capture.details)
+        if (redacted == capture.details) return capture
+        try {
+            replaceReport(capture.timestampMillis) { writer ->
+                redacted.removeSuffix("\n").lineSequence().forEach(writer::line)
+            }
+            // Read back the committed text so the in-memory entry sees the same size limit.
+            read()
+        } catch (_: IOException) {
+            null
+        }
+    }
+
+    fun clear(): Boolean = fileLock.withLock {
+        val temporaryDeleted = delete(temporary)
+        val reportDeleted = delete(report)
+        temporaryDeleted && reportDeleted
+    }
+
+    private fun delete(file: File): Boolean = try {
+        Files.deleteIfExists(file.toPath())
+        true
+    } catch (_: IOException) {
+        false
     }
 
     private fun read(): Capture? = try {
@@ -103,6 +146,7 @@ internal class LastCrashReport(directory: File, private val environment: String)
     }
 
     companion object {
+        private const val CRASH_EXIT_CODE = 10
         private const val MAX_REPORT_BYTES = 16 * 1024
         private const val MAX_FIELD_CHARS = 512
         private const val MAX_THROWABLES = 8

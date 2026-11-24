@@ -31,13 +31,21 @@ import org.junit.Test
 
 class DiagnosticsExportTest {
     @Test
-    fun `copy includes the crash timestamp and stack while removing URLs from messages and frames`() {
+    fun `copy includes the crash timestamp and stack while removing private messages and frame fields`() {
         val log = DiagnosticsLog()
         log.recordCrash(0, """
             java.lang.IllegalStateException: https://forum.hardware.fr/mp/?pseudo=SecretUser&hash_check=SecretHash
             ${'\t'}at Editor.open(Editor.kt:19)
             Caused by: java.io.IOException: failed
             ${'\t'}at Parser.parse(https://forum.hardware.fr/mp/654321)
+            ${'\t'}at Parser.parse(/forum2.php?post=42&hash_check=SecretRelative)
+            Caused by: java.lang.IllegalArgumentException: Cookie: md_user=Alice; custom=SecretCookie
+            ${'\t'}at Parser.parse(Set-Cookie: custom=SecretHeader)
+            ${'\t'}at Parser.parse(md_id=SecretId)
+            ${'\t'}at Parser.parse(MD_PASSS=SecretPass)
+            ${'\t'}at Parser.parse(hash_check=SecretHash)
+            ${'\t'}at Parser.parse(pseudo=SecretPseudo)
+            ${'\t'}at Parser.parse(password=SecretPassword)
         """.trimIndent())
         val format = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
         val environment = DiagnosticsEnvironment("0.71.0", 75, "beta", 34, "Google", "Test")
@@ -48,9 +56,10 @@ class DiagnosticsExportTest {
         assertTrue(export.contains("java.lang.IllegalStateException: <url>"))
         assertTrue(export.contains("at Editor.open(Editor.kt:19)"))
         assertTrue(export.contains("Caused by: java.io.IOException: failed"))
-        listOf("https://", "SecretUser", "hash_check", "SecretHash", "654321").forEach {
+        listOf("https://", "Secret", "Alice", "Cookie:", "hash_check", "654321", "?post=42").forEach {
             assertFalse(export, export.contains(it))
         }
+        assertTrue(export.contains("Caused by: java.lang.IllegalArgumentException: <redacted>"))
         assertTrue(export.endsWith("0 entrées locales non exportées"))
     }
 

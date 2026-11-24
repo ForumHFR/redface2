@@ -34,9 +34,13 @@ class DiagnosticsLog @Inject constructor() {
     val entries: StateFlow<List<Entry>> = _entries.asStateFlow()
 
     @Volatile private var submissionTraceSink: ((String) -> Unit)? = null
+    @Volatile private var clearCrashReport: (() -> Boolean)? = null
 
     /** Installed only by debug/dev app startup; prod/beta release keeps the volatile buffer. */
     fun exportSubmissionTraces(sink: (String) -> Unit) { submissionTraceSink = sink }
+
+    /** Registers the app's durable crash deletion before launching its startup import. */
+    fun registerCrashReportClear(clear: () -> Boolean) { clearCrashReport = clear }
 
     fun record(level: Level, tag: String, message: String) {
         val entry = Entry(
@@ -61,9 +65,7 @@ class DiagnosticsLog @Inject constructor() {
     }
 
     fun recordCrash(timestampMillis: Long, details: String) {
-        val redacted = details.lineSequence().joinToString("\n") { line ->
-            DiagnosticRedactor.redact(line, maxLength = line.length)
-        }
+        val redacted = CrashReportRedactor.redact(details)
         synchronized(crashLock) {
             if (acceptsStartupCrash) {
                 acceptsStartupCrash = false
@@ -80,9 +82,11 @@ class DiagnosticsLog @Inject constructor() {
     }
 
     fun clear() = synchronized(crashLock) {
-        // Startup consumes the file on IO and may finish after the user presses Clear.
-        acceptsStartupCrash = false
-        _entries.value = emptyList()
+        // Startup releases the file lock before publishing, so pending imports cannot race clear.
+        if (clearCrashReport?.invoke() != false) {
+            acceptsStartupCrash = false
+            _entries.value = emptyList()
+        }
     }
 
     data class Entry(
