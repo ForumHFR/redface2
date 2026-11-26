@@ -133,6 +133,7 @@ import fr.forumhfr.redface2.feature.profile.ProfilePreviewSheet
 import fr.forumhfr.redface2.feature.profile.ProfileRoute
 import fr.forumhfr.redface2.feature.profile.ProfileViewModel
 import fr.forumhfr.redface2.feature.search.SearchScreen
+import fr.forumhfr.redface2.feature.settings.NetworkStatsScreen
 import fr.forumhfr.redface2.feature.settings.MyImagesScreen
 import fr.forumhfr.redface2.feature.settings.SanctionsScreen
 import fr.forumhfr.redface2.feature.settings.SettingsAccountAboutScreen
@@ -436,6 +437,9 @@ data object LoginRoute : RedfaceNavKey
 
 @Serializable
 data object DiagnosticsRoute : RedfaceNavKey
+
+@Serializable
+data object NetworkStatsRoute : RedfaceNavKey
 
 @Serializable
 data object SettingsRoute : RedfaceNavKey
@@ -2776,6 +2780,15 @@ private fun RedfaceNavHost(
                     topBarActions = accountMenu,
                 )
             }
+            entry<NetworkStatsRoute> {
+                NetworkStatsScreen(
+                    onBack = {
+                        if (backStack.size > 1) {
+                            backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                )
+            }
             entry<SettingsMaintenanceRoute> {
                 SettingsMaintenanceScreen(
                     onBack = {
@@ -2784,6 +2797,7 @@ private fun RedfaceNavHost(
                         }
                     },
                     onOpenDiagnostics = { backStack.add(DiagnosticsRoute) },
+                    onOpenNetworkStats = { backStack.add(NetworkStatsRoute) },
                     onOpenMpStorageInspector = { backStack.add(MpStorageInspectorRoute) },
                     // #445 — expose the debug bounds overlay toggle on the dev channel only.
                     debugOverlayAvailable = BuildConfig.FLAVOR == DEV_CHANNEL,

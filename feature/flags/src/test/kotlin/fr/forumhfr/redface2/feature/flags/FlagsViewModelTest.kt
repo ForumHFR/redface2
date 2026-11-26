@@ -21,6 +21,9 @@ import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.flags.FlagCategoryCoverage
 import fr.forumhfr.redface2.core.domain.flags.FlagCoverage
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.NetworkTrigger
 import fr.forumhfr.redface2.core.model.FlagFailureKind
 import fr.forumhfr.redface2.core.model.FlagSource
 import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
@@ -899,7 +902,11 @@ class FlagsViewModelTest {
         flags.refreshGate = CompletableDeferred()
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = viewModel(auth, flags, forum)
+        val actions = mutableMapOf<Pair<NetworkAction, NetworkTrigger>, Long>()
+        val recorder = NetworkActionRecorder { action, trigger, count ->
+            actions.merge(action to trigger, count, Long::plus)
+        }
+        val vm = viewModel(auth, flags, forum, networkActions = recorder)
         advanceUntilIdle()
         // The initial (Cyan) tab legitimately subscribes once; Super must not add a subscription.
         val categoriesSubscriptionsBeforeSuper = forum.observeCategoriesSubscriptions
@@ -917,6 +924,8 @@ class FlagsViewModelTest {
 
             vm.refresh()
             assertTrue(awaitItem())
+            assertEquals(1L, actions[NetworkAction.FLAG_PULL to NetworkTrigger.NONE])
+            assertEquals(3L, actions[NetworkAction.FLAG_REFRESH_ADMITTED to NetworkTrigger.PULL])
             vm.refresh()
 
             expectNoEvents()
@@ -930,6 +939,9 @@ class FlagsViewModelTest {
         }
         assertEquals(categoriesSubscriptionsBeforeSuper, forum.observeCategoriesSubscriptions)
         assertEquals(0, forum.refreshCategoriesCalls)
+        assertEquals(2L, actions[NetworkAction.FLAG_PULL to NetworkTrigger.NONE])
+        assertEquals(3L, actions[NetworkAction.FLAG_REFRESH_ADMITTED to NetworkTrigger.PULL])
+        assertEquals(3L, actions[NetworkAction.FLAG_REFRESH_IGNORED to NetworkTrigger.PULL])
     }
 
     @Test
@@ -3349,6 +3361,7 @@ class FlagsViewModelTest {
         // the process-lifetime scope it mirrors.
         externalScope: CoroutineScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
+        networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
     ): FlagsViewModel =
         FlagsViewModel(
             authRepository = auth,
@@ -3361,7 +3374,8 @@ class FlagsViewModelTest {
             mpStorageRepository = mpStorage,
             clock = fixedClock,
             externalScope = externalScope,
-            refreshDiagnostics = FlagRefreshDiagnostics(diagnostics),
+            refreshDiagnostics = FlagRefreshDiagnostics(diagnostics, networkActions = networkActions),
+            networkActions = networkActions,
         )
 
     /** Builds a ViewModel with a custom [clock] for the #378 throttle tests; everything else is a

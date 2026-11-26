@@ -1,6 +1,10 @@
 package fr.forumhfr.redface2.core.domain.stats
 
 import fr.forumhfr.redface2.core.domain.diagnostics.AppVisibility
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneOffset
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.Dispatchers
@@ -85,8 +89,37 @@ class NetworkStatsBufferTest {
         val secondary = NetworkStatsBuffer(process)
         assertFalse(secondary.isEnabled)
         assertNull(secondary.started(start(0)))
+        secondary.record(NetworkAction.LIST)
+        secondary.onVisibilityChanged(AppVisibility.FOREGROUND)
         assertTrue(secondary.drain().isEmpty())
         assertTrue(NetworkStatsProcess.forApp(72, mainPackage, mainPackage).isMain)
+    }
+
+    @Test
+    fun `foreground sessions and seconds checkpoint across UTC hours and reset while visible`() = runTest {
+        var nanos = 0L
+        val process = NetworkStatsProcess(72, isMain = true)
+        val clock = Clock.fixed(Instant.ofEpochSecond(3599), ZoneOffset.UTC)
+        val recorder = NetworkStatsBuffer(process, clock, DiagnosticsClock { nanos })
+        val session = NetworkActionKey(72, NetworkAction.FOREGROUND_SESSION)
+        val seconds = NetworkActionKey(72, NetworkAction.FOREGROUND_SECONDS)
+
+        recorder.onVisibilityChanged(AppVisibility.FOREGROUND)
+        recorder.onVisibilityChanged(AppVisibility.FOREGROUND)
+        nanos = 2_500_000_000
+        val first = recorder.drain()
+        assertEquals(mapOf(session to 1L, seconds to 1L), first.getValue(0).actions)
+        assertEquals(mapOf(seconds to 1L), first.getValue(1).actions)
+
+        recorder.reset()
+        nanos = 4_200_000_000
+        recorder.onVisibilityChanged(AppVisibility.BACKGROUND)
+        assertEquals(mapOf(seconds to 1L), recorder.drain().getValue(0).actions)
+        nanos += 10_000_000_000
+        assertTrue(recorder.drain().isEmpty())
+        recorder.onVisibilityChanged(AppVisibility.FOREGROUND)
+        nanos += 400_000_000
+        assertEquals(mapOf(session to 1L, seconds to 1L), recorder.drain().getValue(0).actions)
     }
 
     private fun send(second: Long) = checkNotNull(buffer.started(start(second)))

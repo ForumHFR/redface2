@@ -3,6 +3,9 @@ package fr.forumhfr.redface2.core.domain.diagnostics
 import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshPolicy
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshCategory
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.NetworkTrigger
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.FlagType
 import java.util.concurrent.atomic.AtomicBoolean
@@ -31,6 +34,7 @@ class FlagRefreshDiagnostics @Inject constructor(
     private val foreground: AppForegroundDiagnostics = AppForegroundDiagnostics(log),
     private val clock: DiagnosticsClock = DiagnosticsClock(System::nanoTime),
     private val activity: HfrRefreshActivity = HfrRefreshActivity(),
+    private val networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
 ) {
     private val sequence = AtomicLong()
     @Volatile var policy = FlagsRefreshPolicy()
@@ -47,6 +51,9 @@ class FlagRefreshDiagnostics @Inject constructor(
         types: List<FlagType>,
         startedNanos: Long = System.nanoTime(),
     ): FlagRefreshTrace {
+        networkActions.record(
+            NetworkAction.FLAG_REFRESH_ADMITTED, NetworkTrigger.fromFlags(trigger), types.size.toLong(),
+        )
         val environment = FlagRefreshEnvironment(foreground, networkContext, clock, activity.begin())
         val timing = foreground.snapshot()
         val network = runCatching { networkContext.snapshot() }.getOrElse { NetworkDiagnosticsContext() }
@@ -68,6 +75,9 @@ class FlagRefreshDiagnostics @Inject constructor(
         throttled: Boolean,
         deferredTypes: List<FlagType> = emptyList(),
     ) {
+        networkActions.record(
+            NetworkAction.FLAG_REFRESH_IGNORED, NetworkTrigger.fromFlags(trigger), types.size.toLong(),
+        )
         log.record(DiagnosticsLog.Level.INFO, TAG,
             "trigger=${trigger.label} types=${types.joinToString { it.name }} " +
                 "${policy.diagnosticLine()} ignored=${if (throttled) "throttle" else "reentrance"} " +

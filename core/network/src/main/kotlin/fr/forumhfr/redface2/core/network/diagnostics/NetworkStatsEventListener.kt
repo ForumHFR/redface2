@@ -2,6 +2,8 @@ package fr.forumhfr.redface2.core.network.diagnostics
 
 import fr.forumhfr.redface2.core.domain.diagnostics.AppForegroundDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallIntent
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsContext
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsContextProvider
 import fr.forumhfr.redface2.core.domain.stats.NetworkRequestCounts
 import fr.forumhfr.redface2.core.domain.stats.NetworkRole
 import fr.forumhfr.redface2.core.domain.stats.NetworkStatsRecorder
@@ -25,12 +27,18 @@ class NetworkStatsListenerFactory @Inject constructor(
     private val recorder: NetworkStatsRecorder,
     private val foreground: AppForegroundDiagnostics,
     private val clock: Clock,
+    private val networkContext: NetworkDiagnosticsContextProvider =
+        NetworkDiagnosticsContextProvider { NetworkDiagnosticsContext() },
 ) {
     fun forRole(role: NetworkRole, delegate: EventListener.Factory = NO_LISTENER): EventListener.Factory =
         EventListener.Factory { call -> create(role) + delegate.create(call) }
 
     internal fun create(role: NetworkRole): EventListener = runCatching {
-        if (recorder.isEnabled) NetworkStatsEventListener(recorder, foreground, clock, role) else EventListener.NONE
+        if (recorder.isEnabled) {
+            NetworkStatsEventListener(recorder, foreground, clock, role, networkContext)
+        } else {
+            EventListener.NONE
+        }
     }.getOrDefault(EventListener.NONE)
 
     private companion object {
@@ -44,6 +52,7 @@ internal class NetworkStatsEventListener(
     private val foreground: AppForegroundDiagnostics,
     private val clock: Clock,
     private val role: NetworkRole,
+    private val networkContext: NetworkDiagnosticsContextProvider,
 ) : EventListener() {
     private var initial: NetworkStatsRecorder.CallRecording? = null
     private var headersStart: NetworkStatsRecorder.CallRecording? = null
@@ -133,7 +142,10 @@ internal class NetworkStatsEventListener(
     }
 
     private fun snapshot() =
-        NetworkStatsStart(clock.instant().epochSecond, System.nanoTime(), foreground.currentVisibility(), role)
+        NetworkStatsStart(
+            clock.instant().epochSecond, System.nanoTime(), foreground.currentVisibility(), role,
+            networkContext.currentNetworkKind(),
+        )
 
     private fun trigger(request: Request): NetworkTrigger {
         val tag = request.tag(HfrCallTag::class.java)

@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.data.stats
 import android.util.Log
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.diagnostics.AppVisibility
 import fr.forumhfr.redface2.core.domain.stats.NetworkStatsBuffer
 import fr.forumhfr.redface2.core.domain.stats.NetworkStatsReport
 import fr.forumhfr.redface2.core.domain.stats.NetworkStatsRepository
@@ -54,6 +55,11 @@ class NetworkStatsWriter @Inject internal constructor(
                 }
             }
         }
+    }
+
+    fun onVisibilityChanged(visibility: AppVisibility) {
+        buffer.onVisibilityChanged(visibility)
+        if (visibility == AppVisibility.BACKGROUND) requestFlush()
     }
 
     fun requestFlush() {

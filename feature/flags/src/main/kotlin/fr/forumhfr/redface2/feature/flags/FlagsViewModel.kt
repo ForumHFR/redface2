@@ -27,6 +27,8 @@ import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
 import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteTopic
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.preferences.matches
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
@@ -90,6 +92,7 @@ class FlagsViewModel @Inject constructor(
     // screen right after confirming would abort it; [awaitDetached] re-parents it here. Every read
     // and every preference write stays as it was.
     @param:ApplicationScope private val externalScope: CoroutineScope,
+    private val networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
     private val refreshDiagnostics: FlagRefreshDiagnostics,
 ) : ViewModel() {
 
@@ -921,11 +924,13 @@ class FlagsViewModel @Inject constructor(
     fun refresh() {
         val selected = _selectedTab.value
         val type = selected.flagType
-        if (type == null) {
-            if (selected == FlagTab.Super) requestManualRefresh(SUPER_FAVORITE_BACKING_TYPES, selected)
-            return
+        val types = when {
+            type != null -> listOf(type)
+            selected == FlagTab.Super -> SUPER_FAVORITE_BACKING_TYPES
+            else -> return
         }
-        requestManualRefresh(listOf(type), selected)
+        networkActions.record(NetworkAction.FLAG_PULL)
+        requestManualRefresh(types, selected)
     }
 
     fun consumeRefreshWarning(warning: FlagsRefreshWarning) {

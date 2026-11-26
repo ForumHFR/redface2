@@ -4,12 +4,25 @@ package fr.forumhfr.redface2.core.domain.diagnostics
 fun interface NetworkDiagnosticsContextProvider {
     fun snapshot(): NetworkDiagnosticsContext
 
+    fun currentNetworkKind(): NetworkKind = snapshot().networkKind
+
     fun restrictions(): NetworkDiagnosticsRestrictions = NetworkDiagnosticsRestrictions()
 
     fun observe(listener: (NetworkDiagnosticsEvent) -> Unit): DiagnosticsSubscription = DiagnosticsSubscription { }
 
     /** Captures the default network and returns a check for a later change, if the initial read succeeds. */
     fun defaultNetworkChangeCheck(): (() -> Boolean)? = null
+}
+
+enum class NetworkKind { WIFI, CELLULAR, OTHER, UNKNOWN }
+
+internal fun networkKind(transports: Set<NetworkTransport>?): NetworkKind = when {
+    transports.isNullOrEmpty() -> NetworkKind.UNKNOWN
+    NetworkTransport.VPN in transports -> NetworkKind.OTHER
+    NetworkTransport.WIFI in transports && NetworkTransport.CELLULAR in transports -> NetworkKind.OTHER
+    NetworkTransport.WIFI in transports -> NetworkKind.WIFI
+    NetworkTransport.CELLULAR in transports -> NetworkKind.CELLULAR
+    else -> NetworkKind.OTHER
 }
 
 /** Stable ordering keeps VPN visible even when capabilities also expose another transport. */
@@ -28,6 +41,7 @@ class NetworkDiagnosticsContext(
     private val privateDns: Boolean? = null,
 ) {
     private val transport = diagnosticTransportLabel(transports)
+    val networkKind = networkKind(transports)
 
     fun line(): String = "transport=$transport metered=${metered.diagnosticBit()} " +
         "validated=${validated.diagnosticBit()} privateDns=${privateDns.diagnosticBit()}"

@@ -31,6 +31,8 @@ import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.domain.write.ModerationRepository
 import fr.forumhfr.redface2.core.domain.write.PollVoteRepository
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
@@ -124,6 +126,7 @@ class TopicViewModel @AssistedInject constructor(
     // re-parents them here. READS stay on `viewModelScope` — leaving the screen must still cancel
     // them. Plain Hilt dependency, the assisted Factory is unchanged.
     @param:ApplicationScope private val externalScope: CoroutineScope,
+    private val networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TopicUiState.initial(request))
@@ -1246,6 +1249,7 @@ class TopicViewModel @AssistedInject constructor(
         ) {
             return
         }
+        networkActions.record(NetworkAction.TOPIC_PAGE)
         // #221 — explicit refresh also retries a cold-start offline miss. Repository TTL and
         // single-flight keep this effectively free while the directory is fresh/in flight.
         loadStaff()
@@ -1372,7 +1376,9 @@ class TopicViewModel @AssistedInject constructor(
     private fun loadCurrentPage(
         entryLanding: PendingLanding? = null,
         entryLandingIsScrollTo: Boolean = false,
+        countVisit: Boolean = true,
     ) {
+        if (countVisit) networkActions.record(NetworkAction.TOPIC_PAGE)
         becomePageOwner()
         if (entryLanding != null) {
             armLanding(entryLanding, initialScrollTo = entryLandingIsScrollTo)
@@ -2122,6 +2128,7 @@ class TopicViewModel @AssistedInject constructor(
     /** Resolve a possibly stale last-page offer with its own single redirect, only after the click. */
     fun openSubmittedPostPage(page: Int, departureAnchor: TopicScrollAnchor? = null) {
         if (page < 1) return
+        networkActions.record(NetworkAction.TOPIC_PAGE)
         submitAcknowledgements.clear()
         departureAnchor?.let { pageAnchors[request.page] = it }
         pageSnapshots.remove(page)
@@ -2191,6 +2198,7 @@ class TopicViewModel @AssistedInject constructor(
         bottomLandingEligible: Boolean = false,
     ) {
         submitAcknowledgements.clear()
+        networkActions.record(NetworkAction.TOPIC_PAGE)
         // F4 step 1 — save the departure anchor before anything else.
         departureAnchor?.let { pageAnchors[request.page] = it }
         // Steps 2-3 — new owner : generation bump + cancel search / form fetch / load / prefetch.
@@ -2266,6 +2274,7 @@ class TopicViewModel @AssistedInject constructor(
         submitRefreshKind: TopicRefreshKind,
         acknowledgementId: Long? = null,
     ) {
+        val departingPage = request.page
         becomePageOwner()
         // #1301 — expose the durable cause synchronously, before any adoption or network wait.
         _state.update { it.copy(refreshKind = submitRefreshKind) }
@@ -2309,6 +2318,7 @@ class TopicViewModel @AssistedInject constructor(
                         continue
                     }
                     alignSubmittedPage(plan, topic)
+                    recordSubmitLandingVisit(submitRefreshKind, departingPage, topic.page)
                     recordSnapshot(topic)
                     dispatchPendingLanding(topic, terminal = true)
                     val offeredLastPage = topic.totalPages.takeIf {
@@ -2327,6 +2337,12 @@ class TopicViewModel @AssistedInject constructor(
                 }
                 return@launch
             }
+        }
+    }
+
+    private fun recordSubmitLandingVisit(kind: TopicRefreshKind, departingPage: Int, visiblePage: Int) {
+        if (kind != TopicRefreshKind.PostSubmitJump && departingPage != visiblePage) {
+            networkActions.record(NetworkAction.TOPIC_PAGE)
         }
     }
 
@@ -2527,7 +2543,7 @@ class TopicViewModel @AssistedInject constructor(
                 throw cancellation
             } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
                 android.util.Log.w(LOG_TAG, "Post-delete refresh failed", refreshError)
-                if (generation == ownerGeneration) loadCurrentPage()
+                if (generation == ownerGeneration) loadCurrentPage(countVisit = false)
             }
         }
     }

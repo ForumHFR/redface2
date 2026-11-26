@@ -6,12 +6,15 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
 import fr.forumhfr.redface2.core.model.Category
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -27,12 +30,14 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class ForumViewModel @Inject constructor(
     private val forumRepository: ForumRepository,
+    private val networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
 ) : ViewModel() {
 
     private val _isRefreshing: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing
 
     val uiState: StateFlow<ForumUiState> = forumRepository.observeCategories()
+        .onStart { networkActions.record(NetworkAction.LIST) }
         .map { it.toUiState() }
         .keepContentDuringRefresh(
             isLoading = { it is ForumUiState.Loading },
@@ -45,6 +50,7 @@ class ForumViewModel @Inject constructor(
         )
 
     fun refresh() {
+        networkActions.record(NetworkAction.LIST)
         viewModelScope.launch {
             _isRefreshing.value = true
             try {

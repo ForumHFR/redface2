@@ -1,5 +1,9 @@
 package fr.forumhfr.redface2.core.domain.stats
 
+import fr.forumhfr.redface2.core.domain.diagnostics.AppVisibility
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
+import fr.forumhfr.redface2.core.domain.stats.NetworkStatsStart.Companion.SECONDS_PER_HOUR
+import java.time.Clock
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -14,9 +18,14 @@ import kotlinx.coroutines.yield
 
 /** Each drain detaches a batch. Producers never wait for the drainer or touch the database. */
 @Singleton
-class NetworkStatsBuffer @Inject constructor(private val process: NetworkStatsProcess) : NetworkStatsRecorder {
+class NetworkStatsBuffer @Inject constructor(
+    private val process: NetworkStatsProcess,
+    private val clock: Clock = Clock.systemUTC(),
+    private val elapsed: DiagnosticsClock = DiagnosticsClock(System::nanoTime),
+) : NetworkStatsRecorder, NetworkActionRecorder {
     private val generation = AtomicReference(Generation())
     private val flushSignal = Channel<Unit>(Channel.CONFLATED)
+    private val foreground = ForegroundTime()
 
     override val isEnabled: Boolean get() = process.isMain
 
@@ -31,16 +40,79 @@ class NetworkStatsBuffer @Inject constructor(private val process: NetworkStatsPr
     override fun started(start: NetworkStatsStart): NetworkStatsRecorder.CallRecording? =
         if (isEnabled) Recording(generation.get(), start) else null
 
+    override fun record(action: NetworkAction, trigger: NetworkTrigger, count: Long) {
+        if (isEnabled && count > 0) addAction(clock.instant().epochSecond, action, trigger, count)
+    }
+
+    fun onVisibilityChanged(visibility: AppVisibility) {
+        if (isEnabled) foreground.update(visibility)
+    }
+
+    private fun addAction(epochSecond: Long, action: NetworkAction, trigger: NetworkTrigger, count: Long) {
+        val hour = Math.floorDiv(epochSecond, SECONDS_PER_HOUR)
+        val key = HourKey(hour, NetworkActionKey(process.versionCode, action, trigger))
+        generation.get().update { it.actions.update(key, count) }
+    }
+
     /** Only the single writer calls drain and reset. */
     suspend fun drain(): Map<Long, NetworkStatsTotals> {
+        foreground.checkpoint()
         val batch = generation.get().active.getAndSet(Batch(::requestFlush))
         while (batch.writers.get() != 0) yield()
         return batch.snapshot()
     }
 
     fun reset() {
-        generation.set(Generation())
+        foreground.reset()
     }
+
+    /** Lifecycle and writer checkpoints share a monotonic cursor; OkHttp never takes this lock. */
+    private inner class ForegroundTime {
+        private var cursor: ForegroundCursor? = null
+        private var remainderNanos = 0L
+
+        @Synchronized
+        fun update(visibility: AppVisibility) {
+            if (visibility == AppVisibility.FOREGROUND) {
+                if (cursor == null) {
+                    val wall = clock.instant().epochSecond
+                    cursor = ForegroundCursor(wall, elapsed.elapsedRealtimeNanos() - remainderNanos)
+                    addAction(wall, NetworkAction.FOREGROUND_SESSION, NetworkTrigger.NONE, 1L)
+                }
+            } else {
+                val now = elapsed.elapsedRealtimeNanos()
+                checkpointAt(now)
+                cursor?.let { remainderNanos = (now - it.elapsedNanos).coerceAtLeast(0L) }
+                cursor = null
+            }
+        }
+
+        @Synchronized
+        fun checkpoint() = checkpointAt(elapsed.elapsedRealtimeNanos())
+
+        private fun checkpointAt(now: Long) {
+            val start = cursor ?: return
+            var seconds = (now - start.elapsedNanos).coerceAtLeast(0L) / NANOS_PER_SECOND
+            val elapsedSeconds = seconds
+            var wall = start.wallSecond
+            while (seconds > 0L) {
+                val inHour = minOf(seconds, SECONDS_PER_HOUR - Math.floorMod(wall, SECONDS_PER_HOUR))
+                addAction(wall, NetworkAction.FOREGROUND_SECONDS, NetworkTrigger.NONE, inHour)
+                wall += inHour
+                seconds -= inHour
+            }
+            cursor = ForegroundCursor(wall, start.elapsedNanos + elapsedSeconds * NANOS_PER_SECOND)
+        }
+
+        @Synchronized
+        fun reset() {
+            generation.set(Generation())
+            remainderNanos = 0L
+            cursor = cursor?.let { ForegroundCursor(clock.instant().epochSecond, elapsed.elapsedRealtimeNanos()) }
+        }
+    }
+
+    private data class ForegroundCursor(val wallSecond: Long, val elapsedNanos: Long)
 
     private inner class Generation {
         val active = AtomicReference(Batch(::requestFlush))
@@ -96,7 +168,7 @@ class NetworkStatsBuffer @Inject constructor(private val process: NetworkStatsPr
         }
 
         private fun dimensions(target: NetworkTarget, trigger: NetworkTrigger) =
-            NetworkDimensions(process.versionCode, target, start.role, start.visibility, trigger)
+            NetworkDimensions(process.versionCode, target, start.role, start.visibility, trigger, start.network)
     }
 
     private class PeakWindows {
@@ -143,6 +215,8 @@ class NetworkStatsBuffer @Inject constructor(private val process: NetworkStatsPr
         val noRequests = Counters<NoRequestKey, Long>(::onInsert, signal, Long::plus)
         val peaks = Counters<NetworkPeakKey, NetworkPeaks>(::onInsert, signal, NetworkPeaks::max)
 
+        val actions = Counters<NetworkActionKey, Long>(::onInsert, signal, Long::plus)
+
         private fun onInsert() {
             if (keys.incrementAndGet() == FLUSH_KEY_COUNT) signal()
         }
@@ -151,9 +225,11 @@ class NetworkStatsBuffer @Inject constructor(private val process: NetworkStatsPr
             val requestHours = requests.byHour()
             val noRequestHours = noRequests.byHour()
             val peakHours = peaks.byHour()
-            return (requestHours.keys + noRequestHours.keys + peakHours.keys).associateWith { hour ->
+            val actionHours = actions.byHour()
+            return (requestHours.keys + noRequestHours.keys + peakHours.keys + actionHours.keys).associateWith { hour ->
                 NetworkStatsTotals(
                     requestHours[hour].orEmpty(), noRequestHours[hour].orEmpty(), peakHours[hour].orEmpty(),
+                    actionHours[hour].orEmpty(),
                 )
             }
         }
@@ -208,6 +284,7 @@ class NetworkStatsBuffer @Inject constructor(private val process: NetworkStatsPr
     }
 
     private companion object {
+        const val NANOS_PER_SECOND = 1_000_000_000L
         const val SLOTS = 1024
         const val MAX_PROBES = 16
         const val FLUSH_KEY_COUNT = 256

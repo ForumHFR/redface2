@@ -72,23 +72,24 @@ class HfrClientWriteReplayTest(private val path: WritePath) {
         server.useHttps(serverCertificates.sslSocketFactory(), false)
         server.start()
         baseUrl = server.url("/").newBuilder().host("write.test").build()
+        val witness = object : EventListener() {
+            override fun connectionAcquired(call: Call, connection: Connection) {
+                connections += connection
+            }
+            override fun requestHeadersStart(call: Call) {
+                if (call.request().method == "POST") requestHeadersStarts.incrementAndGet()
+            }
+            override fun requestBodyStart(call: Call) {
+                requestBodyStarts.incrementAndGet()
+            }
+        }
         val base = OkHttpClient.Builder()
             .sslSocketFactory(clientCertificates.sslSocketFactory(), clientCertificates.trustManager)
             .dns(object : Dns {
                 override fun lookup(hostname: String): List<InetAddress> =
                     listOf(InetAddress.getByName("127.0.0.1"))
             })
-            .eventListener(object : EventListener() {
-                override fun connectionAcquired(call: Call, connection: Connection) {
-                    connections += connection
-                }
-                override fun requestHeadersStart(call: Call) {
-                    if (call.request().method == "POST") requestHeadersStarts.incrementAndGet()
-                }
-                override fun requestBodyStart(call: Call) {
-                    requestBodyStarts.incrementAndGet()
-                }
-            })
+            .eventListener(witness)
             .callTimeout(5, TimeUnit.SECONDS)
             .build()
         // La même configuration que l'injection réelle, pas de verrou ajouté par le test.
@@ -97,7 +98,11 @@ class HfrClientWriteReplayTest(private val path: WritePath) {
                 listOf(Cookie.Builder().name("md_user").value("tester").domain(url.host).build())
             override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) = Unit
         }
-        mutation = NetworkModule.provideMutationClient(base, cookies, testClientListeners())
+        val production = NetworkModule.provideMutationClient(base, cookies, testClientListeners())
+        // The production factory replaces the base listener: keep the witness beside it.
+        mutation = production.newBuilder()
+            .eventListenerFactory { call -> witness + production.eventListenerFactory.create(call) }
+            .build()
         client = hfrClient(mutation)
     }
 

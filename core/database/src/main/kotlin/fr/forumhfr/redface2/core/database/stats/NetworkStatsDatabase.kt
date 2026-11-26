@@ -6,7 +6,9 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [NetworkRequestEntity::class, NoRequestEntity::class, NetworkPeakEntity::class],
+    entities = [
+        NetworkRequestEntity::class, NoRequestEntity::class, NetworkPeakEntity::class, NetworkActionEntity::class,
+    ],
     version = 1,
     exportSchema = true,
 )

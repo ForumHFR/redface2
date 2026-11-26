@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.domain.stats
 
 import fr.forumhfr.redface2.core.domain.diagnostics.AppVisibility
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkKind
 import java.time.Instant
 import java.time.LocalDate
 
@@ -44,6 +45,7 @@ data class NetworkDimensions(
     val role: NetworkRole,
     val visibility: AppVisibility,
     val trigger: NetworkTrigger,
+    val network: NetworkKind = NetworkKind.UNKNOWN,
 )
 
 data class NetworkRequestCounts(
@@ -72,15 +74,38 @@ data class NetworkRequestKey(val dimensions: NetworkDimensions, val status: Netw
 data class NoRequestKey(val dimensions: NetworkDimensions, val reason: NoRequestReason)
 data class NetworkPeakKey(val versionCode: Int, val group: NetworkPeakGroup)
 
+enum class NetworkAction {
+    TOPIC_PAGE, LIST, FLAG_PULL, FLAG_REFRESH_ADMITTED, FLAG_REFRESH_IGNORED, WRITE, FOREGROUND_SESSION,
+    FOREGROUND_SECONDS,
+}
+
+data class NetworkActionKey(
+    val versionCode: Int,
+    val action: NetworkAction,
+    val trigger: NetworkTrigger = NetworkTrigger.NONE,
+)
+
+fun interface NetworkActionRecorder {
+    fun record(action: NetworkAction, trigger: NetworkTrigger, count: Long)
+
+    fun record(action: NetworkAction) = record(action, NetworkTrigger.NONE, 1)
+
+    companion object {
+        val None = NetworkActionRecorder { _, _, _ -> }
+    }
+}
+
 data class NetworkStatsTotals(
     val requests: Map<NetworkRequestKey, NetworkRequestCounts> = emptyMap(),
     val noRequests: Map<NoRequestKey, Long> = emptyMap(),
     val peaks: Map<NetworkPeakKey, NetworkPeaks> = emptyMap(),
+    val actions: Map<NetworkActionKey, Long> = emptyMap(),
 ) {
     operator fun plus(other: NetworkStatsTotals) = NetworkStatsTotals(
         requests.mergedWith(other.requests, NetworkRequestCounts::plus),
         noRequests.mergedWith(other.noRequests, Long::plus),
         peaks.mergedWith(other.peaks, NetworkPeaks::max),
+        actions.mergedWith(other.actions, Long::plus),
     )
 
     private fun <K, V : Any> Map<K, V>.mergedWith(other: Map<K, V>, combine: (V, V) -> V): Map<K, V> =
@@ -93,6 +118,7 @@ data class NetworkStatsReport(
     val recordedSince: Instant? = null,
     val period: NetworkStatsTotals = NetworkStatsTotals(),
     val days: List<NetworkStatsDay> = emptyList(),
+    val versions: Set<Int> = emptySet(),
 )
 
 interface NetworkStatsRepository {
@@ -114,6 +140,7 @@ data class NetworkStatsStart(
     val monotonicNanos: Long,
     val visibility: AppVisibility,
     val role: NetworkRole,
+    val network: NetworkKind = NetworkKind.UNKNOWN,
 ) {
     val hourUtc: Long get() = Math.floorDiv(epochSecond, SECONDS_PER_HOUR)
 

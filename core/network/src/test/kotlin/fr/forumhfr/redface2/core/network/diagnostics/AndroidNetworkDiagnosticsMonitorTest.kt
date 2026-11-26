@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkKind
 import fr.forumhfr.redface2.core.model.FlagType
 import io.mockk.Runs
 import io.mockk.every
@@ -44,6 +45,37 @@ class AndroidNetworkDiagnosticsMonitorTest {
         second.finish()
         second.finish()
         verify(exactly = 1) { manager.unregisterNetworkCallback(callback.captured) }
+    }
+
+    @Test
+    fun `statistics seed the cached transport and follow changes using the shared callback`() {
+        val wifi = mockk<NetworkCapabilities>(relaxed = true)
+        val mobile = mockk<NetworkCapabilities>(relaxed = true)
+        val vpn = mockk<NetworkCapabilities>(relaxed = true)
+        every { manager.getNetworkCapabilities(network) } returns wifi
+        every { wifi.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) } returns true
+        every { mobile.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) } returns true
+        every { vpn.hasTransport(NetworkCapabilities.TRANSPORT_VPN) } returns true
+        every { vpn.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) } returns true
+        val replacement = mockk<Network>()
+
+        provider.startNetworkKindTracking()
+        assertEquals(NetworkKind.WIFI, provider.currentNetworkKind())
+        provider.observe { }.close()
+        callback.captured.onAvailable(replacement)
+        assertEquals(NetworkKind.UNKNOWN, provider.currentNetworkKind())
+        callback.captured.onCapabilitiesChanged(replacement, mobile)
+        assertEquals(NetworkKind.CELLULAR, provider.currentNetworkKind())
+        callback.captured.onCapabilitiesChanged(replacement, vpn)
+        assertEquals(NetworkKind.OTHER, provider.currentNetworkKind())
+        callback.captured.onLost(network)
+        assertEquals(NetworkKind.OTHER, provider.currentNetworkKind())
+        callback.captured.onLost(replacement)
+        assertEquals(NetworkKind.UNKNOWN, provider.currentNetworkKind())
+        verify(exactly = 1) { manager.activeNetwork }
+        verify(exactly = 1) { manager.getNetworkCapabilities(any()) }
+        verify(exactly = 1) { manager.registerDefaultNetworkCallback(any()) }
+        verify(exactly = 0) { manager.unregisterNetworkCallback(any<ConnectivityManager.NetworkCallback>()) }
     }
 
     @Test

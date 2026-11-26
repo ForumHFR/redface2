@@ -45,6 +45,47 @@ class NetworkStatsDaoTest {
     }
 
     @Test
+    fun `network transport is a key for both sent and unsent rows`() = runTest {
+        Room.inMemoryDatabaseBuilder(context, NetworkStatsDatabase::class.java).build().withDatabase { database ->
+            val dao = database.statsDao()
+            dao.merge(batch(25, network = "WIFI"))
+            dao.merge(batch(25, network = "CELLULAR"))
+            dao.merge(batch(25, network = "WIFI"))
+
+            val rows = dao.readDays(24, 48)
+            assertEquals(mapOf("WIFI" to 6L, "CELLULAR" to 3L),
+                rows.requests.associate { it.dimensions.network to it.requests })
+            assertEquals(mapOf("WIFI" to 8L, "CELLULAR" to 4L),
+                rows.noRequests.associate { it.dimensions.network to it.count })
+        }
+    }
+
+    @Test
+    fun `actions add by trigger and build and participate in retention and reset`() = runTest {
+        Room.inMemoryDatabaseBuilder(context, NetworkStatsDatabase::class.java).build().withDatabase { database ->
+            val dao = database.statsDao()
+            val older = NetworkActionEntity(24, 72, "FLAG_REFRESH_ADMITTED", "PULL", 3)
+            val latest = older.copy(hourUtc = 25, count = 2)
+            val other = latest.copy(trigger = "TAB", count = 1)
+            val nextBuild = latest.copy(versionCode = 73, count = 1)
+            dao.merge(NetworkStatsRows(emptyList(), emptyList(), emptyList(), listOf(older, latest, other, nextBuild)))
+            dao.merge(NetworkStatsRows(emptyList(), emptyList(), emptyList(), listOf(latest)))
+
+            assertEquals(24L, dao.firstHour())
+            assertEquals(setOf(72, 73), dao.versions().toSet())
+            assertEquals(setOf(older.copy(count = 7), other.copy(hourUtc = 24), nextBuild.copy(hourUtc = 24)),
+                dao.readDays(24, 48).actions.toSet())
+            dao.purge(25)
+            assertEquals(25L, dao.firstHour())
+            assertEquals(4L, dao.readDays(24, 48).actions.single { it.versionCode == 72 && it.trigger == "PULL" }.count)
+            dao.reset()
+            assertTrue(dao.readDays(24, 48).actions.isEmpty())
+            assertTrue(dao.versions().isEmpty())
+            assertNull(dao.firstHour())
+        }
+    }
+
+    @Test
     fun `retention purges old rows from every table and reset clears the rest`() = runTest {
         Room.inMemoryDatabaseBuilder(context, NetworkStatsDatabase::class.java).build().withDatabase { database ->
             val dao = database.statsDao()
@@ -97,8 +138,8 @@ class NetworkStatsDaoTest {
         }
     }
 
-    private fun batch(hour: Long, versionCode: Int = 72): NetworkStatsRows {
-        val dims = NetworkDimensionsColumns(hour, versionCode, "HTML_FORUM2", "AUTH", "UNKNOWN", "NONE")
+    private fun batch(hour: Long, versionCode: Int = 72, network: String = "UNKNOWN"): NetworkStatsRows {
+        val dims = NetworkDimensionsColumns(hour, versionCode, "HTML_FORUM2", "AUTH", "UNKNOWN", "NONE", network)
         return NetworkStatsRows(
             listOf(NetworkRequestEntity(dims, "SUCCESS", 3, 9, 6, 1)),
             listOf(NoRequestEntity(dims, "DNS", 4)),

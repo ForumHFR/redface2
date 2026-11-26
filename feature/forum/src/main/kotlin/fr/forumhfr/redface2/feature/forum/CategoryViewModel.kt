@@ -13,6 +13,8 @@ import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
@@ -72,6 +74,7 @@ class CategoryViewModel @AssistedInject constructor(
     private val forumRepository: ForumRepository,
     authRepository: AuthRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
 ) : ViewModel() {
 
     // #1132 — the REAL auth state, seeded `null` (still unknown) so the persisted-filter seed can
@@ -330,6 +333,7 @@ class CategoryViewModel @AssistedInject constructor(
                 val seed = if (auth is AuthState.Authenticated) persisted else CategoryFlagFilter.ALL
                 flagFilter.value = seed
                 flagFilterHydrated.value = true
+                countListIntent()
                 if (seed != CategoryFlagFilter.ALL) {
                     launchFlagFilterFetch(keepContent = false)
                 }
@@ -365,8 +369,13 @@ class CategoryViewModel @AssistedInject constructor(
         else -> null
     }
 
+    private fun countListIntent() {
+        if (flagFilterHydrated.value) networkActions.record(NetworkAction.LIST)
+    }
+
     fun selectSubcategory(subcat: Int?) {
         if (selectedSubcat.value == subcat) return
+        countListIntent()
         selectedSubcat.value = subcat
         page.value = 1
         // searchQuery preserved deliberately — see CategoryUiState.searchQuery KDoc.
@@ -374,6 +383,7 @@ class CategoryViewModel @AssistedInject constructor(
 
     fun selectPage(newPage: Int) {
         if (newPage < 1 || newPage == page.value) return
+        if (flagFilter.value == CategoryFlagFilter.ALL) countListIntent()
         page.value = newPage
     }
 
@@ -430,6 +440,7 @@ class CategoryViewModel @AssistedInject constructor(
      */
     fun selectFlagFilter(filter: CategoryFlagFilter) {
         if (flagFilter.value == filter) return
+        countListIntent()
         flagFilter.value = filter
         launchFlagFilterFetch(keepContent = false)
         // #1132 — persist the user's explicit choice AFTER the optimistic local update + fetch, so the
@@ -484,6 +495,7 @@ class CategoryViewModel @AssistedInject constructor(
      * collapses the transient `Loading` so the list does not blank.
      */
     fun refresh() {
+        countListIntent()
         viewModelScope.launch {
             isRefreshing.value = true
             try {

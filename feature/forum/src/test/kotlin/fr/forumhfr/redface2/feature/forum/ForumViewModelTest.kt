@@ -6,6 +6,8 @@ import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
@@ -40,14 +42,19 @@ class ForumViewModelTest {
     }
 
     @Test
-    fun `uiState walks Loading then Content as the categories load`() = runTest {
+    fun `initial categories load and manual refresh each count one list intention`() = runTest {
         val repo = FakeForumRepository()
-        val vm = ForumViewModel(repo)
+        val actions = mutableListOf<NetworkAction>()
+        val vm = ForumViewModel(repo, NetworkActionRecorder { action, _, _ -> actions += action })
 
+        assertTrue(actions.isEmpty())
         vm.uiState.test {
             assertEquals(ForumUiState.Loading, awaitItem())
             repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES))
             assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES), awaitItem())
+            assertEquals(listOf(NetworkAction.LIST), actions)
+            vm.refresh()
+            assertEquals(listOf(NetworkAction.LIST, NetworkAction.LIST), actions)
             cancelAndIgnoreRemainingEvents()
         }
     }

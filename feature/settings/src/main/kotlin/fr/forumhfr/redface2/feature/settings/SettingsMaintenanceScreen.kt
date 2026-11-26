@@ -42,6 +42,7 @@ import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsListItem
 fun SettingsMaintenanceScreen(
     onBack: () -> Unit,
     onOpenDiagnostics: () -> Unit,
+    onOpenNetworkStats: () -> Unit,
     onOpenMpStorageInspector: () -> Unit,
     modifier: Modifier = Modifier,
     // #445 — debug bounds overlay row visibility. `:feature:settings` does not own the `:app`
@@ -138,6 +139,12 @@ fun SettingsMaintenanceScreen(
                 title = stringResource(R.string.settings_about_diagnostics),
                 description = stringResource(R.string.settings_about_diagnostics_description),
                 onClick = onOpenDiagnostics,
+                trailingContent = { ChevronTrailing() },
+            )
+            RedfaceSettingsListItem(
+                title = stringResource(R.string.network_stats_title),
+                description = stringResource(R.string.network_stats_description),
+                onClick = onOpenNetworkStats,
                 trailingContent = { ChevronTrailing() },
             )
             // #6 — read-only MPStorage inspector (debug). Gated on the DT section toggle.

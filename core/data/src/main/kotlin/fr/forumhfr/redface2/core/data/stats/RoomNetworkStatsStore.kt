@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.data.stats
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import fr.forumhfr.redface2.core.database.stats.NetworkActionEntity
 import fr.forumhfr.redface2.core.database.stats.NetworkDimensionsColumns
 import fr.forumhfr.redface2.core.database.stats.NetworkPeakEntity
 import fr.forumhfr.redface2.core.database.stats.NetworkRequestEntity
@@ -9,6 +10,9 @@ import fr.forumhfr.redface2.core.database.stats.NetworkStatsDatabase
 import fr.forumhfr.redface2.core.database.stats.NetworkStatsRows
 import fr.forumhfr.redface2.core.database.stats.NoRequestEntity
 import fr.forumhfr.redface2.core.domain.diagnostics.AppVisibility
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkKind
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionKey
 import fr.forumhfr.redface2.core.domain.stats.NetworkDimensions
 import fr.forumhfr.redface2.core.domain.stats.NetworkPeakGroup
 import fr.forumhfr.redface2.core.domain.stats.NetworkPeakKey
@@ -45,6 +49,7 @@ internal class RoomNetworkStatsStore @Inject constructor(
         val requests = mutableListOf<NetworkRequestEntity>()
         val noRequests = mutableListOf<NoRequestEntity>()
         val peaks = mutableListOf<NetworkPeakEntity>()
+        val actions = mutableListOf<NetworkActionEntity>()
         hours.forEach { (hour, totals) ->
             totals.requests.forEach { (key, counts) ->
                 requests += NetworkRequestEntity(key.dimensions.columns(hour), key.status.name, counts.requests,
@@ -57,8 +62,11 @@ internal class RoomNetworkStatsStore @Inject constructor(
                 peaks += NetworkPeakEntity(hour, key.versionCode, key.group.name, peak.perSecond, peak.perMinute,
                     peak.inFlight)
             }
+            totals.actions.forEach { (key, count) ->
+                actions += NetworkActionEntity(hour, key.versionCode, key.action.name, key.trigger.name, count)
+            }
         }
-        dao.merge(NetworkStatsRows(requests, noRequests, peaks))
+        dao.merge(NetworkStatsRows(requests, noRequests, peaks, actions))
     }
 
     override suspend fun purge(beforeHour: Long) {
@@ -90,8 +98,16 @@ internal class RoomNetworkStatsStore @Inject constructor(
             days.getOrPut(row.hourUtc, ::TotalsBuilder).peaks[key] = peaks
             period.peaks.merge(key, peaks, NetworkPeaks::max)
         }
+        rows.actions.forEach { row ->
+            val key = NetworkActionKey(
+                row.versionCode, NetworkAction.valueOf(row.action), NetworkTrigger.valueOf(row.trigger),
+            )
+            days.getOrPut(row.hourUtc, ::TotalsBuilder).actions[key] = row.count
+            period.actions.merge(key, row.count, Long::plus)
+        }
         return NetworkStatsReport(
             recordedSince = dao.firstHour()?.let { Instant.ofEpochSecond(it * SECONDS_PER_HOUR) },
+            versions = dao.versions().toSet(),
             period = period.build(),
             days = days.toSortedMap(reverseOrder()).map { (hour, totals) ->
                 NetworkStatsDay(LocalDate.ofEpochDay(hour / HOURS_PER_DAY), totals.build())
@@ -100,18 +116,19 @@ internal class RoomNetworkStatsStore @Inject constructor(
     }
 
     private fun NetworkDimensions.columns(hour: Long) =
-        NetworkDimensionsColumns(hour, versionCode, target.name, role.name, visibility.name, trigger.name)
+        NetworkDimensionsColumns(hour, versionCode, target.name, role.name, visibility.name, trigger.name, network.name)
 
     private fun NetworkDimensionsColumns.toDomain() = NetworkDimensions(
         versionCode, NetworkTarget.valueOf(target), NetworkRole.valueOf(role), AppVisibility.valueOf(visibility),
-        NetworkTrigger.valueOf(trigger),
+        NetworkTrigger.valueOf(trigger), NetworkKind.valueOf(network),
     )
 
     private class TotalsBuilder {
         val requests = mutableMapOf<NetworkRequestKey, NetworkRequestCounts>()
         val noRequests = mutableMapOf<NoRequestKey, Long>()
         val peaks = mutableMapOf<NetworkPeakKey, NetworkPeaks>()
-        fun build() = NetworkStatsTotals(requests, noRequests, peaks)
+        val actions = mutableMapOf<NetworkActionKey, Long>()
+        fun build() = NetworkStatsTotals(requests, noRequests, peaks, actions)
     }
 
     private companion object {

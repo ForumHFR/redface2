@@ -8,6 +8,8 @@ import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallIntent
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrProbeTraffic
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsContext
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsContextProvider
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkKind
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkTransport
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeDisturbance
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeRunner
 import fr.forumhfr.redface2.core.domain.stats.NetworkPeakGroup
@@ -68,7 +70,10 @@ class NetworkStatsEventListenerTest {
     private val foreground = AppForegroundDiagnostics(log)
     private val traffic = HfrProbeTraffic()
     private val diagnostics = HfrEventListenerFactory(HfrNetworkDiagnostics(log, probeTraffic = traffic))
-    private val stats = NetworkStatsListenerFactory(buffer, foreground, clock)
+    private var transports = setOf(NetworkTransport.WIFI)
+    private val stats = NetworkStatsListenerFactory(
+        buffer, foreground, clock, NetworkDiagnosticsContextProvider { NetworkDiagnosticsContext(transports) },
+    )
     private val listeners = NetworkClientListeners(diagnostics, stats)
     private val base = OkHttpClient.Builder()
         .proxy(Proxy.NO_PROXY)
@@ -89,6 +94,7 @@ class NetworkStatsEventListenerTest {
         client.newCall(tagged).execute().use { response ->
             clock.now = Instant.ofEpochSecond(3600)
             foreground.foregrounded()
+            transports = setOf(NetworkTransport.CELLULAR)
             assertEquals(payload, response.body.string())
         }
 
@@ -98,6 +104,7 @@ class NetworkStatsEventListenerTest {
         assertEquals(NetworkStatus.SUCCESS, row.key.status)
         assertEquals(NetworkRole.AUTH, row.key.dimensions.role)
         assertEquals(AppVisibility.UNKNOWN, row.key.dimensions.visibility)
+        assertEquals(NetworkKind.WIFI, row.key.dimensions.network)
         assertEquals(NetworkTrigger.RETURN_FROM_TOPIC, row.key.dimensions.trigger)
         assertEquals(72, row.key.dimensions.versionCode)
         assertEquals(NetworkRequestCounts(1, bytes, 0, 0), row.value)
@@ -139,7 +146,10 @@ class NetworkStatsEventListenerTest {
     @Test
     fun `DNS failure and cancellation before send stay out of requests`() = runTest {
         val client = NetworkModule.provideAnonymousClient(base, listeners).newBuilder()
-            .dns { throw UnknownHostException() }.build()
+            .dns {
+                transports = setOf(NetworkTransport.CELLULAR)
+                throw UnknownHostException()
+            }.build()
         assertTrue(runCatching { execute(client, request("/forum2.php")) }.exceptionOrNull() is IOException)
 
         val cancelled = client.newCall(request("/forum1.php"))
@@ -153,6 +163,8 @@ class NetworkStatsEventListenerTest {
         assertEquals(setOf(NoRequestReason.DNS, NoRequestReason.CANCELLED),
             totals.noRequests.keys.map { it.reason }.toSet())
         assertEquals(2L, totals.noRequests.values.sum())
+        assertEquals(mapOf(NoRequestReason.DNS to NetworkKind.WIFI, NoRequestReason.CANCELLED to NetworkKind.CELLULAR),
+            totals.noRequests.keys.associate { it.reason to it.dimensions.network })
     }
 
     @Test

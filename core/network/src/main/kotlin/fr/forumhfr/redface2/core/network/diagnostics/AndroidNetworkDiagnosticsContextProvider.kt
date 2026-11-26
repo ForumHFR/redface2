@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsContext
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsContextProvider
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsEvent
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsRestrictions
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkKind
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -20,6 +21,12 @@ class AndroidNetworkDiagnosticsContextProvider @Inject constructor(
     @ApplicationContext private val context: Context,
 ) : NetworkDiagnosticsContextProvider {
     private val monitor = AndroidNetworkDiagnosticsMonitor(context)
+
+    fun startNetworkKindTracking() {
+        monitor.trackNetworkKind()
+    }
+
+    override fun currentNetworkKind(): NetworkKind = monitor.networkKind
 
     override fun observe(listener: (NetworkDiagnosticsEvent) -> Unit): DiagnosticsSubscription =
         monitor.observe(listener)

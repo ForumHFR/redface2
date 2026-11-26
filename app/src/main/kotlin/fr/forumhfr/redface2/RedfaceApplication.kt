@@ -15,9 +15,9 @@ import fr.forumhfr.redface2.core.data.editor.DraftRetentionPurger
 import fr.forumhfr.redface2.core.data.stats.NetworkStatsWriter
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.diagnostics.AppForegroundDiagnostics
-import fr.forumhfr.redface2.core.domain.diagnostics.AppVisibility
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.EditorSubmissionTrace
+import fr.forumhfr.redface2.core.network.diagnostics.AndroidNetworkDiagnosticsContextProvider
 import fr.forumhfr.redface2.core.network.qualifiers.ImageClient
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -55,6 +55,7 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var draftRetentionPurger: DraftRetentionPurger
 
     @Inject lateinit var networkStats: NetworkStatsWriter
+    @Inject lateinit var networkContext: AndroidNetworkDiagnosticsContextProvider
 
     @Inject lateinit var foregroundDiagnostics: AppForegroundDiagnostics
 
@@ -112,10 +113,9 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
     }
 
     private fun startNetworkStats() {
+        applicationScope.launch(Dispatchers.IO) { networkContext.startNetworkKindTracking() }
         networkStats.start()
-        foregroundDiagnostics.observe { visibility ->
-            if (visibility == AppVisibility.BACKGROUND) networkStats.requestFlush()
-        }
+        foregroundDiagnostics.observe(networkStats::onVisibilityChanged)
     }
 
     private fun installCrashHandler(): LastCrashReport {

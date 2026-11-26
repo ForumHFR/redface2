@@ -4,6 +4,8 @@ import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
 import fr.forumhfr.redface2.core.model.write.NewTopicContext
 import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
@@ -34,6 +36,7 @@ import okhttp3.FormBody
  * `#t{numreponse}`). The success log collapses the URL to a presence boolean.
  */
 @Singleton
+@Suppress("LongParameterList") // One recorder for successful submissions across write paths.
 class DefaultTopicFormRepository @Inject constructor(
     private val hfrClient: HfrClient,
     private val topicFormParser: TopicFormParser,
@@ -41,6 +44,7 @@ class DefaultTopicFormRepository @Inject constructor(
     private val diagnostics: DiagnosticsLog,
     private val smileyUsageRecorder: SuccessfulSmileyUsageRecorder,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    private val networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
 ) : TopicFormRepository {
 
     override suspend fun fetchEditFirstPostForm(context: EditFirstPostContext): TopicForm {
@@ -133,6 +137,7 @@ class DefaultTopicFormRepository @Inject constructor(
                 val responseHtml = hfrClient.submitEditPost(formBody)
                 val outcome = replySubmitResponseParser.parse(responseHtml)
                 if (outcome is ReplySubmitResult.Success) {
+                    networkActions.record(NetworkAction.WRITE)
                     smileyUsageRecorder.record(
                         smileyUsageOwner, formBody, options.smileyDisabled, form.initialContent,
                     )
