@@ -2,6 +2,8 @@ package fr.forumhfr.redface2.core.network
 
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.stats.NetworkRole
+import fr.forumhfr.redface2.core.network.diagnostics.NetworkStatsListenerFactory
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
 import fr.forumhfr.redface2.core.network.qualifiers.MutationClient
@@ -13,7 +15,6 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.Call
-import okhttp3.EventListener
 import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
@@ -27,6 +28,7 @@ class HfrFavoriteSmileyClient @Inject constructor(
     @param:MutationClient private val mutation: OkHttpClient,
     @param:HfrBaseUrl private val baseUrl: HttpUrl,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    stats: NetworkStatsListenerFactory,
 ) {
     /** #1154 — the single working page carries the complete ordered list and both account tokens. */
     suspend fun getFavoriteSmileyForm(): String {
@@ -65,14 +67,16 @@ class HfrFavoriteSmileyClient @Inject constructor(
         return executeFavoriteSmileyHtml(favoriteSmileyMutationClient, request)
     }
 
-    // Only the repository emits operation + result for this sensitive path, no generic call details.
+    private val statsOnly = stats.forRole(NetworkRole.SMILEY)
+
+    // Only the repository emits operation + result for this sensitive path.
     private val favoriteSmileyReadClient: OkHttpClient by lazy {
-        authenticated.newBuilder().cache(null).eventListener(EventListener.NONE)
+        authenticated.newBuilder().cache(null).eventListenerFactory(statsOnly)
             .followRedirects(false).followSslRedirects(false).build()
     }
 
     private val favoriteSmileyMutationClient: OkHttpClient by lazy {
-        mutation.newBuilder().cache(null).eventListener(EventListener.NONE)
+        mutation.newBuilder().cache(null).eventListenerFactory(statsOnly)
             .followRedirects(false).followSslRedirects(false)
             .retryOnConnectionFailure(false).build()
     }

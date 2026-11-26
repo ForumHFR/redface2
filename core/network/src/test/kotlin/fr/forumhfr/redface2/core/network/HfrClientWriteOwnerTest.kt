@@ -19,6 +19,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorWriteOwner
 import fr.forumhfr.redface2.core.network.cookie.CookieStore
 import fr.forumhfr.redface2.core.network.cookie.PersistentCookieJar
 import fr.forumhfr.redface2.core.network.di.NetworkModule
+import fr.forumhfr.redface2.core.network.stats.testClientListeners
 import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
@@ -88,7 +89,7 @@ class HfrClientWriteOwnerTest(private val path: WritePath) {
                 chain.proceed(chain.request())
             }
             .build()
-        mutation = NetworkModule.provideMutationClient(base, cookies)
+        mutation = NetworkModule.provideMutationClient(base, cookies, testClientListeners())
         client = HfrClient(mutation, mutation, mutation, server.url("/"), Dispatchers.IO)
     }
 

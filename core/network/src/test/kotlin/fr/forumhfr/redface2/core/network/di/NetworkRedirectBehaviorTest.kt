@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.network.di
 
+import fr.forumhfr.redface2.core.network.stats.testClientListeners
 import okhttp3.CookieJar
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -55,10 +56,10 @@ class NetworkRedirectBehaviorTest {
         cleartextServer.enqueue(MockResponse().setBody("image"))
         val cookieJar = CookieJar.NO_COOKIES
         val hfrClients = listOf(
-            NetworkModule.provideAuthenticatedClient(baseClient, cookieJar),
-            NetworkModule.provideMutationClient(baseClient, cookieJar),
-            NetworkModule.provideUploadClient(baseClient),
-            NetworkModule.provideAnonymousClient(baseClient),
+            NetworkModule.provideAuthenticatedClient(baseClient, cookieJar, testClientListeners()),
+            NetworkModule.provideMutationClient(baseClient, cookieJar, testClientListeners()),
+            NetworkModule.provideUploadClient(baseClient, testClientListeners()),
+            NetworkModule.provideAnonymousClient(baseClient, testClientListeners()),
         )
 
         hfrClients.forEach { client ->
@@ -66,7 +67,7 @@ class NetworkRedirectBehaviorTest {
         }
         assertEquals(0, cleartextServer.requestCount)
 
-        assertEquals(200, execute(NetworkModule.provideImageClient(baseClient)))
+        assertEquals(200, execute(NetworkModule.provideImageClient(baseClient, testClientListeners())))
         assertEquals(1, cleartextServer.requestCount)
     }
 

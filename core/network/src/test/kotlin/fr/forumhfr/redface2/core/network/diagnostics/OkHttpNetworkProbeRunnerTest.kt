@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeRunner
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeService
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeStatus
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeWave
+import fr.forumhfr.redface2.core.network.stats.disabledStatsFactory
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
@@ -326,5 +327,7 @@ class OkHttpNetworkProbeRunnerTest {
         client: OkHttpClient = base,
         url: HttpUrl = server.url("/"),
         waveTimeoutMs: Long = NetworkProbeRunner.WAVE_TIMEOUT_MS,
-    ) = OkHttpNetworkProbeRunner(client, url, Dispatchers.IO, traffic, foreground, network, waveTimeoutMs)
+    ) = OkHttpNetworkProbeRunner(
+        client, url, Dispatchers.IO, traffic, foreground, network, disabledStatsFactory(), waveTimeoutMs,
+    )
 }

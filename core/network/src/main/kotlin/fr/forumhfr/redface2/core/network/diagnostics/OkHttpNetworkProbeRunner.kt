@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeDisturbance
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeOutcome
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeRunner
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeWave
+import fr.forumhfr.redface2.core.domain.stats.NetworkRole
 import fr.forumhfr.redface2.core.network.HfrConstants
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
 import java.io.IOException
@@ -43,16 +44,20 @@ internal constructor(
     private val traffic: HfrProbeTraffic,
     private val foreground: AppForegroundDiagnostics,
     private val network: NetworkDiagnosticsContextProvider,
+    private val stats: NetworkStatsListenerFactory,
     private val waveTimeoutMs: Long,
 ) : NetworkProbeRunner {
-    @Inject constructor(
+    @Inject
+    @Suppress("LongParameterList")
+    constructor(
         baseClient: OkHttpClient,
         @HfrBaseUrl baseUrl: HttpUrl,
         @IoDispatcher ioDispatcher: CoroutineDispatcher,
         traffic: HfrProbeTraffic,
         foreground: AppForegroundDiagnostics,
         network: NetworkDiagnosticsContextProvider,
-    ) : this(baseClient, baseUrl, ioDispatcher, traffic, foreground, network, NetworkProbeRunner.WAVE_TIMEOUT_MS)
+        stats: NetworkStatsListenerFactory,
+    ) : this(baseClient, baseUrl, ioDispatcher, traffic, foreground, network, stats, NetworkProbeRunner.WAVE_TIMEOUT_MS)
 
     override suspend fun run(onWaveStarted: (Int) -> Unit, onWaveFinished: (NetworkProbeWave) -> Unit) {
         val client = anonymousProbeClient(baseClient)
@@ -123,11 +128,14 @@ internal constructor(
         val exchanged = AtomicBoolean()
         // Remove 503 retry permission before OkHttp can open a second TCP/TLS connection.
         // Keep the exchange guard as a fallback, before any unexpected follow-up GET.
-        val call = client.newBuilder().eventListener(timing).addNetworkInterceptor { chain ->
-            if (!exchanged.compareAndSet(false, true)) throw ExchangeLimitExceeded()
-            val response = chain.proceed(chain.request())
-            if (response.code == 503) response.newBuilder().removeHeader("Retry-After").build() else response
-        }.build().newCall(request)
+        val call = client.newBuilder()
+            .eventListener(timing + stats.create(NetworkRole.PROBE))
+            .addNetworkInterceptor { chain ->
+                if (!exchanged.compareAndSet(false, true)) throw ExchangeLimitExceeded()
+                val response = chain.proceed(chain.request())
+                if (response.code == 503) response.newBuilder().removeHeader("Retry-After").build() else response
+            }
+            .build().newCall(request)
         // The cancellation hook remains installed while execute() AND the body read are blocked.
         suspendCancellableCoroutine<Unit> { continuation ->
             continuation.invokeOnCancellation {

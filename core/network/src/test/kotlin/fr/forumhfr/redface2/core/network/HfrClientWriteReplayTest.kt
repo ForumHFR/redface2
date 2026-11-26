@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.network
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.editor.EditorWriteOwner
 import fr.forumhfr.redface2.core.network.di.NetworkModule
+import fr.forumhfr.redface2.core.network.stats.testClientListeners
 import java.io.IOException
 import java.net.InetAddress
 import java.net.URLDecoder
@@ -96,7 +97,7 @@ class HfrClientWriteReplayTest(private val path: WritePath) {
                 listOf(Cookie.Builder().name("md_user").value("tester").domain(url.host).build())
             override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) = Unit
         }
-        mutation = NetworkModule.provideMutationClient(base, cookies)
+        mutation = NetworkModule.provideMutationClient(base, cookies, testClientListeners())
         client = hfrClient(mutation)
     }
 

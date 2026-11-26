@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.network.diagnostics.HfrCallTag
 import fr.forumhfr.redface2.core.network.diagnostics.HfrEventListenerFactory
 import fr.forumhfr.redface2.core.network.diagnostics.HfrNetworkDiagnostics
+import fr.forumhfr.redface2.core.network.stats.testClientListeners
 import java.io.IOException
 import okhttp3.CookieJar
 import okhttp3.OkHttpClient
@@ -22,17 +23,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NetworkModuleTest {
+    private val listeners = testClientListeners()
+
     @Test
     fun `derived factories identify roles and images are silent without changing client policies`() {
         val log = DiagnosticsLog()
         val collector = HfrNetworkDiagnostics(log)
-        val base = OkHttpClient.Builder().eventListenerFactory(HfrEventListenerFactory(collector) { 0L }).build()
+        val listeners = testClientListeners(HfrEventListenerFactory(collector) { 0L })
+        val base = OkHttpClient()
         val fetch = FlagFetchTrace(1, FlagType.CYAN)
         val clients = listOf(
-            NetworkModule.provideAuthenticatedClient(base, CookieJar.NO_COOKIES) to HfrClientRole.AUTH,
-            NetworkModule.provideAnonymousClient(base) to HfrClientRole.ANON,
-            NetworkModule.provideMutationClient(base, CookieJar.NO_COOKIES) to HfrClientRole.MUTATION,
-            NetworkModule.provideUploadClient(base) to HfrClientRole.UPLOAD,
+            NetworkModule.provideAuthenticatedClient(base, CookieJar.NO_COOKIES, listeners) to HfrClientRole.AUTH,
+            NetworkModule.provideAnonymousClient(base, listeners) to HfrClientRole.ANON,
+            NetworkModule.provideMutationClient(base, CookieJar.NO_COOKIES, listeners) to HfrClientRole.MUTATION,
+            NetworkModule.provideUploadClient(base, listeners) to HfrClientRole.UPLOAD,
         )
         clients.forEach { (client, role) ->
             val request = Request.Builder().url("https://forum.hardware.fr/forum2.php?cat=23&post=35395")
@@ -49,7 +53,7 @@ class NetworkModuleTest {
             assertEquals(base.readTimeoutMillis, client.readTimeoutMillis)
         }
         val beforeImages = log.entries.value
-        val image = NetworkModule.provideImageClient(base)
+        val image = NetworkModule.provideImageClient(base, listeners)
         val call = image.newCall(Request.Builder().url("https://forum.hardware.fr/mesimages/private.jpg").build())
         val listener = image.eventListenerFactory.create(call)
         listener.callStart(call)
@@ -63,8 +67,9 @@ class NetworkModuleTest {
             val log = DiagnosticsLog()
             val traffic = HfrProbeTraffic()
             val collector = HfrNetworkDiagnostics(log, probeTraffic = traffic)
-            val base = OkHttpClient.Builder().eventListenerFactory(HfrEventListenerFactory(collector)).build()
-            val image = NetworkModule.provideImageClient(base)
+            val listeners = testClientListeners(HfrEventListenerFactory(collector))
+            val base = OkHttpClient()
+            val image = NetworkModule.provideImageClient(base, listeners)
             val call = image.newCall(Request.Builder().url("https://forum.hardware.fr/mesimages/Secret.jpg").build())
             val listener = image.eventListenerFactory.create(call)
             val before = traffic.snapshot()
@@ -85,8 +90,9 @@ class NetworkModuleTest {
         val log = DiagnosticsLog()
         val traffic = HfrProbeTraffic()
         val collector = HfrNetworkDiagnostics(log, probeTraffic = traffic)
-        val base = OkHttpClient.Builder().eventListenerFactory(HfrEventListenerFactory(collector)).build()
-        val image = NetworkModule.provideImageClient(base)
+        val listeners = testClientListeners(HfrEventListenerFactory(collector))
+        val base = OkHttpClient()
+        val image = NetworkModule.provideImageClient(base, listeners)
         val call = image.newCall(Request.Builder().url("https://example.invalid/Secret.jpg").build())
         val listener = image.eventListenerFactory.create(call)
         val before = traffic.snapshot()
@@ -107,11 +113,11 @@ class NetworkModuleTest {
             .build()
         val cookieJar = CookieJar.NO_COOKIES
 
-        val authenticated = NetworkModule.provideAuthenticatedClient(baseClient, cookieJar)
-        val anonymous = NetworkModule.provideAnonymousClient(baseClient)
-        val image = NetworkModule.provideImageClient(baseClient)
-        val mutation = NetworkModule.provideMutationClient(baseClient, cookieJar)
-        val upload = NetworkModule.provideUploadClient(baseClient)
+        val authenticated = NetworkModule.provideAuthenticatedClient(baseClient, cookieJar, listeners)
+        val anonymous = NetworkModule.provideAnonymousClient(baseClient, listeners)
+        val image = NetworkModule.provideImageClient(baseClient, listeners)
+        val mutation = NetworkModule.provideMutationClient(baseClient, cookieJar, listeners)
+        val upload = NetworkModule.provideUploadClient(baseClient, listeners)
 
         assertTrue(authenticated.retryOnConnectionFailure)
         assertTrue(anonymous.retryOnConnectionFailure)
@@ -126,11 +132,11 @@ class NetworkModuleTest {
         val baseClient = OkHttpClient()
         val cookieJar = CookieJar.NO_COOKIES
 
-        val authenticated = NetworkModule.provideAuthenticatedClient(baseClient, cookieJar)
-        val anonymous = NetworkModule.provideAnonymousClient(baseClient)
-        val image = NetworkModule.provideImageClient(baseClient)
-        val mutation = NetworkModule.provideMutationClient(baseClient, cookieJar)
-        val upload = NetworkModule.provideUploadClient(baseClient)
+        val authenticated = NetworkModule.provideAuthenticatedClient(baseClient, cookieJar, listeners)
+        val anonymous = NetworkModule.provideAnonymousClient(baseClient, listeners)
+        val image = NetworkModule.provideImageClient(baseClient, listeners)
+        val mutation = NetworkModule.provideMutationClient(baseClient, cookieJar, listeners)
+        val upload = NetworkModule.provideUploadClient(baseClient, listeners)
 
         assertEquals(
             listOf(RehostHttpsUpgradeInterceptor::class, RefererInterceptor::class),
@@ -151,11 +157,11 @@ class NetworkModuleTest {
             .build()
         val cookieJar = CookieJar.NO_COOKIES
 
-        val authenticated = NetworkModule.provideAuthenticatedClient(baseClient, cookieJar)
-        val anonymous = NetworkModule.provideAnonymousClient(baseClient)
-        val image = NetworkModule.provideImageClient(baseClient)
-        val mutation = NetworkModule.provideMutationClient(baseClient, cookieJar)
-        val upload = NetworkModule.provideUploadClient(baseClient)
+        val authenticated = NetworkModule.provideAuthenticatedClient(baseClient, cookieJar, listeners)
+        val anonymous = NetworkModule.provideAnonymousClient(baseClient, listeners)
+        val image = NetworkModule.provideImageClient(baseClient, listeners)
+        val mutation = NetworkModule.provideMutationClient(baseClient, cookieJar, listeners)
+        val upload = NetworkModule.provideUploadClient(baseClient, listeners)
 
         listOf(authenticated, mutation, upload, anonymous).forEach { client ->
             assertTrue(client.followRedirects)
@@ -169,8 +175,8 @@ class NetworkModuleTest {
     fun `anonymous HFR and image clients never carry cookies`() {
         val baseClient = OkHttpClient()
 
-        assertSame(CookieJar.NO_COOKIES, NetworkModule.provideAnonymousClient(baseClient).cookieJar)
-        assertSame(CookieJar.NO_COOKIES, NetworkModule.provideImageClient(baseClient).cookieJar)
+        assertSame(CookieJar.NO_COOKIES, NetworkModule.provideAnonymousClient(baseClient, listeners).cookieJar)
+        assertSame(CookieJar.NO_COOKIES, NetworkModule.provideImageClient(baseClient, listeners).cookieJar)
     }
 
     @Test
