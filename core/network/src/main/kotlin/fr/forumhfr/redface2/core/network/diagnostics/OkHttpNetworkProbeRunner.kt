@@ -11,14 +11,19 @@ import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeOutcome
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeRunner
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeWave
 import fr.forumhfr.redface2.core.domain.stats.NetworkRole
-import fr.forumhfr.redface2.core.network.HfrConstants
+import fr.forumhfr.redface2.core.network.HfrRestCircuitBreaker
+import fr.forumhfr.redface2.core.network.RestReply
+import fr.forumhfr.redface2.core.network.isApacheForbiddenCandidate
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
+import fr.forumhfr.redface2.core.network.qualifiers.HfrUserAgent
+import fr.forumhfr.redface2.core.network.restReply
 import java.io.IOException
 import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -28,6 +33,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.Authenticator
+import okhttp3.Call
 import okhttp3.ConnectionPool
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
@@ -45,7 +51,9 @@ internal constructor(
     private val foreground: AppForegroundDiagnostics,
     private val network: NetworkDiagnosticsContextProvider,
     private val stats: NetworkStatsListenerFactory,
-    private val waveTimeoutMs: Long,
+    private val userAgent: String,
+    private val waveTimeoutMs: Long = NetworkProbeRunner.WAVE_TIMEOUT_MS,
+    private val breaker: HfrRestCircuitBreaker = HfrRestCircuitBreaker.inMemory(),
 ) : NetworkProbeRunner {
     @Inject
     @Suppress("LongParameterList")
@@ -57,7 +65,12 @@ internal constructor(
         foreground: AppForegroundDiagnostics,
         network: NetworkDiagnosticsContextProvider,
         stats: NetworkStatsListenerFactory,
-    ) : this(baseClient, baseUrl, ioDispatcher, traffic, foreground, network, stats, NetworkProbeRunner.WAVE_TIMEOUT_MS)
+        @HfrUserAgent userAgent: String,
+        breaker: HfrRestCircuitBreaker,
+    ) : this(
+        baseClient, baseUrl, ioDispatcher, traffic, foreground, network, stats, userAgent,
+        waveTimeoutMs = NetworkProbeRunner.WAVE_TIMEOUT_MS, breaker = breaker,
+    )
 
     override suspend fun run(onWaveStarted: (Int) -> Unit, onWaveFinished: (NetworkProbeWave) -> Unit) {
         val client = anonymousProbeClient(baseClient)
@@ -68,6 +81,7 @@ internal constructor(
         try {
             for (size in NetworkProbeRunner.WAVE_SIZES) {
                 currentCoroutineContext().ensureActive()
+                breaker.checkProbeAllowed()
                 environment.startWave()
                 onWaveStarted(size)
                 runWave(client, size, observation, environment, onWaveFinished)
@@ -118,17 +132,28 @@ internal constructor(
         timing: ProbeTimingListener,
         dns: ProbeDns,
     ) = withContext(ioDispatcher) {
+        val call = newProbeCall(client, timing)
+        val admission = breaker.admit(allowRecovery = false)
+        var reply: RestReply? = null
+        try {
+            executeCall(call, timing, dns) { reply = it }
+        } finally {
+            withContext(NonCancellable) { breaker.complete(admission, reply) }
+        }
+    }
+
+    private fun newProbeCall(client: OkHttpClient, timing: ProbeTimingListener): Call {
         val url = baseUrl.newBuilder().encodedPath("/webservices/rest_api.php")
             .query(null).addQueryParameter("uri", "forums/hardwarefr/categories/").build()
         val request = Request.Builder().url(url)
             .header("Connection", "close")
             .header("Cache-Control", "no-cache, no-store")
-            .header("User-Agent", HfrConstants.USER_AGENT)
+            .header("User-Agent", userAgent)
             .build()
         val exchanged = AtomicBoolean()
         // Remove 503 retry permission before OkHttp can open a second TCP/TLS connection.
         // Keep the exchange guard as a fallback, before any unexpected follow-up GET.
-        val call = client.newBuilder()
+        return client.newBuilder()
             .eventListener(timing + stats.create(NetworkRole.PROBE))
             .addNetworkInterceptor { chain ->
                 if (!exchanged.compareAndSet(false, true)) throw ExchangeLimitExceeded()
@@ -136,6 +161,14 @@ internal constructor(
                 if (response.code == 503) response.newBuilder().removeHeader("Retry-After").build() else response
             }
             .build().newCall(request)
+    }
+
+    private suspend fun executeCall(
+        call: Call,
+        timing: ProbeTimingListener,
+        dns: ProbeDns,
+        observeReply: (RestReply?) -> Unit,
+    ) {
         // The cancellation hook remains installed while execute() AND the body read are blocked.
         suspendCancellableCoroutine<Unit> { continuation ->
             continuation.invokeOnCancellation {
@@ -146,9 +179,14 @@ internal constructor(
             var failure: IOException? = null
             try {
                 call.execute().use { response ->
+                    observeReply(response.restReply())
                     val source = response.body.source()
                     if (source.request(1)) timing.firstBodyByte()
-                    while (!source.exhausted()) source.skip(source.buffer.size)
+                    if (response.isApacheForbiddenCandidate) {
+                        observeReply(response.restReply(response.body.string()))
+                    } else {
+                        while (!source.exhausted()) source.skip(source.buffer.size)
+                    }
                     outcome = if (response.isSuccessful) NetworkProbeOutcome.OK else NetworkProbeOutcome.HTTP_ERROR
                 }
             } catch (error: ProbeDns.DeadlineExceeded) {

@@ -132,6 +132,7 @@ import fr.forumhfr.redface2.core.ui.icon.categoryIcon
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoice
 import fr.forumhfr.redface2.core.ui.settings.RedfaceSettingsChoiceGroup
 import fr.forumhfr.redface2.core.ui.theme.FlagPalette
+import java.time.Instant
 import java.util.Locale
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -208,6 +209,7 @@ fun FlagsRoute(
     val selectedTab by viewModel.selectedTab.collectAsStateWithLifecycle()
     val flagsTabState by viewModel.flagsTabState.collectAsStateWithLifecycle()
     val flagsState = flagsTabState.flagsState
+    val restBlockedUntil by viewModel.restBlockedUntil.collectAsStateWithLifecycle()
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val removeFlagState by viewModel.removeFlagState.collectAsStateWithLifecycle()
     val removeFlagEvent by viewModel.removeFlagEvent.collectAsStateWithLifecycle()
@@ -268,7 +270,7 @@ fun FlagsRoute(
         host = snackbarHostState,
         onConsumed = viewModel::consumeRefreshWarning,
         onRetry = viewModel::retryRefreshWarning,
-        hasRefreshBanner = (flagsState as? FlagsListUiState.Success)?.hasRefreshBanner == true,
+        hasRefreshBanner = flagsState.showsRefreshBanner(restBlockedUntil),
     )
 
     // #385 — hoisted list state + scroll-to-top when the unread filter flips (cf.
@@ -564,6 +566,7 @@ fun FlagsRoute(
                                         categoryBandStyle = flagsViewSettings.categoryBandStyle,
                                         funnyEmptyState = funnyEmptyState,
                                         hideReadActive = flagsViewSettings.hideReadCategories,
+                                        restBlockedUntil = restBlockedUntil,
                                     ),
                                     actions = AuthenticatedActions(
                                         onSelectTab = viewModel::selectTab,
@@ -1603,8 +1606,9 @@ internal fun FlagListBody(
     val pullState = rememberPullToRefreshState()
     val settling = rememberPullSettling(pullState, state.isRefreshing)
     val pushRelease = pullPushReleaseFactor(state.isRefreshing, settling)
-    val snapshot = (state.flagsState as? FlagsListUiState.Success)
-        ?.takeIf { it.hasRefreshBanner }
+    val restBlocked = state.restBlockedUntil != null || state.flagsState.isRestBlocked
+    val snapshot = (state.flagsState as? FlagsListUiState.Success)?.takeIf { it.hasRefreshBanner }
+    val hasBanner = restBlocked || snapshot != null
     val contentTopPadding = LocalFlagsContentTopPadding.current
     PullToRefreshBox(
         isRefreshing = state.isRefreshing,
@@ -1640,15 +1644,17 @@ internal fun FlagListBody(
                     translationY = pullState.distanceFraction.coerceIn(0f, 1f) * pushRelease() *
                         MAX_PULL_PUSH.toPx()
                 }
-                .padding(top = if (snapshot != null) contentTopPadding else 0.dp),
+                .padding(top = if (hasBanner) contentTopPadding else 0.dp),
         ) {
-            if (snapshot != null) {
+            if (restBlocked) {
+                FlagsRestBlockedBanner(state.restBlockedUntil, actions.onRefresh)
+            } else if (snapshot != null) {
                 FlagsRefreshBanner(snapshot, actions.onRefresh, actions.onLoginRequested)
             }
             // The persistent banner sits below the overlaid bar. Consume its inset once here;
             // the list and its filtered/empty states then start directly below the banner.
             CompositionLocalProvider(
-                LocalFlagsContentTopPadding provides if (snapshot != null) 0.dp else contentTopPadding,
+                LocalFlagsContentTopPadding provides if (hasBanner) 0.dp else contentTopPadding,
             ) {
                 Box(modifier = Modifier.weight(1f)) {
                     FlagListContent(
@@ -1673,7 +1679,8 @@ private fun FlagListContent(
     rowClickEnabled: (FlagRowUiModel) -> Boolean = { true },
 ) {
     val selectedTab = state.selectedTab
-    when (val current = state.flagsState) {
+    val current = state.flagsState.takeUnless { it is FlagsListUiState.Failure && it.isRestBlocked }
+    when (current) {
         null, FlagsListUiState.Loading -> Box(
             // #603 — central spinner retired: the top FlagsLoadingBar is now the single loading cue
             // (it covers the initial load too). An empty but scrollable box keeps the surrounding
@@ -2912,6 +2919,7 @@ internal data class FlagsBodyState(
      * empty state uses a distinct factual wording instead of the per-tab « aucun … ».
      */
     val hideReadActive: Boolean = false,
+    val restBlockedUntil: Instant? = null,
 )
 
 internal data class AuthenticatedActions(

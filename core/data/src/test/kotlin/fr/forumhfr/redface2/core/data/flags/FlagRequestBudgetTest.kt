@@ -14,7 +14,8 @@ import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
-import fr.forumhfr.redface2.core.domain.error.HfrServerException
+import fr.forumhfr.redface2.core.domain.error.HfrRestBlockedException
+import fr.forumhfr.redface2.core.domain.flags.FlagPullBatch
 import fr.forumhfr.redface2.core.domain.flags.FlagLookup
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
@@ -54,6 +55,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.Dns
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -77,19 +79,22 @@ import org.robolectric.annotation.Config
 /**
  * REST requests at OkHttp entry with 20 categories. Peak counts concurrent requests in the interceptor.
  *
- * | Operation | Requests | Peak |
+ * | Operation | Requests before → after | Peak before → after |
  * | --- | ---: | ---: |
- * | CYAN refresh, cold / warm catalogue | 41 / 40 | 15 / 15 |
- * | CYAN initial observe, then landing refresh, then warm observe | 41 + 40 + 0 | 15 |
- * | CYAN cold refresh admitted before observation | 41 shared | 15 |
- * | First RED / FAVORITE observation after a completed sweep, then landing refresh | 20 + 40 each | 15 |
- * | Super pull, warm catalogue | 120 | 15 |
- * | Apache 403, warm / no catalogue | 20 / 1 | 15 / 1 |
- * | HTTP 429, warm / no catalogue, two consecutive pulls | 20 / 1 each | 15 / 1 |
- * | findFlag, cold catalogue / cached hit | 5 / 0 | 3 / 0 |
- * | resolveFavorite, sticky hit / memo hit | 2 / 0 | 1 / 0 |
- * | Subcategory names, cold / cached subscription | 1 / 0 | 1 / 0 |
- * | CYAN refresh, persisted LEGACY, cold catalogue | 41 | 20 |
+ * | CYAN refresh, cold / warm catalogue | 41 / 40 → 41 / 40 | 15 / 15 → 5 / 5 |
+ * | CYAN initial observe, then landing refresh, then warm observe | 41 + 40 + 0 → 41 + 40 + 0 | 15 → 5 |
+ * | CYAN cold refresh admitted before observation | 41 shared → 41 shared | 15 → 5 |
+ * | First RED / FAVORITE observation after a completed sweep, then landing refresh | 20 + 40 → 20 + 40 each | 15 → 5 |
+ * | Super pull, warm catalogue | 120 → 80 | 15 → 5 |
+ * | Apache 403, warm catalogue, detecting pull | 20 → 5 | 15 → 5 |
+ * | Apache 403, cold catalogue, two pulls that detect the block | 1 + 1 → 1 + 1 | 1 → 1 |
+ * | HTTP 429 with Retry-After, warm catalogue, two pulls | 20 + 20 → 5 + 0 | 15 → 5 |
+ * | HTTP 429 with Retry-After, cold catalogue, two pulls that detect the block | 1 + 1 → 1 + 1 | 1 → 1 |
+ * | Pull during an active cooldown, warm / cold catalogue | 20 / 1 → 0 / 0 | 15 / 1 → 0 / 0 |
+ * | findFlag, cold catalogue / cached hit | 5 / 0 → 5 / 0 | 3 / 0 → 3 / 0 |
+ * | resolveFavorite, sticky hit / memo hit | 2 / 0 → 2 / 0 | 1 / 0 → 1 / 0 |
+ * | Subcategory names, cold / cached subscription | 1 / 0 → 1 / 0 | 1 / 0 → 1 / 0 |
+ * | CYAN refresh, persisted LEGACY with N = 5, cold catalogue | 41 → 41 | 20 → 5 |
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -112,11 +117,11 @@ class FlagRequestBudgetTest {
         repositories {
             val cold = request { flags.refresh(FlagType.CYAN) }
             assertComplete(cold, FlagType.CYAN)
-            assertSweep("participated", catalogueCalls = 1, peak = 15)
+            assertSweep("participated", catalogueCalls = 1, peak = 5)
 
             val warm = request { flags.refresh(FlagType.CYAN) }
             assertEquals(cold, warm)
-            assertSweep("participated", catalogueCalls = 0, peak = 15)
+            assertSweep("participated", catalogueCalls = 0, peak = 5)
         }
     }
 
@@ -125,11 +130,11 @@ class FlagRequestBudgetTest {
         repositories {
             val cold = request { flags.observe(FlagType.CYAN).first { it != FlagsResult.Loading } }
             assertComplete(cold, FlagType.CYAN)
-            assertSweep("participated", catalogueCalls = 1, peak = 15)
+            assertSweep("participated", catalogueCalls = 1, peak = 5)
 
             val refreshed = request { flags.refresh(FlagType.CYAN) }
             assertComplete(refreshed, FlagType.CYAN)
-            assertSweep("participated", catalogueCalls = 0, peak = 15)
+            assertSweep("participated", catalogueCalls = 0, peak = 5)
 
             assertEquals(refreshed, request { flags.observe(FlagType.CYAN).first() })
             assertBudget(RequestCounts(), peak = 0)
@@ -148,7 +153,7 @@ class FlagRequestBudgetTest {
                     assertEquals(refreshed, observed)
                 }
             }
-            assertSweep("participated", catalogueCalls = 1, peak = 15)
+            assertSweep("participated", catalogueCalls = 1, peak = 5)
         }
     }
 
@@ -163,66 +168,81 @@ class FlagRequestBudgetTest {
                 assertBucketsOnly(bucket)
 
                 assertComplete(request { flags.refresh(type) }, type)
-                assertSweep(bucket, catalogueCalls = 0, peak = 15)
+                assertSweep(bucket, catalogueCalls = 0, peak = 5)
             }
         }
     }
 
     @Test
-    fun `Super pull refreshes CYAN then RED then FAVORITE and repeats the sticky sweep`() = runTest {
+    fun `Super pull refreshes three buckets with one shared sticky sweep`() = runTest {
         repositories {
             warmCatalogue()
-
-            // FlagsViewModel.fetchRefreshBatch follows SUPER_FAVORITE_BACKING_TYPES in this order.
             val batch = listOf(
                 FlagType.CYAN to "participated",
                 FlagType.RED to "read",
                 FlagType.FAVORITE to "favorites",
             )
-            for ((type, bucket) in batch) {
-                assertComplete(request { flags.refresh(type) }, type)
-                assertSweep(bucket, catalogueCalls = 0, peak = 15)
+            request {
+                withContext(FlagPullBatch()) {
+                    for ((type, bucket) in batch) {
+                        assertComplete(flags.refresh(type), type)
+                        if (type == FlagType.CYAN) assertSweep(bucket, catalogueCalls = 0, peak = 5)
+                        else assertBucketsOnly(bucket)
+                    }
+                }
             }
         }
     }
 
     @Test
-    fun `Apache 403 with a warm catalogue still sends all buckets and retains pinned rows`() = runTest {
+    fun `Apache 403 with a warm catalogue stops after the first wave and retains pinned rows`() = runTest {
         repositories {
             val cached = primeCyan()
             http.failureCode = 403
-            assertBlockedWarm(cached)
+            assertBlockedWarm(cached, bucketCalls = 5)
+            assertBlockedWarm(cached, bucketCalls = 0)
         }
     }
 
     @Test
-    fun `Apache 403 with no catalogue sends one call per pull and fails`() = runTest {
+    fun `Apache 403 with no catalogue opens after two calls then refuses a third pull`() = runTest {
         repositories {
             http.failureCode = 403
-            repeat(2) {
-                val cause = assertBlockedCold(code = 403)
-                assertTrue(cause.message.orEmpty().contains("You don't have permission to access"))
-            }
+            repeat(2) { assertBlockedCold(code = 403) }
+            assertBlockedCold(code = null)
         }
     }
 
     @Test
-    fun `429 Retry-After does not delay or suppress the next pull`() = runTest {
+    fun `429 Retry-After with a warm catalogue suppresses the next pull and ancillary REST calls`() = runTest {
         repositories {
             val cached = primeCyan()
             http.failureCode = 429
             val startedAt = currentTime
-            repeat(2) { assertBlockedWarm(cached) }
+            assertBlockedWarm(cached, bucketCalls = 5)
+            assertBlockedWarm(cached, bucketCalls = 0)
+
+            assertEquals(FlagLookup.Unavailable, request { flags.findFlag(DISCUSSIONS, -1) })
+            assertTrue(request { flags.resolveFavorite(DISCUSSIONS, FAVORITE_PIN) }
+                .exceptionOrNull() is HfrRestBlockedException)
+            request { forum.refreshSubcategories(DISCUSSIONS) }
+            assertNull(request { forum.observeCachedSubcategories(DISCUSSIONS).first() })
+            assertBudget(RequestCounts(), peak = 0)
             assertEquals(startedAt, currentTime)
         }
     }
 
     @Test
-    fun `429 Retry-After with no catalogue still sends one call on each pull`() = runTest {
+    fun `429 Retry-After with no catalogue opens after two calls then refuses a third pull`() = runTest {
         repositories {
             http.failureCode = 429
             val startedAt = currentTime
             repeat(2) { assertBlockedCold(code = 429) }
+            assertBlockedCold(code = null)
+            val observed = request { flags.observe(FlagType.RED).first { it != FlagsResult.Loading } }
+            val error = (observed as FlagsResult.Failure).cause as HfrRestBlockedException
+            assertNull(error.statusCode)
+            assertBudget(RequestCounts(), peak = 0)
             assertEquals(startedAt, currentTime)
         }
     }
@@ -238,7 +258,7 @@ class FlagRequestBudgetTest {
                     RecordedRequest(Kind.BUCKET, DISCUSSIONS, "participated", 1),
                     RecordedRequest(Kind.BUCKET, DISCUSSIONS, "read", 1),
                     RecordedRequest(Kind.BUCKET, DISCUSSIONS, "favorites", 1),
-                    RecordedRequest(Kind.STICKY, DISCUSSIONS, page = 1),
+                    RecordedRequest(Kind.STICKY, DISCUSSIONS, page = 1, resultsPerPage = 1),
                 ),
                 calls.filter { it.kind != Kind.CATALOGUE }.toSet(),
             )
@@ -256,7 +276,7 @@ class FlagRequestBudgetTest {
             assertEquals(
                 listOf(
                     RecordedRequest(Kind.BUCKET, DISCUSSIONS, "favorites", 1),
-                    RecordedRequest(Kind.STICKY, DISCUSSIONS, page = 1),
+                    RecordedRequest(Kind.STICKY, DISCUSSIONS, page = 1, resultsPerPage = 50),
                 ),
                 calls,
             )
@@ -283,10 +303,10 @@ class FlagRequestBudgetTest {
     }
 
     @Test
-    fun `persisted LEGACY bypasses the limiter even with a stored concurrency of five`() = runTest {
+    fun `persisted LEGACY uses baseline and the stored concurrency of five`() = runTest {
         repositories(persistLegacy = true) {
             assertComplete(request { flags.refresh(FlagType.CYAN) }, FlagType.CYAN)
-            assertSweep("participated", catalogueCalls = 1, peak = 20)
+            assertSweep("participated", catalogueCalls = 1, peak = 5)
         }
     }
 
@@ -441,25 +461,27 @@ class FlagRequestBudgetTest {
         suspend fun primeCyan(): FlagsResult.Success {
             val cached = request { flags.refresh(FlagType.CYAN) } as FlagsResult.Success
             assertComplete(cached, FlagType.CYAN)
-            assertSweep("participated", catalogueCalls = 1, peak = 15)
+            assertSweep("participated", catalogueCalls = 1, peak = 5)
             return cached
         }
 
-        suspend fun assertBlockedWarm(cached: FlagsResult.Success) {
+        suspend fun assertBlockedWarm(cached: FlagsResult.Success, bucketCalls: Int) {
             val result = request { flags.refresh(FlagType.CYAN) } as FlagsResult.Success
             assertEquals(FlagRefreshStatus.FAILED, result.refreshStatus)
             assertEquals(cached.flags, result.flags)
             assertEquals(cached.cachedAt, result.cachedAt)
-            assertCoverage(result, failure = FlagFailureKind.SERVER)
-            assertBucketsOnly("participated")
+            assertCoverage(result, failure = FlagFailureKind.BLOCKED)
+            val calls = assertBudget(RequestCounts(bucket = bucketCalls), peak = bucketCalls)
+            assertEquals(bucketCalls, calls.map { it.cat }.distinct().size)
+            assertTrue(calls.all { it.cat in categoryIds && it.bucket == "participated" && it.page == 1 })
         }
 
-        suspend fun assertBlockedCold(code: Int): HfrServerException {
+        suspend fun assertBlockedCold(code: Int?) {
             val result = request { flags.refresh(FlagType.CYAN) } as FlagsResult.Failure
-            val cause = result.cause as HfrServerException
-            assertEquals(code, cause.code)
-            assertBudget(RequestCounts(catalogue = 1), peak = 1)
-            return cause
+            val cause = result.cause as HfrRestBlockedException
+            assertEquals(code, cause.statusCode)
+            val sent = if (code == null) 0 else 1
+            assertBudget(RequestCounts(catalogue = sent), peak = sent)
         }
 
         fun assertSweep(bucket: String, catalogueCalls: Int, peak: Int) {
@@ -469,12 +491,15 @@ class FlagRequestBudgetTest {
         }
 
         fun assertBucketsOnly(bucket: String) {
-            val calls = assertBudget(RequestCounts(bucket = 20), peak = 15)
+            val calls = assertBudget(RequestCounts(bucket = 20), peak = 5)
             assertCategoryPages(calls, Kind.BUCKET, bucket)
         }
 
         private fun assertCategoryPages(calls: List<RecordedRequest>, kind: Kind, bucket: String? = null) {
-            val expected = categoryIds.map { cat -> RecordedRequest(kind, cat, bucket, page = 1) }.toSet()
+            val pageSize = 1.takeIf { kind == Kind.STICKY }
+            val expected = categoryIds.map { cat ->
+                RecordedRequest(kind, cat, bucket, page = 1, resultsPerPage = pageSize)
+            }.toSet()
             assertEquals(expected, calls.filter { it.kind == kind }.toSet())
         }
 
@@ -507,6 +532,7 @@ class FlagRequestBudgetTest {
         private val inFlight = AtomicInteger()
         private val peak = AtomicInteger()
         private lateinit var wave: CountDownLatch
+        private val reachedOkHttp = ThreadLocal<Boolean>()
         var failureCode: Int? = null
 
         override fun dispatch(context: CoroutineContext, block: Runnable) {
@@ -517,12 +543,22 @@ class FlagRequestBudgetTest {
             val admitted = generateSequence(pending::poll).toList()
             if (admitted.isEmpty()) return false
             wave = CountDownLatch(admitted.size)
-            val work = admitted.map { workers.submit(it) }
+            val work = admitted.map { block ->
+                workers.submit {
+                    try {
+                        block.run()
+                    } finally {
+                        if (reachedOkHttp.get() != true) wave.countDown()
+                        reachedOkHttp.remove()
+                    }
+                }
+            }
             work.forEach { it.get(WORKER_TIMEOUT_SECONDS, TimeUnit.SECONDS) }
             return true
         }
 
         override fun intercept(chain: Interceptor.Chain): Response {
+            reachedOkHttp.set(true)
             val request = chain.request()
             val entry = request.record()
             requests.add(entry)
@@ -534,7 +570,7 @@ class FlagRequestBudgetTest {
                 val contentType = if (code == 403) "text/html; charset=iso-8859-1" else "application/json"
                 val body = when (code) {
                     403 -> APACHE_FORBIDDEN
-                    200 -> bodies[entry] ?: EMPTY_LIST
+                    200 -> bodies[entry.copy(resultsPerPage = null)] ?: EMPTY_LIST
                     else -> "{}"
                 }
                 return Response.Builder()
@@ -568,6 +604,7 @@ class FlagRequestBudgetTest {
         val bucket: String? = null,
         val page: Int? = null,
         val subcat: Int? = null,
+        val resultsPerPage: Int? = null,
     )
 
     private data class RequestCounts(
@@ -643,15 +680,19 @@ class FlagRequestBudgetTest {
                 subcategoryNames != null ->
                     RecordedRequest(Kind.SUBCATEGORIES, cat = subcategoryNames.groupValues[1].toInt())
                 globalTopics != null -> RecordedRequest(Kind.GLOBAL, bucket = globalTopics.groupValues[1])
-                categoryTopics != null -> categoryTopics.toCategoryRequest(url.queryParameter("page")?.toIntOrNull())
+                categoryTopics != null -> categoryTopics.toCategoryRequest(
+                    url.queryParameter("page")?.toIntOrNull(),
+                    url.queryParameter("results_per_page")?.toIntOrNull(),
+                )
                 else -> RecordedRequest(Kind.OTHER)
             }
         }
 
-        fun MatchResult.toCategoryRequest(page: Int?): RecordedRequest {
+        fun MatchResult.toCategoryRequest(page: Int?, resultsPerPage: Int?): RecordedRequest {
             val (cat, subcat, endpoint) = destructured
             return when (endpoint) {
-                "last" -> RecordedRequest(Kind.STICKY, cat.toInt(), page = page, subcat = subcat.toIntOrNull())
+                "last" -> RecordedRequest(Kind.STICKY, cat.toInt(), page = page,
+                    subcat = subcat.toIntOrNull(), resultsPerPage = resultsPerPage)
                 in BUCKETS -> RecordedRequest(Kind.BUCKET, cat.toInt(), endpoint, page, subcat.toIntOrNull())
                 else -> RecordedRequest(Kind.OTHER)
             }

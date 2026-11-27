@@ -43,16 +43,16 @@ class OkHttpNetworkProbeEnvironmentTest {
     private val traffic = HfrProbeTraffic()
 
     @Test
-    fun `wave of 20 in the background is disturbed even when every DNS lookup fails`() = runBlocking {
+    fun `wave of 10 in the background is disturbed even when every DNS lookup fails`() = runBlocking {
         foreground.foregrounded()
         val waves = mutableListOf<NetworkProbeWave>()
         runner().run(onWaveStarted = {}, onWaveFinished = { wave ->
             waves += wave
-            if (wave.size == 10) foreground.backgrounded()
+            if (wave.size == 5) foreground.backgrounded()
         })
 
-        assertEquals(20, waves.last().results.count { it.outcome == NetworkProbeOutcome.DNS_ERROR })
-        assertEquals(listOf(false, false, false, true), waves.map { it.disturbed })
+        assertEquals(10, waves.last().results.count { it.outcome == NetworkProbeOutcome.DNS_ERROR })
+        assertEquals(listOf(false, false, true), waves.map { it.disturbed })
         assertEquals(setOf(NetworkProbeDisturbance.BACKGROUND), waves.last().disturbedBy)
     }
 
@@ -74,7 +74,7 @@ class OkHttpNetworkProbeEnvironmentTest {
 
         assertEquals(setOf(NetworkProbeDisturbance.HFR_TRAFFIC, NetworkProbeDisturbance.BACKGROUND),
             waves.first().disturbedBy)
-        assertEquals(List(3) { setOf(NetworkProbeDisturbance.HFR_TRAFFIC) }, waves.drop(1).map { it.disturbedBy })
+        assertEquals(List(2) { setOf(NetworkProbeDisturbance.HFR_TRAFFIC) }, waves.drop(1).map { it.disturbedBy })
     }
 
     @Test
@@ -90,7 +90,7 @@ class OkHttpNetworkProbeEnvironmentTest {
         }, onWaveFinished = waves::add)
 
         val changed = setOf(NetworkProbeDisturbance.NETWORK_CHANGE)
-        assertEquals(listOf(emptySet(), changed, changed, emptySet()), waves.map { it.disturbedBy })
+        assertEquals(listOf(emptySet(), changed, changed), waves.map { it.disturbedBy })
     }
 
     @Test
@@ -102,7 +102,7 @@ class OkHttpNetworkProbeEnvironmentTest {
         }, onWaveFinished = waves::add)
 
         val changed = setOf(NetworkProbeDisturbance.NETWORK_CHANGE)
-        assertEquals(listOf(emptySet(), emptySet(), changed, emptySet()), waves.map { it.disturbedBy })
+        assertEquals(listOf(emptySet(), emptySet(), changed), waves.map { it.disturbedBy })
     }
 
     @Test
@@ -110,22 +110,22 @@ class OkHttpNetworkProbeEnvironmentTest {
         val android = AndroidDefaultNetwork()
         val waves = mutableListOf<NetworkProbeWave>()
         runner(network = android.provider).run(onWaveStarted = { size ->
-            if (size == 20) {
+            if (size == 10) {
                 android.callback.captured.onAvailable(android.initial)
                 android.callback.captured.onAvailable(android.replacement)
                 android.callback.captured.onAvailable(android.initial)
             }
         }, onWaveFinished = { wave ->
             waves += wave
-            if (wave.size == 10) {
+            if (wave.size == 5) {
                 android.active = android.replacement
                 android.active = android.initial
             }
         })
 
-        // The default stayed the same throughout wave 20. The delayed callbacks still mark it.
+        // The default stayed the same throughout wave 10. The delayed callbacks still mark it.
         val changed = setOf(NetworkProbeDisturbance.NETWORK_CHANGE)
-        assertEquals(listOf(emptySet(), emptySet(), emptySet(), changed), waves.map { it.disturbedBy })
+        assertEquals(listOf(emptySet(), emptySet(), changed), waves.map { it.disturbedBy })
     }
 
     @Test(timeout = 10_000)
@@ -166,7 +166,7 @@ class OkHttpNetworkProbeEnvironmentTest {
     ): OkHttpNetworkProbeRunner {
         val client = OkHttpClient.Builder().proxy(Proxy.NO_PROXY).dns(dns).build()
         return OkHttpNetworkProbeRunner(client, "https://probe.invalid/".toHttpUrl(), Dispatchers.IO, traffic,
-            foreground, network, disabledStatsFactory())
+            foreground, network, disabledStatsFactory(), "Redface2/test")
     }
 
     private class AndroidDefaultNetwork {

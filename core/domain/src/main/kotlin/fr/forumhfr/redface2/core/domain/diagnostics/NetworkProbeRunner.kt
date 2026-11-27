@@ -5,7 +5,7 @@ interface NetworkProbeRunner {
     suspend fun run(onWaveStarted: (Int) -> Unit, onWaveFinished: (NetworkProbeWave) -> Unit)
 
     companion object {
-        val WAVE_SIZES: List<Int> = listOf(1, 5, 10, 20)
+        val WAVE_SIZES: List<Int> = listOf(1, 5, 10)
         const val WAVE_TIMEOUT_MS = 12_000L
         // Extension point only: a witness needs an approved host and explicit consent (#984).
         const val WITNESS_ENABLED = false

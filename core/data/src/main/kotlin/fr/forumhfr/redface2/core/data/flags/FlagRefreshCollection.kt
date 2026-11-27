@@ -21,7 +21,13 @@ internal class FlagRefreshCollection(private val clock: Clock) {
     }
 
     @Synchronized fun failed(error: Throwable) {
-        if (failure == null || error.toFlagFailureKind() == FlagFailureKind.SESSION) failure = error
+        val kind = error.toFlagFailureKind()
+        when {
+            failure == null || kind == FlagFailureKind.SESSION -> failure = error
+            kind == FlagFailureKind.BLOCKED && failure?.toFlagFailureKind() != FlagFailureKind.SESSION -> {
+                failure = error
+            }
+        }
     }
 
     @Synchronized fun finish(deadline: Boolean): FlagRefreshBatch {

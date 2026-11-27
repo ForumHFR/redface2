@@ -101,12 +101,12 @@ class FlagReadExecutorTest {
             }
         }
         runCurrent()
-        assertEquals(15, running)
-        assertEquals(15, limiter.heldPermits)
+        assertEquals(5, running)
+        assertEquals(5, limiter.heldPermits)
         advanceTimeBy(250)
         close.complete(Unit)
         calls.awaitAll()
-        assertEquals(15, peak)
+        assertEquals(5, peak)
         assertEquals(0, limiter.heldPermits)
         assertTrue(sessions.sumOf { it.counters().getValue("permitWaitMs") } >= 250)
     }
@@ -126,13 +126,13 @@ class FlagReadExecutorTest {
         }
         runCurrent()
         advanceTimeBy(11_999)
-        assertEquals(15, limiter.heldPermits)
+        assertEquals(5, limiter.heldPermits)
         advanceTimeBy(1)
         runCurrent()
         assertTrue(calls.awaitAll().all { it is FlagReadDeadlineException })
-        assertEquals(15, cancelled)
+        assertEquals(5, cancelled)
         assertEquals(0, limiter.heldPermits)
-        assertEquals(15L, session.counters().getValue("applicationCalls"))
+        assertEquals(5L, session.counters().getValue("applicationCalls"))
     }
 
     @Test

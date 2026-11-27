@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
 import fr.forumhfr.redface2.core.domain.flags.FlagLookup
+import fr.forumhfr.redface2.core.domain.flags.FlagPullBatch
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
@@ -30,6 +31,7 @@ import java.time.ZoneOffset
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,6 +51,7 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -56,17 +59,17 @@ import org.junit.Test
  * Repository calls per action. Each row after startup excludes the setup calls.
  * On a first visit, the cold observation is allowed to settle before the route's landing effect.
  *
- * | Scenario | Explicit refresh types | Cold observe fetch types |
+ * | Scenario | Explicit refresh types before → after | Cold observe fetch types before → after |
  * | --- | --- | --- |
- * | Cold start on CYAN (landing + resume) | CYAN | CYAN |
- * | First RED visit, then first FAVORITE visit | RED, FAVORITE | RED, FAVORITE |
- * | Return from a CYAN topic within the window | CYAN | 0 |
- * | Return from a Super topic | 0 | 0 |
- * | Switch back to CYAN after that Super return, still within the window | CYAN | 0 |
- * | Resume after 10 s / 20 s | 0 / CYAN | 0 / 0 |
- * | CYAN pull | CYAN | 0 |
- * | Super pull | CYAN, RED, FAVORITE | 0 |
- * | Two completed CYAN pulls 5 s apart | CYAN, CYAN | 0 |
+ * | Cold start on CYAN (landing + resume) | CYAN → CYAN | CYAN → CYAN |
+ * | First RED visit, then first FAVORITE visit | RED, FAVORITE → RED, FAVORITE | RED, FAVORITE → RED, FAVORITE |
+ * | Return from a CYAN topic within the window | CYAN → CYAN | 0 → 0 |
+ * | Return from a Super topic | 0 → 0 | 0 → 0 |
+ * | Switch back to CYAN after that Super return, still within the window | CYAN → CYAN | 0 → 0 |
+ * | Resume after 10 s / 20 s | 0 / CYAN → 0 / CYAN | 0 / 0 → 0 / 0 |
+ * | CYAN pull | CYAN → CYAN | 0 → 0 |
+ * | Super pull | CYAN, RED, FAVORITE → same types in one sweep batch (120 → 80 REST calls) | 0 → 0 |
+ * | Two completed CYAN pulls 5 s apart | CYAN, CYAN → CYAN, CYAN | 0 → 0 |
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class FlagsRefreshTriggerBudgetTest {
@@ -165,7 +168,7 @@ class FlagsRefreshTriggerBudgetTest {
 
             pull()
 
-            assertCalls(refreshes = listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE))
+            assertCalls(refreshes = listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE), sharedSweep = true)
             assertPinned(FlagTab.Super, FlagType.CYAN, explicitRefreshes = 2)
         }
     }
@@ -286,9 +289,16 @@ class FlagsRefreshTriggerBudgetTest {
             scope.runCurrent()
         }
 
-        fun assertCalls(refreshes: List<FlagType> = emptyList(), observations: List<FlagType> = emptyList()) {
+        fun assertCalls(
+            refreshes: List<FlagType> = emptyList(),
+            observations: List<FlagType> = emptyList(),
+            sharedSweep: Boolean = false,
+        ) {
             assertEquals("explicit refreshes", refreshes, flags.refreshes.toList())
             assertEquals("cold observation fetches", observations, flags.initialObserves.toList())
+            if (sharedSweep) assertNotNull(flags.pullBatches.distinct().single())
+            else assertEquals(List(refreshes.size) { null }, flags.pullBatches)
+            flags.pullBatches.clear()
             flags.refreshes.clear()
             flags.initialObserves.clear()
         }
@@ -310,6 +320,7 @@ class FlagsRefreshTriggerBudgetTest {
         private val cacheUpdates = MutableSharedFlow<FlagType>(extraBufferCapacity = FlagType.entries.size)
         val refreshes = mutableListOf<FlagType>()
         val initialObserves = mutableListOf<FlagType>()
+        val pullBatches = mutableListOf<FlagPullBatch?>()
         private var isRefreshing = false
 
         override fun observe(type: FlagType): Flow<FlagsResult> = flow {
@@ -327,6 +338,7 @@ class FlagsRefreshTriggerBudgetTest {
             isRefreshing = true
             try {
                 refreshes += type
+                pullBatches += currentCoroutineContext()[FlagPullBatch]
                 yield()
                 val previousAnchor = snapshots.getValue(type).value?.flags?.single()?.lastPostReadId
                 return publish(pinnedFlag(type, (previousAnchor ?: INITIAL_ANCHOR) + 1))

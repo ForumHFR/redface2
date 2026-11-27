@@ -11,13 +11,14 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeReservationStore
 import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.network.HfrRestCooldownStore
 import javax.inject.Singleton
-import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeReservationStore
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -43,6 +44,10 @@ abstract class UserPreferencesBindingsModule {
     abstract fun bindNetworkProbeReservationStore(
         impl: DataStoreNetworkProbeReservationStore,
     ): NetworkProbeReservationStore
+
+    @Binds
+    @Singleton
+    abstract fun bindHfrRestCooldownStore(impl: DataStoreHfrRestCooldownStore): HfrRestCooldownStore
 
     @Binds
     @Singleton

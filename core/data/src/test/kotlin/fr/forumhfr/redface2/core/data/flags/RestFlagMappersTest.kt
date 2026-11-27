@@ -356,6 +356,26 @@ class RestFlagMappersTest {
         )
     }
 
+    @Test
+    fun `all captured stickies plus one ordinary topic suffice to restore the favorite anchor`() {
+        val full = json.decodeFromString<RestListEnvelope<RestTopic>>(
+            fixture("rest_cat13_topics_last_sticky_favorite.json"),
+        )
+        val stickies = full.resource.resources.filter { it.isSticky }
+        val ordinary = full.resource.resources.first { !it.isSticky }
+        val minimal = full.copy(resource = full.resource.copy(resultsPerPage = 1, resources = stickies + ordinary))
+
+        assertEquals(6, minimal.resource.resources.size)
+        val flags = RestFlagMappers.toStickyFlags(minimal, FlagType.FAVORITE, fallbackCat = 13)
+        assertEquals(RestFlagMappers.toStickyFlags(full, FlagType.FAVORITE, fallbackCat = 13), flags)
+        val favorite = flags.single()
+        assertEquals(100217, favorite.topicId)
+        assertTrue(favorite.isFavorite)
+        assertFalse(favorite.hasUnread)
+        assertEquals(1, favorite.lastReadPage)
+        assertEquals(28173029L, favorite.lastPostReadId)
+    }
+
     private fun fixture(name: String): String {
         val resource = requireNotNull(javaClass.classLoader?.getResourceAsStream("fixtures/$name")) {
             "fixture missing: $name"

@@ -1,10 +1,14 @@
 package fr.forumhfr.redface2.core.domain.diagnostics
 
+import fr.forumhfr.redface2.core.domain.error.HfrRestAvailability
+import fr.forumhfr.redface2.core.domain.error.HfrRestBlockedException
 import java.io.IOException
+import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -18,6 +22,21 @@ class NetworkProbeServiceTest {
     private val log = DiagnosticsLog()
     private val activity = HfrRefreshActivity()
     private val store = MemoryReservations()
+
+    @Test
+    fun `REST pause refuses Diagnostics before it reserves a probe`() = runTest {
+        val blocked = object : HfrRestAvailability {
+            override val blockedUntil = flowOf(Instant.parse("2026-11-27T14:00:00Z"))
+            override suspend fun checkProbeAllowed() { throw HfrRestBlockedException() }
+        }
+        val service = NetworkProbeService(
+            runner { _, _ -> error("Probe must not start") }, store, activity, log, blocked,
+        )
+        service.run()
+        assertEquals(NetworkProbeStatus.BLOCKED, service.state.value.status)
+        assertEquals(0L, service.remainingSeconds())
+        assertTrue(service.state.value.waves.isEmpty())
+    }
 
     @Test
     fun `double launch is ignored and cancellation retains reservation and summary`() = runTest {
@@ -92,6 +111,7 @@ class NetworkProbeServiceTest {
         assertTrue(log.entries.value.isEmpty())
     }
 
+    /** Healthy connection test: 36 → 16 anonymous GETs. */
     @Test
     fun `wave export is bounded and connection median combines separate TCP and TLS samples`() = runTest {
         val service = service(runner { started, finished ->
@@ -105,12 +125,12 @@ class NetworkProbeServiceTest {
             }
         })
         service.run()
-        assertEquals(listOf(1, 5, 10, 20), service.state.value.waves.map { it.size })
-        assertEquals(36, service.state.value.waves.sumOf { it.successes })
-        assertEquals(39L, service.state.value.waves.last().medianConnectionMs)
-        assertEquals(5, log.entries.value.size)
+        assertEquals(listOf(1, 5, 10), service.state.value.waves.map { it.size })
+        assertEquals(16, service.state.value.waves.sumOf { it.successes })
+        assertEquals(34L, service.state.value.waves.last().medianConnectionMs)
+        assertEquals(4, log.entries.value.size)
         assertTrue(log.entries.value.all { it.tag == NetworkProbeService.TAG })
-        assertTrue(log.entries.value.last().message.contains("requests=36 disturbed=true"))
+        assertTrue(log.entries.value.last().message.contains("requests=16 disturbed=true"))
         val waves = log.entries.value.filter { it.message.startsWith("wave") }.map { it.message }
         assertTrue(waves.first().contains("disturbed=false results=["))
         assertTrue(waves.first().endsWith("disturbedBy=[]"))

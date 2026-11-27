@@ -73,6 +73,15 @@ class FlagDaoTest {
     }
 
     @Test
+    fun `blocked round trips through Room as a failed partition`() = runTest {
+        val now = Instant.parse("2026-11-27T12:00:00Z")
+        dao.upsertCoverage(listOf(FlagCategoryCoverageEntity(
+            "alice", FlagType.CYAN, 23, FlagSource.BUCKET, now, now, FlagFailureKind.BLOCKED,
+        )))
+        assertEquals(FlagFailureKind.BLOCKED, dao.getCoverage("alice", FlagType.CYAN).single().failure)
+    }
+
+    @Test
     fun `deadline writes a failure name readable by P1a without a schema change - 984`() = runTest {
         val now = Instant.parse("2026-05-03T12:00:00Z")
         dao.upsertCoverage(listOf(FlagCategoryCoverageEntity(

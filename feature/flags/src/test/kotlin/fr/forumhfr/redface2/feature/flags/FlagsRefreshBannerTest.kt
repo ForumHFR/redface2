@@ -12,6 +12,8 @@ import fr.forumhfr.redface2.core.model.FlagFailureKind
 import fr.forumhfr.redface2.core.model.FlagSource
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -24,6 +26,30 @@ import org.robolectric.annotation.Config
 class FlagsRefreshBannerTest {
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun `active REST pause displays the live deadline and hides retry`() {
+        val until = Instant.parse("2026-11-27T13:30:00Z")
+        val time = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault()).format(until)
+        compose.setContent {
+            RedfaceTheme { FlagsRestBlockedBanner(until, onRetry = {}) }
+        }
+
+        compose.onNodeWithText("Nouvel essai possible à $time.", substring = true).assertExists()
+        compose.onNodeWithText("Réessayer").assertDoesNotExist()
+    }
+
+    @Test
+    fun `REST failure without a live deadline offers retry without showing a time`() {
+        var retried = false
+        compose.setContent {
+            RedfaceTheme { FlagsRestBlockedBanner(null, onRetry = { retried = true }) }
+        }
+
+        compose.onNodeWithText("HFR refuse temporairement les requêtes de l’app.").assertExists()
+        compose.onNodeWithText("Réessayer").performClick()
+        assertEquals(true, retried)
+    }
 
     @Test
     fun `global marker never masks schema or transport failures - P2c fix`() {

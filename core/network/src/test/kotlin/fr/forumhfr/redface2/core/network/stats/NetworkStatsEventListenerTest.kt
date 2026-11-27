@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.NetworkKind
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkTransport
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeDisturbance
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeRunner
+import fr.forumhfr.redface2.core.domain.error.HfrRestBlockedException
 import fr.forumhfr.redface2.core.domain.stats.NetworkPeakGroup
 import fr.forumhfr.redface2.core.domain.stats.NetworkRequestCounts
 import fr.forumhfr.redface2.core.domain.stats.NetworkRole
@@ -21,7 +22,9 @@ import fr.forumhfr.redface2.core.domain.stats.NetworkStatus
 import fr.forumhfr.redface2.core.domain.stats.NetworkTarget
 import fr.forumhfr.redface2.core.domain.stats.NetworkTrigger
 import fr.forumhfr.redface2.core.domain.stats.NoRequestReason
+import fr.forumhfr.redface2.core.network.HfrApiClient
 import fr.forumhfr.redface2.core.network.HfrFavoriteSmileyClient
+import fr.forumhfr.redface2.core.network.HfrRestCircuitBreaker
 import fr.forumhfr.redface2.core.network.di.NetworkClientListeners
 import fr.forumhfr.redface2.core.network.di.NetworkModule
 import fr.forumhfr.redface2.core.network.diagnostics.HfrCallTag
@@ -299,11 +302,33 @@ class NetworkStatsEventListenerTest {
     }
 
     @Test
+    fun `REST cooldown leaves measured requests intact and records no rejected call`() = runBlocking {
+        repeat(2) { server.enqueue(MockResponse().setResponseCode(429).setHeader("Retry-After", "1800")) }
+        val client = NetworkModule.provideAnonymousClient(base, listeners)
+        val breaker = HfrRestCircuitBreaker.inMemory()
+        val api = HfrApiClient(client, client, url("/"), Dispatchers.IO, breaker = breaker)
+        val probe = OkHttpNetworkProbeRunner(base, url("/"), Dispatchers.IO, traffic, foreground,
+            NetworkDiagnosticsContextProvider { NetworkDiagnosticsContext() }, stats, "Redface2/test", breaker)
+        repeat(2) {
+            val refusal = runCatching { api.getCategories() }.exceptionOrNull() as HfrRestBlockedException
+            assertEquals(429, refusal.statusCode)
+        }
+        val local = runCatching { api.getSubcategories(13) }.exceptionOrNull() as HfrRestBlockedException
+        assertEquals(null, local.statusCode)
+        assertTrue(runCatching { probe.run({}, {}) }.exceptionOrNull() is HfrRestBlockedException)
+
+        val rows = buffer.drain().getValue(0)
+        assertEquals(2, server.requestCount)
+        assertEquals(2L, rows.requests.values.sumOf { it.requests })
+        assertTrue(rows.noRequests.isEmpty())
+    }
+
+    @Test
     fun `probe exchanges count as PROBE and never disturb their own wave`() = runBlocking {
         val count = NetworkProbeRunner.WAVE_SIZES.sum()
         repeat(count) { server.enqueue(MockResponse().setBody("probe")) }
         val probe = OkHttpNetworkProbeRunner(base, url("/"), Dispatchers.IO, traffic, foreground,
-            NetworkDiagnosticsContextProvider { NetworkDiagnosticsContext() }, stats)
+            NetworkDiagnosticsContextProvider { NetworkDiagnosticsContext() }, stats, "Redface2/test")
         probe.run(onWaveStarted = {}, onWaveFinished = {
             assertFalse(NetworkProbeDisturbance.HFR_TRAFFIC in it.disturbedBy)
         })

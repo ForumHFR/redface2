@@ -28,7 +28,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -45,7 +44,9 @@ internal fun FlagsRefreshPolicyDialog(
     onDismiss: () -> Unit,
     onSave: (FlagsRefreshPolicy) -> Unit,
 ) {
-    var draft by remember(policy) { mutableStateOf(policy) }
+    var draft by remember(policy) {
+        mutableStateOf(policy.copy(strategy = FlagsRefreshStrategy.fromId(policy.strategy.id)))
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.diagnostics_flags_experimental_title)) },
@@ -58,10 +59,11 @@ internal fun FlagsRefreshPolicyDialog(
                     stringResource(
                         R.string.diagnostics_flags_experimental_help,
                         FlagsRefreshPolicy.DEFAULT_CONCURRENCY,
+                        FlagsRefreshPolicy.MAX_CONCURRENCY,
                     ),
                 )
                 Column(Modifier.selectableGroup()) {
-                    FlagsRefreshStrategy.entries.forEach { strategy ->
+                    FlagsRefreshStrategy.entries.filterNot { it == FlagsRefreshStrategy.LEGACY }.forEach { strategy ->
                         Row(
                             Modifier.fillMaxWidth()
                                 .heightIn(min = 48.dp)
@@ -110,13 +112,12 @@ internal fun FlagsRefreshPolicyDialog(
 
 @Composable
 private fun FlagsConcurrencySetting(policy: FlagsRefreshPolicy, onChange: (Int) -> Unit) {
-    val enabled = policy.effectiveConcurrency != null
     val decreaseLabel = stringResource(R.string.diagnostics_flags_decrease)
     val increaseLabel = stringResource(R.string.diagnostics_flags_increase)
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             IconButton(
-                enabled = enabled && policy.concurrency > FlagsRefreshPolicy.MIN_CONCURRENCY,
+                enabled = policy.concurrency > FlagsRefreshPolicy.MIN_CONCURRENCY,
                 onClick = { onChange(policy.concurrency - 1) },
                 modifier = Modifier.size(48.dp).semantics { contentDescription = decreaseLabel },
             ) {
@@ -124,43 +125,30 @@ private fun FlagsConcurrencySetting(policy: FlagsRefreshPolicy, onChange: (Int) 
             }
             Text(
                 stringResource(R.string.diagnostics_flags_n, policy.concurrency),
-                modifier = Modifier.weight(1f).semantics { if (!enabled) disabled() },
+                modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
-                color = if (enabled) MaterialTheme.colorScheme.onSurface
-                    else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
             )
             IconButton(
-                enabled = enabled && policy.concurrency < FlagsRefreshPolicy.MAX_CONCURRENCY,
+                enabled = policy.concurrency < FlagsRefreshPolicy.MAX_CONCURRENCY,
                 onClick = { onChange(policy.concurrency + 1) },
                 modifier = Modifier.size(48.dp).semantics { contentDescription = increaseLabel },
             ) {
                 RedfaceVectorIcon(CoreUiR.drawable.ic_add)
             }
         }
-        val effective = policy.effectiveConcurrency
-        Text(if (effective == null) stringResource(R.string.diagnostics_flags_unbounded)
-            else stringResource(R.string.diagnostics_flags_effective_n, effective))
-        if (!enabled) {
-            Text(
-                stringResource(R.string.diagnostics_flags_n_ignored),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+        Text(stringResource(R.string.diagnostics_flags_effective_n, policy.concurrency))
     }
 }
 
 private fun FlagsRefreshStrategy.labelResource(): Int = when (this) {
-    FlagsRefreshStrategy.BASELINE -> R.string.diagnostics_flags_baseline
-    FlagsRefreshStrategy.LEGACY -> R.string.diagnostics_flags_legacy
+    FlagsRefreshStrategy.BASELINE, FlagsRefreshStrategy.LEGACY -> R.string.diagnostics_flags_baseline
     FlagsRefreshStrategy.GLOBAL_ONLY -> R.string.diagnostics_flags_global_only
     FlagsRefreshStrategy.GLOBAL_FIRST -> R.string.diagnostics_flags_global_first
 }
 
 private fun FlagsRefreshStrategy.descriptionResource(): Int = when (this) {
-    FlagsRefreshStrategy.BASELINE -> R.string.diagnostics_flags_baseline_help
-    FlagsRefreshStrategy.LEGACY -> R.string.diagnostics_flags_legacy_help
+    FlagsRefreshStrategy.BASELINE, FlagsRefreshStrategy.LEGACY -> R.string.diagnostics_flags_baseline_help
     FlagsRefreshStrategy.GLOBAL_ONLY -> R.string.diagnostics_flags_global_only_help
     FlagsRefreshStrategy.GLOBAL_FIRST -> R.string.diagnostics_flags_global_first_help
 }

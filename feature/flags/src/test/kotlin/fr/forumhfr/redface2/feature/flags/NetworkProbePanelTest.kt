@@ -80,9 +80,9 @@ class NetworkProbePanelTest {
 
     @Test
     fun `median label value and unit stay on the same line at Pixel 8 width`() {
-        show(NetworkProbeState(waves = listOf(wave(1, 1), wave(5, 5), wave(10, 10), wave(20, 20))))
+        show(NetworkProbeState(waves = listOf(wave(1, 1), wave(5, 5), wave(10, 10))))
 
-        for (size in listOf(1, 5, 10, 20)) {
+        for (size in listOf(1, 5, 10)) {
             val layouts = mutableListOf<TextLayoutResult>()
             compose.onNodeWithText("Vague de $size\u00a0:", substring = true)
                 .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }

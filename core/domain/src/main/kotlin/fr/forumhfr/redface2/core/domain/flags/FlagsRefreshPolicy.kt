@@ -5,7 +5,7 @@ enum class FlagsRefreshStrategy(val id: String) {
     BASELINE("baseline"), LEGACY("legacy"), GLOBAL_ONLY("global-only"), GLOBAL_FIRST("global-first");
 
     companion object {
-        fun fromId(id: String?): FlagsRefreshStrategy = entries.find { it.id == id } ?: BASELINE
+        fun fromId(id: String?): FlagsRefreshStrategy = entries.find { it != LEGACY && it.id == id } ?: BASELINE
     }
 }
 
@@ -21,7 +21,7 @@ data class FlagsRefreshPolicy(
 
     companion object {
         const val MIN_CONCURRENCY = 1
-        const val MAX_CONCURRENCY = 20
-        const val DEFAULT_CONCURRENCY = 15
+        const val MAX_CONCURRENCY = 10
+        const val DEFAULT_CONCURRENCY = 5
     }
 }

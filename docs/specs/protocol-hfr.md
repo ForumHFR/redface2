@@ -1537,9 +1537,11 @@ Implémenté de façon validante (host + scheme + préfixe `/api/` enforcés) da
 
 - Verbes : GET / POST / PUT supportés. PATCH renvoie 501 ; DELETE renvoie 501 sur les ressources existantes.
 - `hash_check` (CSRF) requis pour les POST / PUT, à extraire d'une page HTML auth.
-- Pagination : `?page=N&results_per_page=M`. Défaut HATEOAS = 25 ; cible Redface 2 = 50 (limite les requêtes sur les sous-cats actives).
+- Pagination avec `?page=N&results_per_page=M`. Le défaut HATEOAS est de 25 et Redface 2 demande 50 pour les listes paginées. Le balayage des épinglés demande `results_per_page=1` sur la première page de `topics/last/`. Un relevé anonyme de Discussions a renvoyé les cinq épinglés et un sujet ordinaire avec ce paramètre. L’essai authentifié à cette taille reste à faire.
 - Le relevé initial recommandait au plus 10 connexions TCP simultanées vers HFR, avec une saturation Apache mesurée à 20. Pour le parallélisme des appels de collecte des drapeaux, voir l’[ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride).
 - `name` / `title` peuvent contenir des entités HTML non décodées (`&amp;`) — décoder côté mapper.
+
+Le coupe-circuit REST s’ouvre après deux réponses qualifiantes sans 2xx intermédiaire. Une réponse qualifiante est un HTTP 429 de `rest_api.php` ou un HTTP 403 de ce même endpoint, au format `text/html`, dont le corps contient la signature de refus Apache. Le premier refus qualifiant arrête les nouveaux envois de la collecte de drapeaux en cours. La pause s’enregistre sur l’appareil et dure 10, 20, 40 puis 60 minutes. Une valeur `Retry-After` plus longue prévaut jusqu’à deux heures. À échéance, une seule lecture REST peut vérifier la reprise. Un 2xx réinitialise le coupe-circuit. Le test de connexion de Diagnostics attend la réouverture du trafic REST.
 
 ### Champs présents en JSON / absents en HTML
 

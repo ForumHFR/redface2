@@ -83,13 +83,13 @@ class DataStoreUserPreferencesRepositoryTest {
         }
         val policy = repository.observeFlagsRefreshPolicy().first()
         assertEquals(FlagsRefreshStrategy.BASELINE, policy.strategy)
-        assertEquals(20, policy.concurrency)
+        assertEquals(10, policy.concurrency)
         assertTrue(policy.applicationRetry)
     }
 
     @Test
-    fun `refresh policy defaults and every strategy survive repository recreation`() = runTest(dispatcher) {
-        assertEquals(FlagsRefreshPolicy(concurrency = 15),
+    fun `refresh policy defaults and supported strategies survive repository recreation`() = runTest(dispatcher) {
+        assertEquals(FlagsRefreshPolicy(concurrency = 5),
             repository.observeFlagsRefreshPolicy().first())
         val savedPolicy = FlagsRefreshPolicy(concurrency = 5)
         repository.setFlagsRefreshPolicy(savedPolicy)
@@ -97,7 +97,12 @@ class DataStoreUserPreferencesRepositoryTest {
         FlagsRefreshStrategy.entries.forEach { strategy ->
             val policy = FlagsRefreshPolicy(strategy, 1, false)
             repository.setFlagsRefreshPolicy(policy)
-            assertEquals(policy, repositoryWith(dataStore).observeFlagsRefreshPolicy().first())
+            val expected = if (strategy == FlagsRefreshStrategy.LEGACY) {
+                policy.copy(strategy = FlagsRefreshStrategy.BASELINE)
+            } else {
+                policy
+            }
+            assertEquals(expected, repositoryWith(dataStore).observeFlagsRefreshPolicy().first())
         }
         dataStore.edit { it[intPreferencesKey("flags_refresh_concurrency")] = 0 }
         assertEquals(1, repository.observeFlagsRefreshPolicy().first().concurrency)

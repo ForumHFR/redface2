@@ -1,7 +1,9 @@
 package fr.forumhfr.redface2.core.network
 
+import fr.forumhfr.redface2.core.domain.error.HfrRestBlockedException
 import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshPolicy
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.AbstractCoroutineContextElement
@@ -19,57 +21,79 @@ enum class FlagReadOperation { CATALOGUE, CATEGORY_BUCKET, STICKY_LAST, GLOBAL_B
 class FlagReadDeadlineException : IOException("Flags collection deadline reached")
 
 /** One admitted type refresh. Joiners inherit this instance and can never extend its deadline. */
-class FlagReadSession(
-    private val nanoTime: () -> Long = System::nanoTime,
-    val policy: FlagsRefreshPolicy = FlagsRefreshPolicy(),
-    private val deadline: Long = nanoTime() + COLLECTION_TIMEOUT_MS * NANOS_PER_MS,
+class FlagReadSession private constructor(
+    private val nanoTime: () -> Long,
+    val policy: FlagsRefreshPolicy,
+    private val deadline: Long,
+    private val progress: Progress,
 ) : AbstractCoroutineContextElement(Key) {
+    constructor(
+        nanoTime: () -> Long = System::nanoTime,
+        policy: FlagsRefreshPolicy = FlagsRefreshPolicy(),
+        deadline: Long = nanoTime() + COLLECTION_TIMEOUT_MS * NANOS_PER_MS,
+    ) : this(nanoTime, policy, deadline, Progress())
+
     constructor(nanoTime: () -> Long) : this(nanoTime, FlagsRefreshPolicy())
 
     fun withPolicy(policy: FlagsRefreshPolicy): FlagReadSession = FlagReadSession(nanoTime, policy, deadline)
-    private var successfulCalls = 0
-    private var logicalOperations = 0
-    private var applicationCalls = 0
-    private var retriesAttempted = 0
-    private var retriesSucceeded = 0
-    private var reservedRetries = 0
-    private var permitWaitNanos = 0L
-    private var deadlineCategories = 0
+
+    /** Start the shared sticky sweep with its own deadline and the admission's existing retry quota. */
+    fun startStickyPhase(): FlagReadSession =
+        FlagReadSession(nanoTime, policy, nanoTime() + STICKY_TIMEOUT_MS * NANOS_PER_MS, progress)
+
+    internal fun abort(error: HfrRestBlockedException) { progress.blocked.compareAndSet(null, error) }
+    internal fun checkNotBlocked() { progress.blocked.get()?.let { throw it } }
+    val wasBlocked: Boolean get() = progress.blocked.get() != null
 
     fun remainingNanos(): Long = (deadline - nanoTime()).coerceAtLeast(0)
     fun remainingMillis(): Long = remainingNanos() / NANOS_PER_MS
     fun checkBudget() { if (remainingNanos() == 0L) throw FlagReadDeadlineException() }
     fun nowNanos(): Long = nanoTime()
 
-    @Synchronized fun logicalOperation() { logicalOperations++ }
-    @Synchronized fun applicationCall(retry: Boolean) {
-        applicationCalls++
-        if (retry) retriesAttempted++
+    fun logicalOperation() { synchronized(progress) { progress.logicalOperations++ } }
+    fun applicationCall(retry: Boolean) = synchronized(progress) {
+        progress.applicationCalls++
+        if (retry) progress.retriesAttempted++
     }
-    @Synchronized fun succeeded(retry: Boolean) {
-        successfulCalls++
-        if (retry) retriesSucceeded++
+    fun succeeded(retry: Boolean) = synchronized(progress) {
+        progress.successfulCalls++
+        if (retry) progress.retriesSucceeded++
     }
-    @Synchronized fun reserveRetry(): Boolean {
-        val allowed = policy.applicationRetry && successfulCalls > 0 && reservedRetries < MAX_RETRIES
-        if (allowed) reservedRetries++
-        return allowed
+    fun reserveRetry(): Boolean = synchronized(progress) {
+        val allowed = policy.applicationRetry && progress.successfulCalls > 0 && progress.reservedRetries < MAX_RETRIES
+        if (allowed) progress.reservedRetries++
+        allowed
     }
 
-    @Synchronized fun waited(nanos: Long) { permitWaitNanos += nanos.coerceAtLeast(0) }
-    @Synchronized fun expiredCategories(count: Int) { deadlineCategories = count }
-    @Synchronized fun counters(): Map<String, Long> = mapOf(
-        "logicalOperations" to logicalOperations.toLong(),
-        "applicationCalls" to applicationCalls.toLong(),
-        "retriesAttempted" to retriesAttempted.toLong(),
-        "retriesSucceeded" to retriesSucceeded.toLong(),
-        "permitWaitMs" to permitWaitNanos / NANOS_PER_MS,
-        "deadlineCategories" to deadlineCategories.toLong(),
-    )
+    fun waited(nanos: Long) = synchronized(progress) { progress.permitWaitNanos += nanos.coerceAtLeast(0) }
+    fun expiredCategories(count: Int) = synchronized(progress) { progress.deadlineCategories = count }
+    fun counters(): Map<String, Long> = synchronized(progress) {
+        mapOf(
+            "logicalOperations" to progress.logicalOperations.toLong(),
+            "applicationCalls" to progress.applicationCalls.toLong(),
+            "retriesAttempted" to progress.retriesAttempted.toLong(),
+            "retriesSucceeded" to progress.retriesSucceeded.toLong(),
+            "permitWaitMs" to progress.permitWaitNanos / NANOS_PER_MS,
+            "deadlineCategories" to progress.deadlineCategories.toLong(),
+        )
+    }
+
+    private class Progress {
+        val blocked = AtomicReference<HfrRestBlockedException?>()
+        var successfulCalls = 0
+        var logicalOperations = 0
+        var applicationCalls = 0
+        var retriesAttempted = 0
+        var retriesSucceeded = 0
+        var reservedRetries = 0
+        var permitWaitNanos = 0L
+        var deadlineCategories = 0
+    }
 
     companion object Key : CoroutineContext.Key<FlagReadSession> {
         const val COLLECTION_TIMEOUT_MS = 12_000L
         const val MAX_RETRIES = 10
+        private const val STICKY_TIMEOUT_MS = 12_000L
         private const val NANOS_PER_MS = 1_000_000L
     }
 }

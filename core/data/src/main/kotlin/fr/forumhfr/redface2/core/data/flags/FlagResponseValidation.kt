@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.data.flags
 import fr.forumhfr.redface2.core.data.forum.RestListEnvelope
 import fr.forumhfr.redface2.core.data.forum.RestTopic
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.error.HfrRestBlockedException
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.model.FlagFailureKind
 import fr.forumhfr.redface2.core.network.FlagReadDeadlineException
@@ -30,6 +31,7 @@ internal fun checkFlagSession(expired: AtomicBoolean?) {
 
 internal fun Throwable.toFlagFailureKind(): FlagFailureKind = when (this) {
     is SessionExpiredException -> FlagFailureKind.SESSION
+    is HfrRestBlockedException -> FlagFailureKind.BLOCKED
     is HfrServerException -> FlagFailureKind.SERVER
     is SerializationException -> FlagFailureKind.SCHEMA
     is FlagPageCapException -> FlagFailureKind.PAGE_CAP

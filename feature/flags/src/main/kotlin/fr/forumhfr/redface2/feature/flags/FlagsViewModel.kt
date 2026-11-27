@@ -10,6 +10,8 @@ import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.awaitDetached
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
+import fr.forumhfr.redface2.core.domain.error.HfrRestAvailability
+import fr.forumhfr.redface2.core.domain.flags.FlagPullBatch
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
@@ -96,6 +98,7 @@ class FlagsViewModel @Inject constructor(
     @param:ApplicationScope private val externalScope: CoroutineScope,
     private val networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
     private val refreshDiagnostics: FlagRefreshDiagnostics,
+    restAvailability: HfrRestAvailability = HfrRestAvailability.Available,
 ) : ViewModel() {
 
     private var observedPseudo: String? = null
@@ -103,6 +106,7 @@ class FlagsViewModel @Inject constructor(
     // The SAME issue object is replayed with its snapshot (including filter/mutation copies).
     // Reference equality avoids repeating it without suppressing a later, identical failed fetch.
     private val reportedRefreshIssues = mutableMapOf<FlagType, FlagRefreshIssue>()
+    val restBlockedUntil = restAvailability.blockedUntil.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
     private val refreshWarnings = MutableStateFlow<Map<FlagTab, FlagsRefreshWarning>>(emptyMap())
 
     /**
@@ -138,8 +142,8 @@ class FlagsViewModel @Inject constructor(
      * #743 — the [FlagType] currently being refreshed behind [isRefreshing], the set of types this
      * refresh covers, and the landing that met it while it was running for ANOTHER uncovered type.
      * A normal refresh covers one type; a Super pull covers CYAN, RED and FAVORITE sequentially.
-     * Refreshes stay strictly sequential — the repository treats every `refresh(type)` as a
-     * generation barrier for its shared sticky sweep, so two concurrent per-type refreshes would
+     * Refreshes stay strictly sequential — independent pulls open generation barriers for the shared sticky sweep,
+     * so two concurrent pulls could
      * degrade the older one to a bucket-only result (cf. `DefaultFlagRepository.refresh`) — so a tab
      * switched to while a refresh runs cannot start its own fan-out; its landing is REPLAYED once the
      * in-flight refresh settles, if that tab is still the selected one (a tab left meanwhile lands
@@ -1276,7 +1280,8 @@ class FlagsViewModel @Inject constructor(
     ) {
         val trace = refreshDiagnostics.begin(trigger, types, startedNanos)
         try {
-            withContext(trace) {
+            val context = if (types.size > 1) trace + FlagPullBatch() else trace
+            withContext(context) {
                 types.forEach { type ->
                     refreshingType = type
                     val result = flagRepository.refresh(type)

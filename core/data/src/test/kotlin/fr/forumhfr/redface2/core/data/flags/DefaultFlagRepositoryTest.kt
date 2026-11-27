@@ -55,6 +55,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.first
@@ -314,7 +315,7 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
-    fun `global failure still runs categories and global success spends the same deadline - P2c`() = runTest {
+    fun `global-first shares the bucket budget and leaves twelve seconds for stickies - P2c`() = runTest {
         for (fail in listOf(true, false)) {
             val (api, forum) = wireDeps {
                 stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
@@ -324,8 +325,14 @@ class DefaultFlagRepositoryTest {
             every { monotonic.nowNanos() } answers { testScheduler.currentTime * 1_000_000 }
             val start = testScheduler.currentTime
             coEvery { api.getGlobalFlagTopics(any()) } coAnswers {
-                kotlinx.coroutines.delay(10_000)
+                delay(10_000)
                 if (fail) throw IOException("global unavailable") else fixture("rest_global_participated.json")
+            }
+            coEvery {
+                api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED, page = any(), resultsPerPage = any())
+            } coAnswers {
+                assertEquals(2_000L, currentCoroutineContext()[FlagReadSession]?.remainingMillis())
+                capturedParticipatedFixture
             }
             coEvery { api.getTopicList(any(), null, 1, any(), true) } coAnswers { awaitCancellation() }
             val policy = MutableStateFlow(FlagsRefreshPolicy(
@@ -333,7 +340,7 @@ class DefaultFlagRepositoryTest {
             val repo = buildRepository(api, forum, policy = policy, flagReadClock = monotonic,
                 testDispatcher = UnconfinedTestDispatcher(testScheduler))
             val result = repo.refresh(FlagType.CYAN) as FlagsResult.Success
-            assertEquals(12_000L, testScheduler.currentTime - start)
+            assertEquals(22_000L, testScheduler.currentTime - start)
             assertTrue(result.flags.any { it.topicId == 35395 })
             coVerify(exactly = 1) { api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED,
                 page = any(), resultsPerPage = any(), useAuth = true) }
@@ -809,8 +816,8 @@ class DefaultFlagRepositoryTest {
         assertEquals(FlagFailureKind.NETWORK,
             result.coverage.categories.single { it.cat == 23 && it.source == FlagSource.BUCKET }.failure)
         val summary = diagnostics.entries.value.last().message
-        assertTrue(summary, summary.contains("strategy=baseline N=15 "))
-        assertTrue(summary, summary.contains(" readLimit=15 "))
+        assertTrue(summary, summary.contains("strategy=baseline N=5 "))
+        assertTrue(summary, summary.contains(" readLimit=5 "))
         assertTrue(summary, summary.contains("bucketsFailures=1"))
         assertTrue(summary, !summary.contains("SecretCookie"))
     }
@@ -1597,7 +1604,7 @@ class DefaultFlagRepositoryTest {
         }
 
         coVerify {
-            apiClient.getTopicList(cat = 32, subcat = null, page = 1, resultsPerPage = 50, useAuth = true)
+            apiClient.getTopicList(cat = 32, subcat = null, page = 1, resultsPerPage = 1, useAuth = true)
         }
     }
 
@@ -1632,7 +1639,7 @@ class DefaultFlagRepositoryTest {
         }
 
         coVerify {
-            apiClient.getTopicList(cat = 13, subcat = null, page = 1, resultsPerPage = 50, useAuth = true)
+            apiClient.getTopicList(cat = 13, subcat = null, page = 1, resultsPerPage = 1, useAuth = true)
         }
     }
 
@@ -2678,7 +2685,7 @@ class DefaultFlagRepositoryTest {
         sampleCategories.forEach { category ->
             coEvery {
                 apiClient.getTopicList(
-                    cat = category.id, subcat = null, page = 1, resultsPerPage = 50, useAuth = true,
+                    cat = category.id, subcat = null, page = 1, resultsPerPage = 1, useAuth = true,
                 )
             } returns EMPTY_PAGE
         }
@@ -2736,7 +2743,7 @@ class DefaultFlagRepositoryTest {
         }
         coEvery {
             apiClient.getTopicList(
-                cat = 23, subcat = null, page = 1, resultsPerPage = 50, useAuth = true,
+                cat = 23, subcat = null, page = 1, resultsPerPage = 1, useAuth = true,
             )
         } returns EMPTY_PAGE
         val flagDao = stubFlagDao()
@@ -2821,7 +2828,7 @@ class DefaultFlagRepositoryTest {
         }
         coEvery {
             apiClient.getTopicList(
-                cat = 23, subcat = null, page = 1, resultsPerPage = 50, useAuth = true,
+                cat = 23, subcat = null, page = 1, resultsPerPage = 1, useAuth = true,
             )
         } returns EMPTY_PAGE
         val hfrClient = mockk<HfrClient>()
@@ -3614,7 +3621,7 @@ class DefaultFlagRepositoryTest {
         }
 
     @Test
-    fun `sticky sweep is cancelled at the deadline while completed sticky partitions survive - 984`() = runTest {
+    fun `sticky sweep has twelve seconds after the buckets and retains completed partitions - 984`() = runTest {
         val (api, forum) = wireDeps {
             stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
             stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, capturedParticipatedFixture)
@@ -3624,6 +3631,12 @@ class DefaultFlagRepositoryTest {
         val repo = buildRepository(api, forum, flagReadClock = monotonic,
                 testDispatcher = UnconfinedTestDispatcher(testScheduler))
         repo.refresh(FlagType.CYAN)
+        coEvery {
+            api.getCategoryFlagTopics(13, HfrRestFlagBucket.PARTICIPATED, page = any(), resultsPerPage = any())
+        } coAnswers {
+            delay(11_000)
+            EMPTY_PAGE
+        }
         var cancelled = false
         coEvery {
             api.getTopicList(23, null, page = 1, resultsPerPage = any(), useAuth = true)
@@ -3631,7 +3644,9 @@ class DefaultFlagRepositoryTest {
             try { awaitCancellation() } finally { cancelled = true }
         }
         val refresh = async { repo.refresh(FlagType.CYAN) }
-        advanceTimeBy(12_000)
+        advanceTimeBy(22_999)
+        assertFalse(refresh.isCompleted)
+        advanceTimeBy(1)
         runCurrent()
         assertTrue(refresh.isCompleted)
         val result = refresh.await() as FlagsResult.Success

@@ -12,13 +12,40 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.error.HfrRestBlockedException
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
 import fr.forumhfr.redface2.core.model.FlagFailureKind
+import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 internal val FlagsListUiState.Success.hasRefreshBanner: Boolean
     get() = refreshStatus == FlagRefreshStatus.PARTIAL || refreshStatus == FlagRefreshStatus.FAILED
+
+internal val FlagsListUiState?.isRestBlocked: Boolean get() = when (this) {
+    is FlagsListUiState.Success -> coverage.categories.any { it.failure == FlagFailureKind.BLOCKED }
+    is FlagsListUiState.Failure -> cause is HfrRestBlockedException
+    else -> false
+}
+
+internal fun FlagsListUiState?.showsRefreshBanner(until: Instant?): Boolean =
+    until != null || isRestBlocked || (this as? FlagsListUiState.Success)?.hasRefreshBanner == true
+
+@Composable
+internal fun FlagsRestBlockedBanner(until: Instant?, onRetry: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+            val message = if (until == null) {
+                stringResource(R.string.flags_hfr_blocked)
+            } else {
+                val time = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault()).format(until)
+                stringResource(R.string.flags_hfr_blocked_until, time)
+            }
+            Text(message, style = MaterialTheme.typography.bodyMedium)
+            if (until == null) TextButton(onClick = onRetry) { Text(stringResource(R.string.flags_retry)) }
+        }
+    }
+}
 
 /** Snapshot state, not a consumable effect: filters and Room reloads cannot dismiss this banner. */
 @Composable

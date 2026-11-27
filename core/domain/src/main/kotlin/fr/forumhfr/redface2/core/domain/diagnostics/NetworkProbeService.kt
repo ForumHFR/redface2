@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.domain.diagnostics
 
+import fr.forumhfr.redface2.core.domain.error.HfrRestAvailability
+import fr.forumhfr.redface2.core.domain.error.HfrRestBlockedException
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -8,7 +10,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 
-enum class NetworkProbeStatus { IDLE, RUNNING, COMPLETE, CANCELLED, REFRESH_ACTIVE, COOLDOWN, STORAGE_ERROR, FAILED }
+enum class NetworkProbeStatus {
+    IDLE, RUNNING, COMPLETE, CANCELLED, REFRESH_ACTIVE, COOLDOWN, BLOCKED, STORAGE_ERROR, FAILED,
+}
 
 data class NetworkProbeState(
     val status: NetworkProbeStatus = NetworkProbeStatus.IDLE,
@@ -26,17 +30,24 @@ class NetworkProbeService @Inject constructor(
     private val reservations: NetworkProbeReservationStore,
     private val activity: HfrRefreshActivity,
     private val log: DiagnosticsLog,
+    private val restAvailability: HfrRestAvailability = HfrRestAvailability.Available,
 ) {
     private val execution = Mutex()
     private val mutableState = MutableStateFlow(NetworkProbeState())
     val state = mutableState.asStateFlow()
+    val restBlockedUntil = restAvailability.blockedUntil
 
     suspend fun remainingSeconds(): Long = reservations.remainingSeconds()
 
     suspend fun run() {
         if (!execution.tryLock()) return
         try {
+            restAvailability.checkProbeAllowed()
             runAdmitted()
+        } catch (_: HfrRestBlockedException) {
+            mutableState.value = NetworkProbeState(NetworkProbeStatus.BLOCKED)
+        } catch (_: IOException) {
+            mutableState.value = NetworkProbeState(NetworkProbeStatus.STORAGE_ERROR)
         } finally {
             execution.unlock()
         }
@@ -53,8 +64,6 @@ class NetworkProbeService @Inject constructor(
                 } else {
                     execute()
                 }
-            } catch (_: IOException) {
-                mutableState.value = NetworkProbeState(NetworkProbeStatus.STORAGE_ERROR)
             } finally {
                 lease.close()
             }
@@ -72,6 +81,8 @@ class NetworkProbeService @Inject constructor(
         } catch (cancelled: CancellationException) {
             terminal = NetworkProbeStatus.CANCELLED
             throw cancelled
+        } catch (_: HfrRestBlockedException) {
+            terminal = NetworkProbeStatus.BLOCKED
         } catch (_: IOException) {
             terminal = NetworkProbeStatus.FAILED
         } finally {

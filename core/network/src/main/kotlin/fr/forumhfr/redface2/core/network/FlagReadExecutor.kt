@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.network
 
+import fr.forumhfr.redface2.core.domain.error.HfrRestBlockedException
 import fr.forumhfr.redface2.core.network.diagnostics.HfrCallTag
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -40,14 +41,18 @@ class FlagReadExecutor @Inject constructor(
         require(request.method == "GET")
         require(operation in ALLOWED_OPERATIONS)
         session.logicalOperation()
+        session.checkNotBlocked()
         session.checkBudget()
         val result = withTimeoutOrNull(session.remainingMillis().coerceAtLeast(1)) {
             val phase = FlagReadConnectionPhase()
             try {
                 Result.success(session.attempt(client, request, phase, retry = false, executeCall))
+            } catch (blocked: HfrRestBlockedException) {
+                Result.failure(blocked)
             } catch (error: IOException) {
                 currentCoroutineContext().ensureActive()
                 session.checkBudget()
+                session.checkNotBlocked()
                 if (!phase.canRetry(error) || !session.reserveRetry()) throw error
                 jitter.pause()
                 currentCoroutineContext().ensureActive()
@@ -73,6 +78,7 @@ class FlagReadExecutor @Inject constructor(
         return limiter.withPermit(this) {
             val session = this
             currentCoroutineContext().ensureActive()
+            session.checkNotBlocked()
             val factory = client.eventListenerFactory
             val bounded = client.newBuilder()
                 .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)

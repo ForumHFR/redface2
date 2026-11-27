@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.network
 
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.error.HfrRestBlockedException
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.network.diagnostics.HfrCallTag
 import fr.forumhfr.redface2.core.network.diagnostics.withHfrDiagnostics
@@ -11,6 +12,7 @@ import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -34,11 +36,10 @@ import okhttp3.Response
  *
  * The client returns raw JSON [String]. Parsing lives in `:core:data` next to its
  * consuming repositories (per ADR-003, "Frontières de modules"). On non-2xx the call
- * raises [HfrServerException] (#324 — typed status code so the screens can tell a 5xx
- * outage from a network cut) with the URL, status and a short body excerpt for
- * diagnostics.
+ * raises [HfrServerException] with the HTTP status and a short body excerpt for diagnostics.
+ * Qualifying refusals and local cooldown rejections raise [HfrRestBlockedException].
  *
- * Authenticated calls run through [executeAuthenticatedJson] which surfaces a
+ * Authenticated calls run through [readJson] which surfaces a
  * [SessionExpiredException] when HFR redirects to login or returns the login HTML
  * payload, identical to the contract [HfrClient] already exposes for HTML pages.
  */
@@ -49,6 +50,7 @@ class HfrApiClient @Inject constructor(
     @param:HfrBaseUrl private val baseUrl: HttpUrl,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
     private val flagReadExecutor: FlagReadExecutor = FlagReadExecutor(FlagReadLimiter(), FlagReadJitter()),
+    private val breaker: HfrRestCircuitBreaker = HfrRestCircuitBreaker.inMemory(),
 ) {
 
     suspend fun getCategories(useAuth: Boolean = false): String =
@@ -216,43 +218,48 @@ class HfrApiClient @Inject constructor(
         val client = if (useAuth) authenticated else anonymous
         val session = currentCoroutineContext()[FlagReadSession]
         return if (session == null || flagOperation == null) {
-            executeJson(client.newCall(request), useAuth)
+            client.newCall(request).executeCancellable(useAuth)
         } else {
-            flagReadExecutor.execute(client, request, flagOperation, session) { executeJson(it, useAuth) }
-        }
-    }
-
-    private suspend fun executeJson(call: Call, useAuth: Boolean): String = if (useAuth) {
-        call.executeAuthenticatedJson()
-    } else {
-        call.executeCancellable { response ->
-            if (!response.isSuccessful) {
-                throw HfrServerException(
-                    code = response.code,
-                    url = response.request.url.toString(),
-                    detailMessage = failureMessage(response.code, response.request.url, response.body.string()),
-                )
-            }
-            response.body.string()
+            flagReadExecutor.execute(client, request, flagOperation, session) { it.executeCancellable(useAuth) }
         }
     }
 
     /** Keep the cancellation bridge alive through both headers and body, as in [HfrClient]. */
-    private suspend fun <T> Call.executeCancellable(readResponse: (Response) -> T): T = withContext(ioDispatcher) {
+    private suspend fun Call.executeCancellable(useAuth: Boolean): String = withContext(ioDispatcher) {
         val call = this@executeCancellable
-        suspendCancellableCoroutine { continuation ->
-            continuation.invokeOnCancellation { call.cancel() }
-            continuation.resumeWith(runCatching {
-                call.request().tag(HfrCallTag::class.java)?.executing()
-                call.execute().use(readResponse)
-            })
+        val session = currentCoroutineContext()[FlagReadSession]
+        session?.checkNotBlocked()
+        session?.checkBudget()
+        val admission = breaker.admit()
+        var reply: RestReply? = null
+        try {
+            suspendCancellableCoroutine { continuation ->
+                continuation.invokeOnCancellation { call.cancel() }
+                continuation.resumeWith(runCatching {
+                    session?.checkNotBlocked()
+                    session?.checkBudget()
+                    call.request().tag(HfrCallTag::class.java)?.executing()
+                    call.execute().use { response ->
+                        // A 429 still qualifies if its body cannot be read.
+                        reply = response.restReply()
+                        if (reply?.qualifying == true) throw session.blocked(response.code)
+                        val body = response.body.string()
+                        reply = response.restReply(body)
+                        if (reply?.qualifying == true) throw session.blocked(response.code)
+                        readJson(response, body, useAuth)
+                    }
+                })
+            }
+        } finally {
+            withContext(NonCancellable) { breaker.complete(admission, reply) }
         }
     }
 
-    private suspend fun Call.executeAuthenticatedJson(): String = executeCancellable { response ->
-        val body = response.body.string()
+    private fun FlagReadSession?.blocked(code: Int): HfrRestBlockedException =
+        HfrRestBlockedException(code).also { this?.abort(it) }
+
+    private fun readJson(response: Response, body: String, useAuth: Boolean): String {
         if (!response.isSuccessful) {
-            // #324 — typed (status code) while keeping the richer REST diagnostic line.
             throw HfrServerException(
                 code = response.code,
                 url = response.request.url.toString(),
@@ -260,10 +267,10 @@ class HfrApiClient @Inject constructor(
             )
         }
         val finalUrl = response.request.url
-        if (finalUrl.isLoginUrl() || body.looksLikeLoginPage()) {
+        if (useAuth && (finalUrl.isLoginUrl() || body.looksLikeLoginPage())) {
             throw SessionExpiredException(finalUrl.toString())
         }
-        body
+        return body
     }
 
     private fun failureMessage(code: Int, url: HttpUrl, body: String): String {

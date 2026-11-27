@@ -41,11 +41,10 @@ class FlagsRefreshPolicyDialogTest {
         val radio = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton)
         val options = listOf(
             R.string.diagnostics_flags_baseline to R.string.diagnostics_flags_baseline_help,
-            R.string.diagnostics_flags_legacy to R.string.diagnostics_flags_legacy_help,
             R.string.diagnostics_flags_global_only to R.string.diagnostics_flags_global_only_help,
             R.string.diagnostics_flags_global_first to R.string.diagnostics_flags_global_first_help,
         )
-        compose.onAllNodes(radio).assertCountEquals(4)
+        compose.onAllNodes(radio).assertCountEquals(3)
         options.forEach { (label, description) ->
             compose.onAllNodes(hasText(text(description))).assertCountEquals(1)
             compose.onNode(radio and hasText(text(label)) and hasText(text(description)))
@@ -57,48 +56,36 @@ class FlagsRefreshPolicyDialogTest {
     }
 
     @Test
-    fun `dialog shows fifteen as the default concurrency`() {
+    fun `dialog shows five as the default concurrency`() {
         mount()
-        compose.onNodeWithText("15 requêtes simultanées", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("N choisi : 15").performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText("N effectif : 15").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("5 requêtes simultanées", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("N choisi : 5").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("N effectif : 5").performScrollTo().assertIsDisplayed()
     }
 
     @Test
-    fun `legacy disables N and restores the retained value when leaving legacy`() {
-        val initial = FlagsRefreshPolicy(concurrency = 7, applicationRetry = false)
+    fun `legacy is read as the baseline with its retained concurrency and retry setting`() {
+        val initial = FlagsRefreshPolicy(FlagsRefreshStrategy.LEGACY, concurrency = 7, applicationRetry = false)
         var saved: FlagsRefreshPolicy? = null
         mount(initial, onSave = { saved = it })
-        choose(R.string.diagnostics_flags_legacy)
-        compose.onNodeWithText("N choisi : 7").performScrollTo().assertIsNotEnabled()
-        decrease().assertIsNotEnabled()
-        increase().assertIsNotEnabled()
-        compose.onNodeWithText(text(R.string.diagnostics_flags_n_ignored))
-            .performScrollTo().assertIsDisplayed()
-        compose.onNodeWithText(text(R.string.diagnostics_flags_unbounded)).assertExists()
-        choose(R.string.diagnostics_flags_baseline)
-        compose.onNodeWithText("N choisi : 7").performScrollTo().assertIsEnabled()
         decrease().assertIsEnabled()
         increase().assertIsEnabled()
-        compose.onNodeWithText(text(R.string.diagnostics_flags_n_ignored)).assertDoesNotExist()
-        choose(R.string.diagnostics_flags_legacy)
-        assertNull(saved)
         compose.onNodeWithText(text(R.string.diagnostics_flags_apply)).performClick()
-        assertEquals(initial.copy(strategy = FlagsRefreshStrategy.LEGACY), saved)
+        assertEquals(initial.copy(strategy = FlagsRefreshStrategy.BASELINE), saved)
     }
 
     @Test
-    fun `N at twenty keeps accessible icon controls and its upper bound in dark theme`() {
+    fun `N at ten keeps accessible icon controls and its upper bound in dark theme`() {
         var saved: FlagsRefreshPolicy? = null
-        mount(FlagsRefreshPolicy(concurrency = 20), darkTheme = true, onSave = { saved = it })
-        compose.onNodeWithText("N choisi : 20").performScrollTo().assertIsDisplayed()
+        mount(FlagsRefreshPolicy(concurrency = 10), darkTheme = true, onSave = { saved = it })
+        compose.onNodeWithText("N choisi : 10").performScrollTo().assertIsDisplayed()
         increase().assertIsNotEnabled().assertHeightIsAtLeast(48.dp)
         decrease().assertIsEnabled().assertHeightIsAtLeast(48.dp).performClick()
-        compose.onNodeWithText("N choisi : 19").assertExists()
+        compose.onNodeWithText("N choisi : 9").assertExists()
         increase().assertIsEnabled().performClick()
         increase().assertIsNotEnabled()
         compose.onNodeWithText(text(R.string.diagnostics_flags_apply)).performClick()
-        assertEquals(FlagsRefreshPolicy(concurrency = 20), saved)
+        assertEquals(FlagsRefreshPolicy(concurrency = 10), saved)
     }
 
     @Test
@@ -114,10 +101,6 @@ class FlagsRefreshPolicyDialogTest {
         compose.onNodeWithText(text(R.string.diagnostics_flags_cancel)).performClick()
         assertEquals(true, dismissed)
         assertNull(saved)
-    }
-
-    private fun choose(label: Int) {
-        compose.onNodeWithText(text(label)).performScrollTo().performClick().assertIsSelected()
     }
 
     private fun decrease() = compose.onNodeWithContentDescription(text(R.string.diagnostics_flags_decrease))

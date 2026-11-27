@@ -24,6 +24,7 @@ internal fun NetworkProbePanel(
     cooldownSeconds: Long?,
     onStart: () -> Unit,
     onCancel: () -> Unit,
+    hfrBlocked: Boolean = false,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -34,18 +35,12 @@ internal fun NetworkProbePanel(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(
-                onClick = onStart,
-                enabled = !state.running && cooldownSeconds == 0L,
-                contentPadding = PaddingValues(0.dp),
-            ) {
-                Text(stringResource(R.string.diagnostics_probe_start))
-            }
-            if (state.running) {
-                TextButton(onClick = onCancel) { Text(stringResource(R.string.diagnostics_probe_cancel)) }
-            }
-        }
+        ProbeControls(
+            running = state.running,
+            canStart = !hfrBlocked && cooldownSeconds == 0L,
+            onStart = onStart,
+            onCancel = onCancel,
+        )
         if (state.running) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             Text(
@@ -53,7 +48,7 @@ internal fun NetworkProbePanel(
                 style = MaterialTheme.typography.bodySmall,
             )
         }
-        ProbeStatus(state.status)
+        ProbeStatus(if (hfrBlocked) NetworkProbeStatus.BLOCKED else state.status)
         state.waves.forEach { wave ->
             val successes = pluralStringResource(R.plurals.diagnostics_probe_successes, wave.successes, wave.successes)
             val failures = pluralStringResource(R.plurals.diagnostics_probe_failures, wave.failures, wave.failures)
@@ -81,11 +76,28 @@ internal fun NetworkProbePanel(
 }
 
 @Composable
+private fun ProbeControls(running: Boolean, canStart: Boolean, onStart: () -> Unit, onCancel: () -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextButton(
+            onClick = onStart,
+            enabled = !running && canStart,
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            Text(stringResource(R.string.diagnostics_probe_start))
+        }
+        if (running) {
+            TextButton(onClick = onCancel) { Text(stringResource(R.string.diagnostics_probe_cancel)) }
+        }
+    }
+}
+
+@Composable
 private fun ProbeStatus(status: NetworkProbeStatus) {
     val message = when (status) {
         NetworkProbeStatus.COMPLETE -> R.string.diagnostics_probe_complete
         NetworkProbeStatus.CANCELLED -> R.string.diagnostics_probe_cancelled
         NetworkProbeStatus.REFRESH_ACTIVE -> R.string.diagnostics_probe_refresh_active
+        NetworkProbeStatus.BLOCKED -> R.string.diagnostics_probe_hfr_blocked
         NetworkProbeStatus.STORAGE_ERROR -> R.string.diagnostics_probe_storage_error
         NetworkProbeStatus.FAILED -> R.string.diagnostics_probe_failed
         else -> null

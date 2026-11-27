@@ -1,20 +1,24 @@
 package fr.forumhfr.redface2.core.network.di
 
+import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
+import fr.forumhfr.redface2.core.domain.error.HfrRestAvailability
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.stats.NetworkRole
 import fr.forumhfr.redface2.core.network.EditorWriteOwnerInterceptor
 import fr.forumhfr.redface2.core.network.HfrConstants
+import fr.forumhfr.redface2.core.network.HfrRestCircuitBreaker
 import fr.forumhfr.redface2.core.network.diagnostics.HfrEventListenerFactory
 import fr.forumhfr.redface2.core.network.diagnostics.HfrNetworkDiagnostics
 import fr.forumhfr.redface2.core.network.diagnostics.NetworkStatsListenerFactory
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
+import fr.forumhfr.redface2.core.network.qualifiers.HfrUserAgent
 import fr.forumhfr.redface2.core.network.qualifiers.ImageClient
 import fr.forumhfr.redface2.core.network.qualifiers.MutationClient
 import fr.forumhfr.redface2.core.network.qualifiers.UploadClient
@@ -45,6 +49,7 @@ object NetworkModule {
     fun provideBaseClient(
         userPreferencesRepository: UserPreferencesRepository,
         listeners: NetworkClientListeners,
+        @HfrUserAgent userAgent: String,
     ): OkHttpClient =
         OkHttpClient.Builder()
         .eventListenerFactory(listeners.hfr(HfrClientRole.ANON))
@@ -52,7 +57,7 @@ object NetworkModule {
         .readTimeout(HfrConstants.ReadTimeout)
         .writeTimeout(HfrConstants.WriteTimeout)
         .callTimeout(HfrConstants.CallTimeout)
-        .addInterceptor(UserAgentInterceptor(HfrConstants.USER_AGENT))
+        .addInterceptor(UserAgentInterceptor(userAgent))
         .applyProxyConfig(userPreferencesRepository.readProxyConfigForNetworkBootstrap())
         .build()
 
@@ -157,4 +162,11 @@ class NetworkClientListeners @Inject constructor(
     )
 
     fun images(): EventListener.Factory = stats.forRole(NetworkRole.IMAGE, diagnostics.forImages())
+}
+
+@Module
+@InstallIn(SingletonComponent::class)
+interface HfrRestAvailabilityModule {
+    @Binds
+    fun bindHfrRestAvailability(impl: HfrRestCircuitBreaker): HfrRestAvailability
 }

@@ -16,6 +16,12 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## À paraître
+
+- Drapeaux ([#1684](https://github.com/ForumHFR/redface2/issues/1684)) — 5 requêtes en parallèle par défaut et 10 au maximum. Le pull sur Super partage le balayage des épinglés entre ses trois types. Chaque page de ce balayage ne demande qu’un sujet ordinaire en plus des épinglés.
+- Une pause avec échéance visible limite les requêtes REST après des refus répétés de HFR. Le test de connexion est suspendu pendant cette pause et utilise 16 requêtes par test.
+- Le User-Agent identifie la version et la variante de l’app. [#1683](https://github.com/ForumHFR/redface2/issues/1683)
+
 ## `0.72.0` — `internal` (dev) — 2026-11-27
 
 Statistiques réseau ([#1685](https://github.com/ForumHFR/redface2/issues/1685), lot A) : l'app compte, sur l'appareil, chaque requête qu'elle envoie (API REST et pages de forum.hardware.fr, images, hébergeurs tiers, sonde de Diagnostics), redirections et rejeux compris, avec la classe de statut, le type de réseau, le premier plan ou le fond, le déclencheur de l'actualisation des drapeaux et les pics par seconde, par minute et en vol. Elle compte aussi les pages et listes affichées, les actualisations admises ou ignorées, les écritures et le temps au premier plan. Les données restent sur l'appareil, dans une base séparée et jetable, 90 jours, exclue des sauvegardes ; ni URL, ni sujet, ni catégorie, ni pseudo. Écran Réglages › Maintenance › Statistiques réseau : totaux 24 h / 7 j / 30 j, erreurs, appels sans requête, pics, requêtes par page lue, 30 derniers jours ; « Copier le résumé » (totaux par jour, aperçu avant copie) et remise à zéro (PR [#1686](https://github.com/ForumHFR/redface2/pull/1686)). Aucun changement des requêtes envoyées : cette version mesure l'« avant » de la réduction de charge ([#1684](https://github.com/ForumHFR/redface2/issues/1684)).

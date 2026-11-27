@@ -69,6 +69,7 @@ class OkHttpNetworkProbeRunnerTest {
     @After
     fun stop() { server.shutdown() }
 
+    /** Healthy connection test: 36 → 16 anonymous GETs. */
     @Test
     fun `exact waves use simultaneous fresh anonymous calls even with an existing session`() = runBlocking {
         val barrier = AtomicReference(CountDownLatch(1))
@@ -101,14 +102,15 @@ class OkHttpNetworkProbeRunnerTest {
             assertEquals(previousTotal, arrived.get())
             waves += wave
         })
-        assertEquals(listOf(1, 5, 10, 20), waves.map { it.size })
-        assertEquals(36, server.requestCount)
-        repeat(36) {
+        assertEquals(listOf(1, 5, 10), waves.map { it.size })
+        assertEquals(16, server.requestCount)
+        repeat(16) {
             val request = requireNotNull(server.takeRequest(1, TimeUnit.SECONDS))
             assertNull(request.getHeader("Cookie"))
             assertNull(request.getHeader("Authorization"))
             assertNull(request.getHeader("Proxy-Authorization"))
             assertEquals("close", request.getHeader("Connection"))
+            assertEquals(PROBE_USER_AGENT, request.getHeader("User-Agent"))
             assertTrue(request.requestLine.endsWith("HTTP/1.1"))
             assertEquals(0, request.sequenceNumber)
             assertEquals("forums/hardwarefr/categories/", request.requestUrl?.queryParameter("uri"))
@@ -136,7 +138,7 @@ class OkHttpNetworkProbeRunnerTest {
 
     @Test
     fun `ordinary HFR activity completed during first wave marks all remaining waves disturbed`() = runBlocking {
-        repeat(36) { server.enqueue(MockResponse().setBody("catalogue")) }
+        repeat(16) { server.enqueue(MockResponse().setBody("catalogue")) }
         val waves = mutableListOf<NetworkProbeWave>()
         runner().run(onWaveStarted = { size ->
             if (size == 1) {
@@ -150,22 +152,22 @@ class OkHttpNetworkProbeRunnerTest {
     @Test
     fun `wave deadline cancels unfinished call before advancing to the next wave`() = runBlocking {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
-        repeat(35) { server.enqueue(MockResponse().setBody("catalogue")) }
+        repeat(15) { server.enqueue(MockResponse().setBody("catalogue")) }
         val waves = mutableListOf<NetworkProbeWave>()
         runner(waveTimeoutMs = 1_000).run({}, { waves += it })
-        assertEquals(listOf(1, 5, 10, 20), waves.map { it.size })
+        assertEquals(listOf(1, 5, 10), waves.map { it.size })
         assertEquals(NetworkProbeOutcome.DEADLINE, waves.first().results.single().outcome)
-        assertEquals(35, waves.drop(1).sumOf { it.successes })
-        assertEquals(36, server.requestCount)
+        assertEquals(15, waves.drop(1).sumOf { it.successes })
+        assertEquals(16, server.requestCount)
     }
 
     @Test
-    fun `408 followed by 200 uses exactly 36 server connections and coherent timings`() = runBlocking {
+    fun `408 followed by 200 uses exactly 16 server connections and coherent timings`() = runBlocking {
         assertSingleExchange(408)
     }
 
     @Test
-    fun `503 Retry-After zero followed by 200 uses exactly 36 server connections and coherent timings`() = runBlocking {
+    fun `503 Retry-After zero followed by 200 uses exactly 16 server connections and coherent timings`() = runBlocking {
         assertSingleExchange(503)
     }
 
@@ -176,7 +178,7 @@ class OkHttpNetworkProbeRunnerTest {
         val url = server.url("/").newBuilder().host("probe.invalid").build()
         val waves = mutableListOf<NetworkProbeWave>()
         runner(client = client, url = url).run({}, waves::add)
-        assertEquals(36, waves.sumOf { it.failures })
+        assertEquals(16, waves.sumOf { it.failures })
         assertEquals(0, connections.get())
         waves.flatMap { it.results }.forEach { result ->
             assertTrue(result.line(), result.line().contains("outcome=dns_error errno=-"))
@@ -212,7 +214,7 @@ class OkHttpNetworkProbeRunnerTest {
 
     @Test(timeout = 20_000)
     fun `deadline releases refresh lease without waiting for blocked DNS worker`() = runBlocking {
-        repeat(35) { server.enqueue(MockResponse().setBody("catalogue")) }
+        repeat(15) { server.enqueue(MockResponse().setBody("catalogue")) }
         val dns = BlockingDns()
         val activity = HfrRefreshActivity()
         val service = service(dns, activity, waveTimeoutMs = 1_000)
@@ -225,9 +227,9 @@ class OkHttpNetworkProbeRunnerTest {
             withTimeout(15_000) { job.join(); refreshed.await() }
             assertEquals(NetworkProbeStatus.COMPLETE, service.state.value.status)
             assertEquals(NetworkProbeOutcome.DEADLINE, service.state.value.waves.first().results.single().outcome)
-            assertEquals(35, service.state.value.waves.drop(1).sumOf { it.successes })
+            assertEquals(15, service.state.value.waves.drop(1).sumOf { it.successes })
             assertEquals(1L, dns.returned.count)
-            assertEquals(35, server.requestCount)
+            assertEquals(15, server.requestCount)
             assertTrue(activity.idleGeneration() != null)
         } finally {
             job.cancel()
@@ -249,16 +251,16 @@ class OkHttpNetworkProbeRunnerTest {
             val client = base.newBuilder().proxy(Proxy.NO_PROXY)
                 .sslSocketFactory(clientCertificates.sslSocketFactory(), clientCertificates.trustManager).build()
             secureServer.enqueue(MockResponse().setResponseCode(status).setHeader("Retry-After", "0").setBody("retry"))
-            repeat(36) { secureServer.enqueue(MockResponse().setBody("catalogue")) }
+            repeat(15) { secureServer.enqueue(MockResponse().setBody("catalogue")) }
             val waves = mutableListOf<NetworkProbeWave>()
             val url = secureServer.url("/").newBuilder().host("127.0.0.1").build()
             runner(client = client, url = url).run({}, waves::add)
-            assertEquals(36, connections.get())
-            assertEquals(36, secureServer.requestCount)
-            assertEquals(36, waves.sumOf { it.results.size })
+            assertEquals(16, connections.get())
+            assertEquals(16, secureServer.requestCount)
+            assertEquals(16, waves.sumOf { it.results.size })
             assertEquals(NetworkProbeOutcome.HTTP_ERROR, waves.first().results.single().outcome)
             assertEquals(status, waves.first().results.single().status)
-            assertEquals(35, waves.sumOf { it.successes })
+            assertEquals(15, waves.sumOf { it.successes })
             waves.flatMap { it.results }.forEach { result ->
                 assertEquals(result.line(), 1, result.connectAttempts)
                 assertNull(result.errno)
@@ -328,6 +330,11 @@ class OkHttpNetworkProbeRunnerTest {
         url: HttpUrl = server.url("/"),
         waveTimeoutMs: Long = NetworkProbeRunner.WAVE_TIMEOUT_MS,
     ) = OkHttpNetworkProbeRunner(
-        client, url, Dispatchers.IO, traffic, foreground, network, disabledStatsFactory(), waveTimeoutMs,
+        client, url, Dispatchers.IO, traffic, foreground, network, disabledStatsFactory(),
+        PROBE_USER_AGENT, waveTimeoutMs,
     )
+
+    private companion object {
+        const val PROBE_USER_AGENT = "Redface2/0.72.0 (Android; dev; +https://github.com/ForumHFR/redface2)"
+    }
 }
