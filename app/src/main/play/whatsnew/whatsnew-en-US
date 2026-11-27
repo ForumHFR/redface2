@@ -1,5 +1,4 @@
-Redface 2 v0.71.1 — dev.
-- Editor: no more crash on opening at some screen densities.
-- Flags: reads bounded to 15 in parallel instead of 5.
-- Diagnostics: "Test the connection" flags disturbed waves.
-- Diagnostics: the export includes the last crash stack.
+Redface 2 v0.72.0 — dev.
+- Settings › Maintenance › Network statistics: the app counts on the device the requests it sends to HFR, errors and peaks, over 90 days.
+- "Copy summary" gives daily totals to paste on the forum.
+- Nothing is sent automatically; no URL, topic or username is stored.
