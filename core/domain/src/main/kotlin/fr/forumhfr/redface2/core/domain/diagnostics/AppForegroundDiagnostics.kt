@@ -15,7 +15,7 @@ class AppForegroundDiagnostics @Inject constructor(
 ) {
     private var backgroundNanos: Long? = null
     private var foregroundNanos: Long? = null
-    private var visibility = AppVisibility.UNKNOWN
+    @Volatile private var visibility = AppVisibility.UNKNOWN
     private val listeners = linkedSetOf<(AppVisibility) -> Unit>()
 
     @Synchronized
@@ -35,6 +35,8 @@ class AppForegroundDiagnostics @Inject constructor(
                 "backgroundMs=${elapsedDiagnosticMs(start, nowNanos)}")
         }
     }
+
+    fun currentVisibility(): AppVisibility = visibility
 
     /** The initial state and subscription are atomic with lifecycle transitions. */
     @Synchronized

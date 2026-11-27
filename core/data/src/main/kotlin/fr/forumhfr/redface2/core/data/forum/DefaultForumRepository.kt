@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshGap
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshPhase
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCatalogueTrace
 import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
+import fr.forumhfr.redface2.core.domain.forum.ForumCategoriesUpdate
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.Category
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -74,28 +76,31 @@ class DefaultForumRepository @Inject constructor(
     private val categoriesFetchMutex = Mutex()
     @Volatile private var activeCategoriesTrace: HfrCatalogueTrace? = null
 
-    private val categoriesRefresh: MutableSharedFlow<ForumResult<List<Category>>> =
+    private val categoriesRefresh: MutableSharedFlow<ForumCategoriesUpdate> =
         MutableSharedFlow(replay = 0, extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     private val subcategoriesRefresh: MutableMap<Int, MutableSharedFlow<ForumResult<List<SubCategory>>>> = HashMap()
     private val topicListRefresh: MutableMap<TopicListKey, MutableSharedFlow<ForumResult<TopicListPage>>> = HashMap()
     private val refreshFlowsLock = Any()
 
-    override fun observeCategories(): Flow<ForumResult<List<Category>>> = flow {
+    override fun observeCategories(): Flow<ForumResult<List<Category>>> =
+        observeCategoryUpdates().map { it.result }
+
+    override fun observeCategoryUpdates(): Flow<ForumCategoriesUpdate> = flow {
         val cached = cachedCategories
         val now = clock.instant()
         if (cached != null && CachePolicy.isFresh(cached.fetchedAt, CachePolicy.categories, now)) {
-            emit(ForumResult.Success(cached.value))
+            emit(ForumCategoriesUpdate(ForumResult.Success(cached.value)))
         } else {
-            if (cached != null) emit(ForumResult.Success(cached.value))
-            emit(ForumResult.Loading)
-            emit(fetchCategoriesSingleFlight(now))
+            if (cached != null) emit(ForumCategoriesUpdate(ForumResult.Success(cached.value)))
+            emit(ForumCategoriesUpdate(ForumResult.Loading))
+            emit(ForumCategoriesUpdate(fetchCategoriesSingleFlight(now)))
         }
         emitAll(categoriesRefresh.asSharedFlow())
     }
 
     override fun observeCachedCategories(): Flow<ForumResult<List<Category>>?> = flow {
         emit(cachedCategories?.let { ForumResult.Success(it.value) })
-        emitAll(categoriesRefresh.asSharedFlow())
+        emitAll(categoriesRefresh.map { it.result })
     }
 
     override suspend fun getCategories(forceRefreshIfStale: Boolean): ForumResult<List<Category>> {
@@ -116,8 +121,8 @@ class DefaultForumRepository @Inject constructor(
     }
 
     override suspend fun refreshCategories() {
-        categoriesRefresh.emit(ForumResult.Loading)
-        categoriesRefresh.emit(fetchCategories())
+        categoriesRefresh.emit(ForumCategoriesUpdate(ForumResult.Loading, isRefresh = true))
+        categoriesRefresh.emit(ForumCategoriesUpdate(fetchCategories(), isRefresh = true))
     }
 
     override fun observeSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>> = flow {

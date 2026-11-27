@@ -1007,7 +1007,7 @@ class DefaultFlagRepository @Inject constructor(
             val shared = (active?.fetch?.takeUnless { it.deferred.isCancelled }
                 ?: inFlightFetches[key]?.takeIf { it.deferred.isActive })?.also { joined = true }
                 ?: run {
-                    val trace = refreshDiagnostics.fetch(key.type, caller?.id).also {
+                    val trace = refreshDiagnostics.fetch(key.type, caller?.id, caller?.trigger).also {
                         // Register publication before a detached fetch can complete its first call.
                         caller?.attach(it, wasJoined = false)
                     }
@@ -1566,7 +1566,7 @@ class DefaultFlagRepository @Inject constructor(
         session: FlagReadSession,
     ): ObservedSweep {
         val trace = parentTrace?.let { parent ->
-            FlagFetchTrace(parent.refreshId, parent.type).also { parent.sticky(it) }
+            FlagFetchTrace(parent.refreshId, parent.type, parent.trigger).also { parent.sticky(it) }
         }
         val bodies = mutableMapOf<Int, Result<String>>()
         val deferred = fetchScope.async((trace ?: kotlin.coroutines.EmptyCoroutineContext) + session) {

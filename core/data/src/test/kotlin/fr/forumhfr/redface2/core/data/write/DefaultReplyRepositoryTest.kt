@@ -2,13 +2,22 @@ package fr.forumhfr.redface2.core.data.write
 
 import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageFailure
 import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageMutationResult
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionKey
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.NetworkStatsBuffer
+import fr.forumhfr.redface2.core.domain.stats.NetworkStatsProcess
+import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.network.HfrClient
+import fr.forumhfr.redface2.core.parser.messages.PrivateMessageReplyLinkParser
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
+import io.mockk.mockk
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
 import java.io.IOException
 import java.net.URLDecoder
@@ -34,6 +43,7 @@ class DefaultReplyRepositoryTest {
     private lateinit var client: HfrClient
     private lateinit var repository: DefaultReplyRepository
     private lateinit var usage: SmileyUsageRecorderFixture
+    private val stats = NetworkStatsBuffer(NetworkStatsProcess(72, isMain = true))
 
     @Before
     fun setUp() {
@@ -54,6 +64,7 @@ class DefaultReplyRepositoryTest {
             diagnostics = fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog(),
             smileyUsageRecorder = usage.recorder,
             ioDispatcher = Dispatchers.Unconfined,
+            networkActions = stats,
         )
     }
 
@@ -61,6 +72,61 @@ class DefaultReplyRepositoryTest {
     fun tearDown() {
         usage.close()
         server.shutdown()
+    }
+
+    @Test
+    fun `confirmed reply edit and private send share one action key`() = runTest {
+        val reply = ReplyContext(23, 550, 35395, 20)
+        server.enqueue(MockResponse().setBody(fixture("write_reply_form_open_topic.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+        val replyForm = repository.fetchReplyForm(reply)
+        assertTrue(repository.submitReply(reply, replyForm, "Réponse") is ReplySubmitResult.Success)
+
+        val edits = DefaultEditPostRepository(
+            client, ReplyFormParser(), ReplySubmitResponseParser(), DiagnosticsLog(), usage.recorder,
+            mockk(), mockk(), Dispatchers.Unconfined, stats,
+        )
+        val edit = EditPostContext(23, 550, 35395, 20, 2784595)
+        server.enqueue(MockResponse().setBody(fixture("write_edit_form_test_post.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_edit_success_response.html")))
+        val editForm = edits.fetchEditPostForm(edit)
+        assertTrue(edits.submitEditPost(edit, editForm, "Édition") is ReplySubmitResult.Success)
+
+        val messages = DefaultPrivateMessageWriteRepository(
+            client, ReplyFormParser(), PrivateMessageReplyLinkParser(), ReplySubmitResponseParser(),
+            DiagnosticsLog(), usage.recorder, Dispatchers.Unconfined, stats,
+        )
+        server.enqueue(MockResponse().setBody(fixture("mp_compose_form.html")))
+        server.enqueue(MockResponse().setBody(fixture("mp_new_post_success.html")))
+        val messageForm = messages.fetchComposeForm()
+        assertTrue(messages.submitNewMessage(messageForm, "Testeur", "Sujet", "Bonjour") is ReplySubmitResult.Success)
+
+        assertEquals(mapOf(NetworkActionKey(72, NetworkAction.WRITE) to 3L),
+            stats.drain().values.flatMap { it.actions.entries }.groupingBy { it.key }.fold(0L) { count, row ->
+                count + row.value
+            })
+    }
+
+    @Test
+    fun `a failing action recorder leaves a confirmed POST successful`() = runTest {
+        val repository = DefaultReplyRepository(
+            hfrClient = client,
+            replyFormParser = ReplyFormParser(),
+            replySubmitResponseParser = ReplySubmitResponseParser(),
+            diagnostics = DiagnosticsLog(),
+            smileyUsageRecorder = usage.recorder,
+            ioDispatcher = Dispatchers.Unconfined,
+            networkActions = NetworkActionRecorder { _, _, _ -> error("counter unavailable") },
+        )
+        val context = ReplyContext(23, 550, 35395, 20)
+        server.enqueue(MockResponse().setBody(fixture("write_reply_form_open_topic.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+
+        val form = repository.fetchReplyForm(context)
+        assertTrue(repository.submitReply(context, form, "Réponse") is ReplySubmitResult.Success)
+        assertEquals("GET", server.takeRequest().method)
+        assertEquals("POST", server.takeRequest().method)
+        assertEquals(2, server.requestCount)
     }
 
     @Test

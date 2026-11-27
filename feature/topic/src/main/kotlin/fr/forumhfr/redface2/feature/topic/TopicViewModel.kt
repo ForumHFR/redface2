@@ -31,6 +31,9 @@ import fr.forumhfr.redface2.core.domain.write.DeletePostRepository
 import fr.forumhfr.redface2.core.domain.write.DeletePostResult
 import fr.forumhfr.redface2.core.domain.write.ModerationRepository
 import fr.forumhfr.redface2.core.domain.write.PollVoteRepository
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.recordSafely
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
@@ -55,6 +58,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -124,6 +128,7 @@ class TopicViewModel @AssistedInject constructor(
     // re-parents them here. READS stay on `viewModelScope` — leaving the screen must still cancel
     // them. Plain Hilt dependency, the assisted Factory is unchanged.
     @param:ApplicationScope private val externalScope: CoroutineScope,
+    private val networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(TopicUiState.initial(request))
@@ -1257,6 +1262,7 @@ class TopicViewModel @AssistedInject constructor(
         loadJob = viewModelScope.launch {
             try {
                 val topic = topicRepository.refreshTopicPage(request.cat, request.post, request.page)
+                ensureActive()
                 if (generation != ownerGeneration) return@launch
                 _state.update {
                     it.copy(
@@ -1265,6 +1271,7 @@ class TopicViewModel @AssistedInject constructor(
                         search = it.search.capturingAnchor(topic),
                     )
                 }
+                recordPageVisit()
                 dispatchPendingLanding(topic, terminal = true)
                 recordSnapshot(topic)
                 // Re-arm the page+1 warmup, like `loadCurrentPage` (l. ~219). Unlike the post-submit
@@ -1372,13 +1379,23 @@ class TopicViewModel @AssistedInject constructor(
     private fun loadCurrentPage(
         entryLanding: PendingLanding? = null,
         entryLandingIsScrollTo: Boolean = false,
+        countVisit: Boolean = true,
     ) {
         becomePageOwner()
         if (entryLanding != null) {
             armLanding(entryLanding, initialScrollTo = entryLandingIsScrollTo)
         }
-        startPageLoad(showLoading = true)
+        startPageLoad(showLoading = true) { if (countVisit) recordPageVisit() }
     }
+
+    private fun completeFirstContent(first: Boolean, topic: Topic, onFirstContent: (Topic) -> Unit) {
+        if (first) {
+            onFirstContent(topic)
+            endFirstContentSectionIfNeeded()
+        }
+    }
+
+    private fun recordPageVisit() = networkActions.recordSafely(NetworkAction.TOPIC_PAGE)
 
     /**
      * #895 étape 4 — the takeover prologue every path that (re)claims the page runs first : cancel
@@ -1474,6 +1491,7 @@ class TopicViewModel @AssistedInject constructor(
         graceLoading: Boolean = false,
         refreshMissingPost: Boolean = false,
         settleRetainedPageOnCompletion: Boolean = refreshMissingPost,
+        onFirstContent: (Topic) -> Unit = {},
     ) {
         beginFirstContentSection()
         if (showLoading) {
@@ -1523,6 +1541,8 @@ class TopicViewModel @AssistedInject constructor(
                     // F4 — drop an emission raced from a previous owner (page switch / takeover).
                     if (generation != ownerGeneration) return@collect
                     // #910 — the target arrived within the grace : the skeleton never shows.
+                    ensureActive()
+                    val firstContent = !received
                     received = true
                     grace?.cancel()
                     val topic = emission.topic
@@ -1539,10 +1559,7 @@ class TopicViewModel @AssistedInject constructor(
                             search = it.search.capturingAnchor(topic),
                         )
                     }
-                    // First content visible — close the async section. Subsequent emissions
-                    // (stale-cache then refresh) already see `firstContentInFlight = false`
-                    // and the helper short-circuits.
-                    endFirstContentSectionIfNeeded()
+                    completeFirstContent(firstContent, topic, onFirstContent)
                     if (!emission.provisional) {
                         // F2 — only TERMINAL emissions become memory snapshots ; a provisional
                         // page may be displayed but must never replace a terminal snapshot.
@@ -2222,6 +2239,7 @@ class TopicViewModel @AssistedInject constructor(
                         search = it.search.capturingAnchor(snapshot),
                     )
                 }
+                recordPageVisit()
                 dispatchLandingAgainstScreen()
                 startPageLoad(showLoading = false)
             }
@@ -2232,9 +2250,9 @@ class TopicViewModel @AssistedInject constructor(
                 // with zero flash ; the grace timer inside startPageLoad posts the skeleton
                 // only if nothing arrived in time.
                 _state.update { it.copy(mode = displayed.copy(provisional = true)) }
-                startPageLoad(showLoading = false, graceLoading = true)
+                startPageLoad(showLoading = false, graceLoading = true) { recordPageVisit() }
             }
-            else -> startPageLoad(showLoading = true)
+            else -> startPageLoad(showLoading = true) { recordPageVisit() }
         }
     }
 
@@ -2266,6 +2284,7 @@ class TopicViewModel @AssistedInject constructor(
         submitRefreshKind: TopicRefreshKind,
         acknowledgementId: Long? = null,
     ) {
+        val recordLandingVisit = submitLandingVisit(submitRefreshKind)
         becomePageOwner()
         // #1301 — expose the durable cause synchronously, before any adoption or network wait.
         _state.update { it.copy(refreshKind = submitRefreshKind) }
@@ -2281,6 +2300,7 @@ class TopicViewModel @AssistedInject constructor(
             while (true) {
                 try {
                     val topic = topicRepository.refreshTopicPage(request.cat, request.post, target)
+                    ensureActive()
                     if (generation != ownerGeneration) return@launch
                     val shouldRedirect = redirectAvailable && plan.needsTailRedirect(target, topic.totalPages)
                     _state.update {
@@ -2296,6 +2316,7 @@ class TopicViewModel @AssistedInject constructor(
                             },
                         )
                     }
+                    recordLandingVisit(topic)
                     // Plain-reply overflow and the explicit last-page action each get one
                     // redirect per refresh. Quote submissions still stay on the cited page.
                     // Consume before switching: a moving tail can never make this loop chase it.
@@ -2323,9 +2344,20 @@ class TopicViewModel @AssistedInject constructor(
                     // back to the cache-aside path with a Retry affordance.
                     android.util.Log.w(LOG_TAG, "Submit-result refresh failed", refreshError)
                     if (generation != ownerGeneration) return@launch
-                    handleSubmitRefreshFailure(acknowledgementId, generation)
+                    handleSubmitRefreshFailure(acknowledgementId, generation, recordLandingVisit)
                 }
                 return@launch
+            }
+        }
+    }
+
+    private fun submitLandingVisit(kind: TopicRefreshKind): (Topic) -> Unit {
+        val departingPage = request.page
+        var recorded = false
+        return { topic ->
+            if (!recorded && (kind == TopicRefreshKind.PostSubmitJump || departingPage != topic.page)) {
+                recorded = true
+                recordPageVisit()
             }
         }
     }
@@ -2338,7 +2370,11 @@ class TopicViewModel @AssistedInject constructor(
         }
     }
 
-    private fun handleSubmitRefreshFailure(acknowledgementId: Long?, generation: Int) {
+    private fun handleSubmitRefreshFailure(
+        acknowledgementId: Long?,
+        generation: Int,
+        onFirstContent: (Topic) -> Unit,
+    ) {
         _state.update { it.copy(refreshKind = TopicRefreshKind.None) }
         if (acknowledgementId != null) {
             submitAcknowledgements.refreshFailed(acknowledgementId)
@@ -2352,6 +2388,7 @@ class TopicViewModel @AssistedInject constructor(
         startPageLoad(
             showLoading = _state.value.mode !is TopicUiState.Mode.Loaded,
             settleRetainedPageOnCompletion = true,
+            onFirstContent = onFirstContent,
         )
     }
 
@@ -2527,7 +2564,7 @@ class TopicViewModel @AssistedInject constructor(
                 throw cancellation
             } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
                 android.util.Log.w(LOG_TAG, "Post-delete refresh failed", refreshError)
-                if (generation == ownerGeneration) loadCurrentPage()
+                if (generation == ownerGeneration) loadCurrentPage(countVisit = false)
             }
         }
     }

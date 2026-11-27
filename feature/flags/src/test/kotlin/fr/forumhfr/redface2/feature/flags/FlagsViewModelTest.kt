@@ -21,6 +21,9 @@ import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.flags.FlagCategoryCoverage
 import fr.forumhfr.redface2.core.domain.flags.FlagCoverage
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.NetworkTrigger
 import fr.forumhfr.redface2.core.model.FlagFailureKind
 import fr.forumhfr.redface2.core.model.FlagSource
 import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
@@ -849,17 +852,27 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `a super pull during a refresh is replayed`() = runTest {
+    fun `two super pulls during Cyan give one decision per type per gesture`() = runTest {
         val flags = FakeFlagRepository()
         val cyanGate = CompletableDeferred<Unit>()
         val superGate = CompletableDeferred<Unit>()
         flags.refreshGate = cyanGate
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = viewModel(auth, flags, FakeForumRepository())
+        val actions = mutableMapOf<Pair<NetworkAction, NetworkTrigger>, Long>()
+        val vm = viewModel(
+            auth, flags, FakeForumRepository(),
+            networkActions = NetworkActionRecorder { action, trigger, count ->
+                actions.merge(action to trigger, count, Long::plus)
+            },
+        )
 
         vm.refresh()
         vm.selectTab(FlagTab.Super)
         vm.refresh()
+        assertEquals(1L, actions[NetworkAction.FLAG_REFRESH_IGNORED to NetworkTrigger.PULL])
+        vm.refresh()
+        assertEquals(4L, actions[NetworkAction.FLAG_REFRESH_IGNORED to NetworkTrigger.PULL])
+        assertEquals(1L, actions[NetworkAction.FLAG_REFRESH_ADMITTED to NetworkTrigger.PULL])
 
         assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
         flags.refreshGate = superGate
@@ -873,6 +886,9 @@ class FlagsViewModelTest {
             flags.refreshCalls,
         )
         assertFalse(vm.isRefreshing.value)
+        assertEquals(3L, actions[NetworkAction.FLAG_PULL to NetworkTrigger.NONE])
+        assertEquals(3L, actions[NetworkAction.FLAG_REFRESH_ADMITTED to NetworkTrigger.PULL])
+        assertEquals(4L, actions[NetworkAction.FLAG_REFRESH_IGNORED to NetworkTrigger.PULL])
     }
 
     @Test
@@ -899,7 +915,11 @@ class FlagsViewModelTest {
         flags.refreshGate = CompletableDeferred()
         val forum = FakeForumRepository(catIds = listOf(1))
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = viewModel(auth, flags, forum)
+        val actions = mutableMapOf<Pair<NetworkAction, NetworkTrigger>, Long>()
+        val recorder = NetworkActionRecorder { action, trigger, count ->
+            actions.merge(action to trigger, count, Long::plus)
+        }
+        val vm = viewModel(auth, flags, forum, networkActions = recorder)
         advanceUntilIdle()
         // The initial (Cyan) tab legitimately subscribes once; Super must not add a subscription.
         val categoriesSubscriptionsBeforeSuper = forum.observeCategoriesSubscriptions
@@ -917,6 +937,8 @@ class FlagsViewModelTest {
 
             vm.refresh()
             assertTrue(awaitItem())
+            assertEquals(1L, actions[NetworkAction.FLAG_PULL to NetworkTrigger.NONE])
+            assertEquals(3L, actions[NetworkAction.FLAG_REFRESH_ADMITTED to NetworkTrigger.PULL])
             vm.refresh()
 
             expectNoEvents()
@@ -930,6 +952,9 @@ class FlagsViewModelTest {
         }
         assertEquals(categoriesSubscriptionsBeforeSuper, forum.observeCategoriesSubscriptions)
         assertEquals(0, forum.refreshCategoriesCalls)
+        assertEquals(2L, actions[NetworkAction.FLAG_PULL to NetworkTrigger.NONE])
+        assertEquals(3L, actions[NetworkAction.FLAG_REFRESH_ADMITTED to NetworkTrigger.PULL])
+        assertEquals(3L, actions[NetworkAction.FLAG_REFRESH_IGNORED to NetworkTrigger.PULL])
     }
 
     @Test
@@ -2326,17 +2351,24 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         flags.refreshGate = CompletableDeferred()
         val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
-        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
-        val vm = viewModelWithClock(auth, flags, clock)
+        val actions = mutableMapOf<Pair<NetworkAction, NetworkTrigger>, Long>()
+        val recorder = NetworkActionRecorder { action, trigger, count ->
+            actions.merge(action to trigger, count, Long::plus)
+        }
+        val vm = viewModel(auth, flags, FakeForumRepository(), networkActions = recorder)
 
         vm.maybeAutoRefresh() // Cyan, gated
         vm.selectTab(FlagTab.Red)
-        vm.maybeAutoRefresh() // deferred: Red…
+        vm.maybeAutoRefresh(FlagRefreshTrigger.RESUME) // deferred: Red…
+        assertNull(actions[NetworkAction.FLAG_REFRESH_IGNORED to NetworkTrigger.RESUME])
         vm.selectTab(FlagTab.Favorite)
         vm.maybeAutoRefresh() // …superseded by Favori, the tab actually on screen when Cyan settles
 
         flags.refreshGate!!.complete(Unit)
         assertEquals(listOf(FlagType.CYAN, FlagType.FAVORITE), flags.refreshCalls)
+        assertEquals(1L, actions[NetworkAction.FLAG_REFRESH_IGNORED to NetworkTrigger.RESUME])
+        assertEquals(1L, actions[NetworkAction.FLAG_REFRESH_ADMITTED to NetworkTrigger.TAB])
+        assertNull(actions[NetworkAction.FLAG_REFRESH_IGNORED to NetworkTrigger.TAB])
     }
 
     @Test
@@ -3349,6 +3381,7 @@ class FlagsViewModelTest {
         // the process-lifetime scope it mirrors.
         externalScope: CoroutineScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
+        networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
     ): FlagsViewModel =
         FlagsViewModel(
             authRepository = auth,
@@ -3361,7 +3394,8 @@ class FlagsViewModelTest {
             mpStorageRepository = mpStorage,
             clock = fixedClock,
             externalScope = externalScope,
-            refreshDiagnostics = FlagRefreshDiagnostics(diagnostics),
+            refreshDiagnostics = FlagRefreshDiagnostics(diagnostics, networkActions = networkActions),
+            networkActions = networkActions,
         )
 
     /** Builds a ViewModel with a custom [clock] for the #378 throttle tests; everything else is a

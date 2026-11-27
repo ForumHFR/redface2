@@ -13,6 +13,9 @@ import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.recordSafely
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
@@ -24,6 +27,8 @@ import java.util.logging.Logger
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -36,6 +41,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.scan
 import kotlinx.coroutines.flow.stateIn
@@ -72,6 +78,7 @@ class CategoryViewModel @AssistedInject constructor(
     private val forumRepository: ForumRepository,
     authRepository: AuthRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
+    private val networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
 ) : ViewModel() {
 
     // #1132 — the REAL auth state, seeded `null` (still unknown) so the persisted-filter seed can
@@ -145,7 +152,15 @@ class CategoryViewModel @AssistedInject constructor(
                 initialValue = SubcategoriesUiState.Loading,
             )
 
-    private val topicsState: StateFlow<TopicsUiState> = combine(
+    // Keep the origin of the content through the combine: navigation keys can update
+    // before the previous observer's last Content has been replaced.
+    private var pendingListKey: ListKey? = null
+    private var filterContentKey: ListKey? = null
+    private var manualRefreshKey: ListKey? = null
+    private var manualRefreshPage: TopicListPage? = null
+    private var displayedList: Pair<ListKey, TopicListPage>? = null
+
+    private val topicsState: StateFlow<TopicListing> = combine(
         selectedSubcat,
         page,
     ) { subcat, currentPage -> subcat to currentPage }
@@ -155,17 +170,20 @@ class CategoryViewModel @AssistedInject constructor(
         // content trick (keepContentDuringRefresh) is applied *inside* the new upstream
         // so that a refresh of the same key keeps showing the prior topics.
         .flatMapLatest { (subcat, currentPage) ->
+            val key = ListKey(subcat, currentPage, CategoryFlagFilter.ALL)
             forumRepository.observeTopicList(cat = request.cat, subcat = subcat, page = currentPage)
+                .onEach { result -> acceptRefreshResult(key, result) }
                 .map { it.toTopicsUiState() }
                 .keepContentDuringRefresh(
                     isLoading = { it is TopicsUiState.Loading },
                     isContent = { it is TopicsUiState.Content },
                 )
+                .map { TopicListing(key, it) }
         }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
-            initialValue = TopicsUiState.Loading,
+            initialValue = TopicListing(null, TopicsUiState.Loading),
         )
 
     // 7 source flows total (5 core + searchQuery + isRefreshing). Kotlin's typed
@@ -212,9 +230,9 @@ class CategoryViewModel @AssistedInject constructor(
             selectedSubcat = core.subcat,
             page = core.page,
             // No pager in flag-filter mode: the buckets are not paginated server-side.
-            pageCount = if (filterActive) 1 else core.topics.pageCount(),
+            pageCount = if (filterActive) 1 else core.listing.topics.pageCount(),
             subcategories = core.subcategories,
-            topics = core.topics,
+            topics = core.listing.topics,
             searchQuery = searchState.query,
             searchActive = searchState.active,
             menusCollapsed = layoutSearch.menusCollapsed ?: false,
@@ -224,13 +242,16 @@ class CategoryViewModel @AssistedInject constructor(
             filteredTopics = if (filterActive) {
                 filter.flagFilterTopics.filterTopics(searchState.query)
             } else {
-                core.topics.filterTopics(searchState.query)
+                core.listing.topics.filterTopics(searchState.query)
             },
             isRefreshing = refreshing,
             canCreateTopic = authenticated,
             flagFilter = filter.flagFilter,
             flagFilterTopics = filter.flagFilterTopics,
-        )
+        ).also { state -> recordDisplayedList(state, core.listing.key) }
+    }.onCompletion {
+        displayedList = null
+        clearManualRefresh()
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
@@ -274,7 +295,7 @@ class CategoryViewModel @AssistedInject constructor(
         // we cancel any in-flight prefetch so we never warm a page the user has
         // moved past.
         topicsState
-            .map { state -> state.toPrefetchTriggerOrNull() }
+            .map { it.topics.toPrefetchTriggerOrNull() }
             .distinctUntilChanged()
             .onEach { trigger ->
                 if (trigger == null) {
@@ -329,6 +350,7 @@ class CategoryViewModel @AssistedInject constructor(
             .onEach { (persisted, auth) ->
                 val seed = if (auth is AuthState.Authenticated) persisted else CategoryFlagFilter.ALL
                 flagFilter.value = seed
+                pendingListKey = listKey()
                 flagFilterHydrated.value = true
                 if (seed != CategoryFlagFilter.ALL) {
                     launchFlagFilterFetch(keepContent = false)
@@ -365,8 +387,62 @@ class CategoryViewModel @AssistedInject constructor(
         else -> null
     }
 
+    private fun listKey(
+        subcat: Int? = selectedSubcat.value,
+        page: Int = this.page.value,
+        filter: CategoryFlagFilter = flagFilter.value,
+    ) = ListKey(subcat, if (filter == CategoryFlagFilter.ALL) page else 1, filter)
+
+    private fun expectListContent(key: ListKey) {
+        pendingListKey = key
+        clearManualRefresh()
+    }
+
+    private fun clearManualRefresh() {
+        manualRefreshKey = null
+        manualRefreshPage = null
+    }
+
+    private fun acceptRefreshResult(key: ListKey, result: ForumResult<TopicListPage>) {
+        if (manualRefreshKey != key || listKey() != key) return
+        when (result) {
+            is ForumResult.Success -> {
+                manualRefreshPage = result.value
+                // StateFlow can suppress a refresh whose content is identical to the visible list.
+                // A different result is counted when the combined UI state publishes it.
+                if (displayedList == (key to result.value)) countDisplayedList(key, result.value)
+            }
+            is ForumResult.Failure -> clearManualRefresh()
+            ForumResult.Loading -> Unit
+        }
+    }
+
+    private fun recordDisplayedList(state: CategoryUiState, unfilteredKey: ListKey?) {
+        val key = listKey(state.selectedSubcat, state.page, state.flagFilter)
+        val topics = if (key.filter == CategoryFlagFilter.ALL) state.topics else state.flagFilterTopics
+        val contentKey = if (key.filter == CategoryFlagFilter.ALL) unfilteredKey else filterContentKey
+        val content = (topics as? TopicsUiState.Content)?.page
+        val currentListing = key == contentKey && key == listKey()
+        if (state.layoutPreferencesReady && content != null && currentListing) {
+            displayedList = key to content
+            countDisplayedList(key, content)
+        } else {
+            displayedList = null
+        }
+    }
+
+    private fun countDisplayedList(key: ListKey, content: TopicListPage) {
+        val refreshed = manualRefreshKey == key && manualRefreshPage == content
+        if (pendingListKey == key || refreshed) {
+            pendingListKey = null
+            if (refreshed) clearManualRefresh()
+            networkActions.recordSafely(NetworkAction.LIST)
+        }
+    }
+
     fun selectSubcategory(subcat: Int?) {
         if (selectedSubcat.value == subcat) return
+        expectListContent(listKey(subcat = subcat, page = 1))
         selectedSubcat.value = subcat
         page.value = 1
         // searchQuery preserved deliberately — see CategoryUiState.searchQuery KDoc.
@@ -374,6 +450,7 @@ class CategoryViewModel @AssistedInject constructor(
 
     fun selectPage(newPage: Int) {
         if (newPage < 1 || newPage == page.value) return
+        if (flagFilter.value == CategoryFlagFilter.ALL) expectListContent(listKey(page = newPage))
         page.value = newPage
     }
 
@@ -430,6 +507,7 @@ class CategoryViewModel @AssistedInject constructor(
      */
     fun selectFlagFilter(filter: CategoryFlagFilter) {
         if (flagFilter.value == filter) return
+        expectListContent(listKey(filter = filter))
         flagFilter.value = filter
         launchFlagFilterFetch(keepContent = false)
         // #1132 — persist the user's explicit choice AFTER the optimistic local update + fetch, so the
@@ -462,10 +540,14 @@ class CategoryViewModel @AssistedInject constructor(
         if (!keepContent || flagFilterTopics.value !is TopicsUiState.Content) {
             flagFilterTopics.value = TopicsUiState.Loading
         }
+        val key = listKey()
         val result = forumRepository.getFlagFilteredTopics(cat = request.cat, subcat = subcat, bucket = bucket)
+        currentCoroutineContext().ensureActive()
         // Stale-guard: only publish if the active (filter, subcat) is still the one we fetched.
         if (flagFilter.value == filter && selectedSubcat.value == subcat) {
+            filterContentKey = key
             flagFilterTopics.value = result.toTopicsUiState()
+            if (keepContent) acceptRefreshResult(key, result)
         }
     }
 
@@ -489,17 +571,18 @@ class CategoryViewModel @AssistedInject constructor(
             try {
                 forumRepository.refreshSubcategories(request.cat)
                 if (flagFilter.value == CategoryFlagFilter.ALL) {
-                    forumRepository.refreshTopicList(
-                        cat = request.cat,
-                        subcat = selectedSubcat.value,
-                        page = page.value,
-                    )
+                    val key = listKey()
+                    manualRefreshKey = key
+                    manualRefreshPage = null
+                    forumRepository.refreshTopicList(cat = request.cat, subcat = key.subcat, page = key.page)
                 } else {
                     // #455 — re-fetch through [flagFilterJob] (NOT inline) so a concurrent
                     // selectFlagFilter / subcat change can cancel it: an inline fetch had no
                     // handle and could clobber flagFilterTopics out of order (review #455).
                     // join() keeps [isRefreshing] bracketing the round-trip.
                     flagFilterJob?.cancel()
+                    manualRefreshKey = listKey()
+                    manualRefreshPage = null
                     val job = viewModelScope.launch { fetchFlagFilter(keepContent = true) }
                     flagFilterJob = job
                     job.join()
@@ -549,12 +632,16 @@ class CategoryViewModel @AssistedInject constructor(
         fun create(request: CategoryRequest): CategoryViewModel
     }
 
+    private data class ListKey(val subcat: Int?, val page: Int, val filter: CategoryFlagFilter)
+
+    private data class TopicListing(val key: ListKey?, val topics: TopicsUiState)
+
     private data class CoreCategoryState(
         val subcat: Int?,
         val page: Int,
         val categoryName: String?,
         val subcategories: SubcategoriesUiState,
-        val topics: TopicsUiState,
+        val listing: TopicListing,
     )
 
     private data class ContentTrigger(

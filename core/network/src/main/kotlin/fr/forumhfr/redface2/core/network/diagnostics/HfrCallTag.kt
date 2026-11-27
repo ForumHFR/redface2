@@ -2,6 +2,8 @@ package fr.forumhfr.redface2.core.network.diagnostics
 
 import fr.forumhfr.redface2.core.domain.diagnostics.EditorSubmissionTrace
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagFetchTrace
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrace
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCatalogueTrace
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallIntent
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrRequestQueued
@@ -15,6 +17,7 @@ class HfrCallTag(
     val catalogue: HfrCatalogueTrace? = null,
     val editorSubmission: EditorSubmissionTrace? = null,
     val intent: HfrCallIntent.Kind? = null,
+    val flagTrigger: FlagRefreshTrigger? = fetch?.trigger,
 ) {
     var executeNanos: Long? = null
         private set
@@ -23,7 +26,7 @@ class HfrCallTag(
 
     /** Each application Call owns its queue/execution times, while retaining the same collectors. */
     internal fun forCall(queuedNanos: Long = this.queuedNanos): HfrCallTag =
-        HfrCallTag(queuedNanos, fetch, catalogue, editorSubmission)
+        HfrCallTag(queuedNanos, fetch, catalogue, editorSubmission, intent, flagTrigger)
 }
 
 fun Request.withHfrDiagnostics(context: CoroutineContext): Request = newBuilder()
@@ -33,5 +36,6 @@ fun Request.withHfrDiagnostics(context: CoroutineContext): Request = newBuilder(
         catalogue = context[HfrCatalogueTrace],
         editorSubmission = context[EditorSubmissionTrace],
         intent = context[HfrCallIntent]?.kind,
+        flagTrigger = context[FlagFetchTrace]?.trigger ?: context[FlagRefreshTrace]?.trigger,
     ))
     .build()

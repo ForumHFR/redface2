@@ -20,6 +20,7 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import fr.forumhfr.redface2.core.network.stats.disabledStatsFactory
 import java.net.Proxy
 import java.net.UnknownHostException
 import java.util.concurrent.CountDownLatch
@@ -165,7 +166,7 @@ class OkHttpNetworkProbeEnvironmentTest {
     ): OkHttpNetworkProbeRunner {
         val client = OkHttpClient.Builder().proxy(Proxy.NO_PROXY).dns(dns).build()
         return OkHttpNetworkProbeRunner(client, "https://probe.invalid/".toHttpUrl(), Dispatchers.IO, traffic,
-            foreground, network)
+            foreground, network, disabledStatsFactory())
     }
 
     private class AndroidDefaultNetwork {

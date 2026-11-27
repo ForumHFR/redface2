@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.network.diagnostics.HfrEventListenerFactory
 import fr.forumhfr.redface2.core.network.diagnostics.HfrNetworkDiagnostics
+import fr.forumhfr.redface2.core.network.stats.disabledStatsFactory
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -45,6 +46,7 @@ class HfrFavoriteSmileyClientTest {
             }.build(),
             baseUrl = server.url("/"),
             ioDispatcher = Dispatchers.Unconfined,
+            stats = disabledStatsFactory(),
         )
     }
 
@@ -160,7 +162,7 @@ class HfrFavoriteSmileyClientTest {
                 }
             }.build()
         val sensitive = HfrFavoriteSmileyClient(
-            base, base, "https://forum.hardware.fr/".toHttpUrl(), Dispatchers.Unconfined,
+            base, base, "https://forum.hardware.fr/".toHttpUrl(), Dispatchers.Unconfined, disabledStatsFactory(),
         )
         assertSafeFailure(runCatching {
             sensitive.removeFavoriteSmileys(HASH_CHECK, CODEHEX, listOf("[:un]"), 0)

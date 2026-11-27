@@ -88,9 +88,14 @@ fun MessagesScreen(
     // #301 follow-up — bumped by the host after a successful new-conversation send : the created
     // thread id is unknown, so the list simply re-fetches and shows the conversation at the top.
     sentSignal: Long? = null,
+    isCurrentRoute: () -> Boolean = { true },
     viewModel: MessagesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val routeCurrent = isCurrentRoute()
+    LaunchedEffect(state.networkLoadGeneration, routeCurrent) {
+        viewModel.onInboxPresented(state.networkLoadGeneration, isCurrentRoute())
+    }
     LaunchedEffect(sentSignal) {
         if (sentSignal != null) {
             // Page 1 always : the created conversation lands at the top of the inbox, and a

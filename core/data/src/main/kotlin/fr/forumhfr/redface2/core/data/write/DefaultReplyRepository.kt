@@ -4,6 +4,9 @@ import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.recordSafely
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -34,6 +37,7 @@ import okhttp3.FormBody
  * user input. `hash_check` is never logged at any point.
  */
 @Singleton
+@Suppress("LongParameterList") // One recorder for successful submissions across write paths.
 class DefaultReplyRepository @Inject constructor(
     private val hfrClient: HfrClient,
     private val replyFormParser: ReplyFormParser,
@@ -41,6 +45,7 @@ class DefaultReplyRepository @Inject constructor(
     private val diagnostics: DiagnosticsLog,
     private val smileyUsageRecorder: SuccessfulSmileyUsageRecorder,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    private val networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
 ) : ReplyRepository {
 
     override suspend fun fetchReplyForm(context: ReplyContext): ReplyForm {
@@ -159,6 +164,7 @@ class DefaultReplyRepository @Inject constructor(
                 val responseHtml = hfrClient.submitReply(formBody)
                 val outcome = replySubmitResponseParser.parse(responseHtml)
                 if (outcome is ReplySubmitResult.Success) {
+                    networkActions.recordSafely(NetworkAction.WRITE)
                     smileyUsageRecorder.record(
                         smileyUsageOwner, formBody, options.smileyDisabled,
                     )

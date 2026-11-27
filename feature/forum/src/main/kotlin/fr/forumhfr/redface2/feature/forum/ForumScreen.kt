@@ -22,6 +22,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +53,7 @@ import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
 fun ForumScreen(
     onOpenCategory: (Category) -> Unit,
     topBarActions: @Composable (() -> Unit)? = null,
+    isCurrentRoute: () -> Boolean = { true },
 ) {
     val viewModel: ForumViewModel = hiltViewModel()
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -95,11 +97,17 @@ fun ForumScreen(
                         onRetry = viewModel::refresh,
                     )
 
-                    is ForumUiState.Content -> ForumContent(
-                        categories = current.categories,
-                        onOpenCategory = onOpenCategory,
-                        onRefresh = viewModel::refresh,
-                    )
+                    is ForumUiState.Content -> {
+                        val routeCurrent = isCurrentRoute()
+                        LaunchedEffect(viewModel, current.listGeneration, routeCurrent) {
+                            viewModel.onCategoriesPresented(current.listGeneration, isCurrentRoute())
+                        }
+                        ForumContent(
+                            categories = current.categories,
+                            onOpenCategory = onOpenCategory,
+                            onRefresh = viewModel::refresh,
+                        )
+                    }
                 }
             }
         }

@@ -27,6 +27,10 @@ import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
 import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteTopic
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.preferences.matches
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.NetworkTrigger
+import fr.forumhfr.redface2.core.domain.stats.recordSafely
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
@@ -90,6 +94,7 @@ class FlagsViewModel @Inject constructor(
     // screen right after confirming would abort it; [awaitDetached] re-parents it here. Every read
     // and every preference write stays as it was.
     @param:ApplicationScope private val externalScope: CoroutineScope,
+    private val networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
     private val refreshDiagnostics: FlagRefreshDiagnostics,
 ) : ViewModel() {
 
@@ -152,7 +157,7 @@ class FlagsViewModel @Inject constructor(
     private var refreshGeneration = 0L
     private var activeRefreshGeneration: Long? = null
     private var refreshingSessionGeneration: Long? = null
-    private var deferredLandingType: FlagType? = null
+    private var deferredLanding: DeferredLanding? = null
     private var diagnosticLandingTab: FlagTab? = null
     private val subcategoryRefreshRequestedCats: MutableSet<Int> = mutableSetOf()
 
@@ -921,11 +926,13 @@ class FlagsViewModel @Inject constructor(
     fun refresh() {
         val selected = _selectedTab.value
         val type = selected.flagType
-        if (type == null) {
-            if (selected == FlagTab.Super) requestManualRefresh(SUPER_FAVORITE_BACKING_TYPES, selected)
-            return
+        val types = when {
+            type != null -> listOf(type)
+            selected == FlagTab.Super -> SUPER_FAVORITE_BACKING_TYPES
+            else -> return
         }
-        requestManualRefresh(listOf(type), selected)
+        networkActions.recordSafely(NetworkAction.FLAG_PULL)
+        requestManualRefresh(types, selected)
     }
 
     fun consumeRefreshWarning(warning: FlagsRefreshWarning) {
@@ -985,11 +992,12 @@ class FlagsViewModel @Inject constructor(
         flagOpenedGenerationConsumed = flagOpenedGeneration
         // #743 — a pull on the tab whose landing is waiting behind an in-flight refresh IS that
         // landing's fetch: drop the replay so it does not double the fan-out right after the pull.
-        if (deferredLandingType?.let { it in types } == true) deferredLandingType = null
+        if (deferredLanding?.type in types) discardDeferredLanding()
         if (activeRefreshGeneration != null) {
+            val deferredTypes = types.filterNot { it in refreshingCoveredTypes }
             refreshDiagnostics.ignored(
                 FlagRefreshTrigger.PULL, types, throttled = false,
-                deferredTypes = types.filterNot { it in refreshingCoveredTypes },
+                deferredTypes = deferredTypes.filterNot { it in pendingManualRefreshTypes },
             )
             // Join covered types to this view too, including a type that already finished inside
             // the current batch. Its result belongs to the request without another fetch.
@@ -997,7 +1005,6 @@ class FlagsViewModel @Inject constructor(
                 if (type in types) tabs + warningTab else tabs
             }
             // Only uncovered types need a queued fetch; repeated pulls keep all requesting views.
-            val deferredTypes = types.filterNot { it in refreshingCoveredTypes }
             val queuedAt = System.nanoTime()
             deferredTypes.forEach { pendingManualDiagnosticStarts.putIfAbsent(it, queuedAt) }
             deferredTypes.forEach { type ->
@@ -1058,24 +1065,22 @@ class FlagsViewModel @Inject constructor(
      * - the user is authenticated (an anonymous landing has no flags to refresh),
      * - the selected tab has a real [FlagType] (Super/DT placeholders have no backend),
      * - no refresh is already in flight — a landing on ANOTHER tab that meets one is not dropped
-     *   but replayed once it settles (#743, cf. [deferredLandingType]),
+     *   but replayed once it settles (#743, cf. [deferredLanding]),
      * - the last auto-refresh OF THAT TAB'S TYPE is older than [AUTO_REFRESH_THROTTLE] (one window
      *   per type, #743) — the per-tab REST fan-out is ~one GET per public category, so rapid
      *   back-and-forth between a topic and the list must not multiply it. A manual pull-to-refresh
      *   is never throttled and does not arm the throttle (it goes straight through [refresh]).
      */
-    fun maybeAutoRefresh(trigger: FlagRefreshTrigger = FlagRefreshTrigger.LAUNCH) {
+    fun maybeAutoRefresh(trigger: FlagRefreshTrigger = FlagRefreshTrigger.LAUNCH) =
+        maybeAutoRefresh(trigger, replay = null)
+
+    private fun maybeAutoRefresh(trigger: FlagRefreshTrigger, replay: DeferredLanding?) {
         val startedNanos = System.nanoTime()
         // Snapshot the tab at CALL time (the landing being refreshed) — re-reading it after the
         // suspension points below could refresh a different tab than the one that landed, or
         // no-op on a placeholder while still arming the throttle (Codex review on PR #421).
         val type = _selectedTab.value.flagType ?: return
-        val diagnosticTrigger = when {
-            flagOpenedGeneration > flagOpenedGenerationConsumed -> FlagRefreshTrigger.RETURN_FROM_TOPIC
-            trigger == FlagRefreshTrigger.RESUME -> trigger
-            diagnosticLandingTab != null -> FlagRefreshTrigger.TAB
-            else -> trigger
-        }
+        val diagnosticTrigger = replay?.trigger ?: diagnosticTriggerFor(trigger)
         diagnosticLandingTab = _selectedTab.value
         if (deferLandingIfRefreshing(type, diagnosticTrigger)) return
         // Snapshot at CALL time (same rationale as the tab snapshot above): a read armed AFTER
@@ -1084,8 +1089,12 @@ class FlagsViewModel @Inject constructor(
         // cannot have captured yet, losing the bypass for the actual return (Codex review).
         val openedGenerationAtCall = flagOpenedGeneration
         viewModelScope.launch {
-            if (!userPreferencesRepository.observeFlagsAutoRefresh().first()) return@launch
-            if (authRepository.observeAuthState().first() !is AuthState.Authenticated) return@launch
+            if (!userPreferencesRepository.observeFlagsAutoRefresh().first() ||
+                authRepository.observeAuthState().first() !is AuthState.Authenticated
+            ) {
+                if (replay != null) recordDiscardedLanding(replay)
+                return@launch
+            }
             val now = clock.instant()
             // #743 — this tab's OWN window: another tab's recent refresh never throttles this landing.
             val last = lastAutoRefreshAt[type]
@@ -1119,11 +1128,18 @@ class FlagsViewModel @Inject constructor(
         }
     }
 
+    private fun diagnosticTriggerFor(trigger: FlagRefreshTrigger): FlagRefreshTrigger = when {
+        flagOpenedGeneration > flagOpenedGenerationConsumed -> FlagRefreshTrigger.RETURN_FROM_TOPIC
+        trigger == FlagRefreshTrigger.RESUME -> trigger
+        diagnosticLandingTab != null -> FlagRefreshTrigger.TAB
+        else -> trigger
+    }
+
     /**
      * #743 — in-flight guard shared by the two [maybeAutoRefresh] checkpoints. `true` when a refresh
      * is running (the landing must not start a concurrent fan-out); the landing is then remembered
      * for replay in [endRefresh] if it targets an uncovered type, and cleared otherwise (latest
-     * landing wins, cf. [deferredLandingType]).
+     * landing wins, cf. [deferredLanding]).
      */
     private fun deferLandingIfRefreshing(type: FlagType, trigger: FlagRefreshTrigger): Boolean {
         if (!_isRefreshing.value) return false
@@ -1131,8 +1147,20 @@ class FlagsViewModel @Inject constructor(
             trigger, listOf(type), throttled = false,
             deferredTypes = listOf(type).filterNot { it in refreshingCoveredTypes },
         )
-        deferredLandingType = type.takeIf { it !in refreshingCoveredTypes }
+        discardDeferredLanding()
+        deferredLanding = DeferredLanding(type, trigger).takeIf { type !in refreshingCoveredTypes }
         return true
+    }
+
+    private data class DeferredLanding(val type: FlagType, val trigger: FlagRefreshTrigger)
+
+    private fun discardDeferredLanding() {
+        deferredLanding?.let(::recordDiscardedLanding)
+        deferredLanding = null
+    }
+
+    private fun recordDiscardedLanding(landing: DeferredLanding) {
+        networkActions.recordSafely(NetworkAction.FLAG_REFRESH_IGNORED, NetworkTrigger.fromFlags(landing.trigger))
     }
 
     /** Raises the single loading cue ([isRefreshing]) for a refresh covering [coveredTypes]. */
@@ -1190,8 +1218,7 @@ class FlagsViewModel @Inject constructor(
                 types = pendingManualRefreshTypes.toList()
                 batchStartedNanos = types.minOf { pendingManualDiagnosticStarts.remove(it) ?: System.nanoTime() }
                 pendingManualRefreshTypes.clear()
-                val landing = deferredLandingType
-                if (landing != null && landing in types) deferredLandingType = null
+                if (deferredLanding?.type in types) discardDeferredLanding()
                 val batchWarningTabs = types.associateWith { requireNotNull(pendingManualWarningTabs.remove(it)) }
                 generation = beginRefresh(
                     type = types.first(), coveredTypes = types.toSet(), warningTabs = batchWarningTabs,
@@ -1276,9 +1303,13 @@ class FlagsViewModel @Inject constructor(
         refreshingCoveredTypes = emptySet()
         refreshingWarningTabs = emptyMap()
         _isRefreshing.value = false
-        val deferred = deferredLandingType ?: return
-        deferredLandingType = null
-        if (deferred == _selectedTab.value.flagType) maybeAutoRefresh()
+        val deferred = deferredLanding ?: return
+        deferredLanding = null
+        if (deferred.type == _selectedTab.value.flagType) {
+            maybeAutoRefresh(FlagRefreshTrigger.LAUNCH, replay = deferred)
+        } else {
+            recordDiscardedLanding(deferred)
+        }
     }
 
     /**

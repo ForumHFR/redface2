@@ -12,9 +12,12 @@ import coil3.svg.SvgDecoder
 import dagger.hilt.android.HiltAndroidApp
 import fr.forumhfr.redface2.core.data.cache.CacheInvalidator
 import fr.forumhfr.redface2.core.data.editor.DraftRetentionPurger
+import fr.forumhfr.redface2.core.data.stats.NetworkStatsWriter
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
+import fr.forumhfr.redface2.core.domain.diagnostics.AppForegroundDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.EditorSubmissionTrace
+import fr.forumhfr.redface2.core.network.diagnostics.AndroidNetworkDiagnosticsContextProvider
 import fr.forumhfr.redface2.core.network.qualifiers.ImageClient
 import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
@@ -51,6 +54,11 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
 
     @Inject lateinit var draftRetentionPurger: DraftRetentionPurger
 
+    @Inject lateinit var networkStats: NetworkStatsWriter
+    @Inject lateinit var networkContext: AndroidNetworkDiagnosticsContextProvider
+
+    @Inject lateinit var foregroundDiagnostics: AppForegroundDiagnostics
+
     @Inject
     @ImageClient
     lateinit var imageClient: OkHttpClient
@@ -74,8 +82,10 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         // The launcher icon restart activity has its own process and shares this directory.
-        val crashReport = if (getProcessName() == packageName) installCrashHandler() else null
+        val mainProcess = getProcessName() == packageName
+        val crashReport = if (mainProcess) installCrashHandler() else null
         super.onCreate()
+        if (mainProcess) startNetworkStats()
         if (crashReport != null) {
             // "Vider" returns at once; the screen confirms only after this deletion reports success.
             diagnostics.registerCrashReportClear { onResult ->
@@ -100,6 +110,12 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
         // One-shot retention sweep dropping editor drafts older than the TTL (#405). Independent
         // of the auth state, so it runs alongside the invalidator rather than inside it.
         draftRetentionPurger.purge()
+    }
+
+    private fun startNetworkStats() {
+        applicationScope.launch(Dispatchers.IO) { networkContext.startNetworkKindTracking() }
+        networkStats.start()
+        foregroundDiagnostics.observe(networkStats::onVisibilityChanged)
     }
 
     private fun installCrashHandler(): LastCrashReport {

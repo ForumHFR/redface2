@@ -1,0 +1,272 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "2566bf01211a86353b3b08abc97d8cd5",
+    "entities": [
+      {
+        "tableName": "network_requests",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`status` TEXT NOT NULL, `requests` INTEGER NOT NULL, `bodyBytesIn` INTEGER NOT NULL, `bodyBytesOut` INTEGER NOT NULL, `incompleteBodies` INTEGER NOT NULL, `hourUtc` INTEGER NOT NULL, `versionCode` INTEGER NOT NULL, `target` TEXT NOT NULL, `role` TEXT NOT NULL, `visibility` TEXT NOT NULL, `trigger` TEXT NOT NULL, `network` TEXT NOT NULL, PRIMARY KEY(`hourUtc`, `versionCode`, `target`, `role`, `visibility`, `trigger`, `network`, `status`))",
+        "fields": [
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "requests",
+            "columnName": "requests",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bodyBytesIn",
+            "columnName": "bodyBytesIn",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bodyBytesOut",
+            "columnName": "bodyBytesOut",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "incompleteBodies",
+            "columnName": "incompleteBodies",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dimensions.hourUtc",
+            "columnName": "hourUtc",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dimensions.versionCode",
+            "columnName": "versionCode",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dimensions.target",
+            "columnName": "target",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dimensions.role",
+            "columnName": "role",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dimensions.visibility",
+            "columnName": "visibility",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dimensions.trigger",
+            "columnName": "trigger",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dimensions.network",
+            "columnName": "network",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "hourUtc",
+            "versionCode",
+            "target",
+            "role",
+            "visibility",
+            "trigger",
+            "network",
+            "status"
+          ]
+        }
+      },
+      {
+        "tableName": "network_no_requests",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`reason` TEXT NOT NULL, `count` INTEGER NOT NULL, `hourUtc` INTEGER NOT NULL, `versionCode` INTEGER NOT NULL, `target` TEXT NOT NULL, `role` TEXT NOT NULL, `visibility` TEXT NOT NULL, `trigger` TEXT NOT NULL, `network` TEXT NOT NULL, PRIMARY KEY(`hourUtc`, `versionCode`, `target`, `role`, `visibility`, `trigger`, `network`, `reason`))",
+        "fields": [
+          {
+            "fieldPath": "reason",
+            "columnName": "reason",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "count",
+            "columnName": "count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dimensions.hourUtc",
+            "columnName": "hourUtc",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dimensions.versionCode",
+            "columnName": "versionCode",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dimensions.target",
+            "columnName": "target",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dimensions.role",
+            "columnName": "role",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dimensions.visibility",
+            "columnName": "visibility",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dimensions.trigger",
+            "columnName": "trigger",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dimensions.network",
+            "columnName": "network",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "hourUtc",
+            "versionCode",
+            "target",
+            "role",
+            "visibility",
+            "trigger",
+            "network",
+            "reason"
+          ]
+        }
+      },
+      {
+        "tableName": "network_peaks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`hourUtc` INTEGER NOT NULL, `versionCode` INTEGER NOT NULL, `peakGroup` TEXT NOT NULL, `perSecond` INTEGER NOT NULL, `perMinute` INTEGER NOT NULL, `inFlight` INTEGER NOT NULL, PRIMARY KEY(`hourUtc`, `versionCode`, `peakGroup`))",
+        "fields": [
+          {
+            "fieldPath": "hourUtc",
+            "columnName": "hourUtc",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "versionCode",
+            "columnName": "versionCode",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "peakGroup",
+            "columnName": "peakGroup",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "perSecond",
+            "columnName": "perSecond",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "perMinute",
+            "columnName": "perMinute",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "inFlight",
+            "columnName": "inFlight",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "hourUtc",
+            "versionCode",
+            "peakGroup"
+          ]
+        }
+      },
+      {
+        "tableName": "network_actions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`hourUtc` INTEGER NOT NULL, `versionCode` INTEGER NOT NULL, `action` TEXT NOT NULL, `trigger` TEXT NOT NULL, `count` INTEGER NOT NULL, PRIMARY KEY(`hourUtc`, `versionCode`, `action`, `trigger`))",
+        "fields": [
+          {
+            "fieldPath": "hourUtc",
+            "columnName": "hourUtc",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "versionCode",
+            "columnName": "versionCode",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "action",
+            "columnName": "action",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trigger",
+            "columnName": "trigger",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "count",
+            "columnName": "count",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "hourUtc",
+            "versionCode",
+            "action",
+            "trigger"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '2566bf01211a86353b3b08abc97d8cd5')"
+    ]
+  }
+}

@@ -4,12 +4,14 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
-import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
-import fr.forumhfr.redface2.core.network.HfrConstants
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.stats.NetworkRole
 import fr.forumhfr.redface2.core.network.EditorWriteOwnerInterceptor
+import fr.forumhfr.redface2.core.network.HfrConstants
 import fr.forumhfr.redface2.core.network.diagnostics.HfrEventListenerFactory
 import fr.forumhfr.redface2.core.network.diagnostics.HfrNetworkDiagnostics
+import fr.forumhfr.redface2.core.network.diagnostics.NetworkStatsListenerFactory
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
@@ -17,6 +19,7 @@ import fr.forumhfr.redface2.core.network.qualifiers.ImageClient
 import fr.forumhfr.redface2.core.network.qualifiers.MutationClient
 import fr.forumhfr.redface2.core.network.qualifiers.UploadClient
 import java.time.Duration
+import javax.inject.Inject
 import javax.inject.Singleton
 import okhttp3.CookieJar
 import okhttp3.EventListener
@@ -34,12 +37,17 @@ object NetworkModule {
 
     @Provides
     @Singleton
+    fun provideHfrEventListenerFactory(diagnostics: HfrNetworkDiagnostics): HfrEventListenerFactory =
+        HfrEventListenerFactory(diagnostics)
+
+    @Provides
+    @Singleton
     fun provideBaseClient(
         userPreferencesRepository: UserPreferencesRepository,
-        diagnostics: HfrNetworkDiagnostics,
+        listeners: NetworkClientListeners,
     ): OkHttpClient =
         OkHttpClient.Builder()
-        .eventListenerFactory(HfrEventListenerFactory(diagnostics))
+        .eventListenerFactory(listeners.hfr(HfrClientRole.ANON))
         .connectTimeout(HfrConstants.ConnectTimeout)
         .readTimeout(HfrConstants.ReadTimeout)
         .writeTimeout(HfrConstants.WriteTimeout)
@@ -54,8 +62,9 @@ object NetworkModule {
     fun provideAuthenticatedClient(
         baseClient: OkHttpClient,
         cookieJar: CookieJar,
+        listeners: NetworkClientListeners,
     ): OkHttpClient = baseClient.newBuilder()
-        .diagnosticsRole(baseClient, HfrClientRole.AUTH)
+        .eventListenerFactory(listeners.hfr(HfrClientRole.AUTH))
         .cookieJar(cookieJar)
         .followSslRedirects(false)
         .build()
@@ -66,8 +75,9 @@ object NetworkModule {
     fun provideMutationClient(
         baseClient: OkHttpClient,
         cookieJar: CookieJar,
+        listeners: NetworkClientListeners,
     ): OkHttpClient = baseClient.newBuilder()
-        .diagnosticsRole(baseClient, HfrClientRole.MUTATION)
+        .eventListenerFactory(listeners.hfr(HfrClientRole.MUTATION))
         .cookieJar(cookieJar)
         .addNetworkInterceptor(EditorWriteOwnerInterceptor())
         .followSslRedirects(false)
@@ -77,8 +87,11 @@ object NetworkModule {
     @Provides
     @Singleton
     @AnonymousClient
-    fun provideAnonymousClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
-        .diagnosticsRole(baseClient, HfrClientRole.ANON)
+    fun provideAnonymousClient(
+        baseClient: OkHttpClient,
+        listeners: NetworkClientListeners,
+    ): OkHttpClient = baseClient.newBuilder()
+        .eventListenerFactory(listeners.hfr(HfrClientRole.ANON))
         .cookieJar(CookieJar.NO_COOKIES)
         .followRedirects(true)
         .followSslRedirects(false)
@@ -91,13 +104,11 @@ object NetworkModule {
     @Provides
     @Singleton
     @ImageClient
-    fun provideImageClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
-        .eventListener(EventListener.NONE)
-        .apply {
-            (baseClient.eventListenerFactory as? HfrEventListenerFactory)?.let {
-                eventListenerFactory(it.forImages())
-            }
-        }
+    fun provideImageClient(
+        baseClient: OkHttpClient,
+        listeners: NetworkClientListeners,
+    ): OkHttpClient = baseClient.newBuilder()
+        .eventListenerFactory(listeners.images())
         .cookieJar(CookieJar.NO_COOKIES)
         .followRedirects(true)
         .followSslRedirects(true)
@@ -115,8 +126,11 @@ object NetworkModule {
     @Provides
     @Singleton
     @UploadClient
-    fun provideUploadClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
-        .diagnosticsRole(baseClient, HfrClientRole.UPLOAD)
+    fun provideUploadClient(
+        baseClient: OkHttpClient,
+        listeners: NetworkClientListeners,
+    ): OkHttpClient = baseClient.newBuilder()
+        .eventListenerFactory(listeners.hfr(HfrClientRole.UPLOAD))
         .cookieJar(CookieJar.NO_COOKIES)
         .followSslRedirects(false)
         .retryOnConnectionFailure(false)
@@ -124,15 +138,23 @@ object NetworkModule {
         .callTimeout(Duration.ofSeconds(UPLOAD_CALL_TIMEOUT_SECONDS))
         .build()
 
-    private fun OkHttpClient.Builder.diagnosticsRole(
-        baseClient: OkHttpClient,
-        role: HfrClientRole,
-    ): OkHttpClient.Builder = apply {
-        (baseClient.eventListenerFactory as? HfrEventListenerFactory)?.let {
-            eventListenerFactory(it.withRole(role))
-        }
-    }
-
     private const val UPLOAD_WRITE_TIMEOUT_SECONDS = 60L
     private const val UPLOAD_CALL_TIMEOUT_SECONDS = 90L
+}
+
+class NetworkClientListeners @Inject constructor(
+    private val diagnostics: HfrEventListenerFactory,
+    private val stats: NetworkStatsListenerFactory,
+) {
+    fun hfr(role: HfrClientRole): EventListener.Factory = stats.forRole(
+        when (role) {
+            HfrClientRole.AUTH -> NetworkRole.AUTH
+            HfrClientRole.ANON -> NetworkRole.ANON
+            HfrClientRole.MUTATION -> NetworkRole.MUTATION
+            HfrClientRole.UPLOAD -> NetworkRole.UPLOAD
+        },
+        diagnostics.withRole(role),
+    )
+
+    fun images(): EventListener.Factory = stats.forRole(NetworkRole.IMAGE, diagnostics.forImages())
 }

@@ -8,10 +8,14 @@ import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageReadPositionSeeder
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.recordSafely
 import fr.forumhfr.redface2.core.model.AuthState
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,6 +37,7 @@ class MessagesViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val mpStorageReadPositionSeeder: MpStorageReadPositionSeeder,
+    private val networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(MessagesUiState())
@@ -43,6 +48,7 @@ class MessagesViewModel @Inject constructor(
     // newer page with its stale result.
     private var loadJob: Job? = null
     private var authenticatedPseudo: String? = null
+    private var presentedLoadGeneration = 0
 
     // One-shot guard for the MPStorage DT seed (#6, ADR-014). Reset whenever the active pseudo
     // changes so a re-login / account switch re-seeds for the new account, never carries the
@@ -110,9 +116,21 @@ class MessagesViewModel @Inject constructor(
         load(page = 1, refreshing = _state.value.page == 1)
     }
 
+    internal fun onInboxPresented(generation: Int, isCurrentRoute: Boolean) {
+        if (!isCurrentRoute) return
+        val current = _state.value
+        if (current.mode is MessagesUiState.Mode.Content &&
+            generation == current.networkLoadGeneration && generation != presentedLoadGeneration
+        ) {
+            presentedLoadGeneration = generation
+            networkActions.recordSafely(NetworkAction.LIST)
+        }
+    }
+
     private fun clearPrivateState() {
         authenticatedPseudo = null
         loadJob?.cancel()
+        presentedLoadGeneration = 0
         _state.value = MessagesUiState(mode = MessagesUiState.Mode.RequiresLogin)
     }
 
@@ -132,6 +150,7 @@ class MessagesViewModel @Inject constructor(
             }
             try {
                 val result = repository.getPrivateMessageList(page = page)
+                ensureActive()
                 _state.update {
                     it.copy(
                         mode = MessagesUiState.Mode.Content(result.items),

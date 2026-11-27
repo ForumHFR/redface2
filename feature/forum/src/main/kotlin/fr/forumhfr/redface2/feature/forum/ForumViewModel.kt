@@ -6,6 +6,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.recordSafely
 import fr.forumhfr.redface2.core.model.Category
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,13 +30,17 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class ForumViewModel @Inject constructor(
     private val forumRepository: ForumRepository,
+    private val networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
 ) : ViewModel() {
 
     private val _isRefreshing: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing
 
-    val uiState: StateFlow<ForumUiState> = forumRepository.observeCategories()
-        .map { it.toUiState() }
+    private var listGeneration = 0
+    private var presentedListGeneration = 0
+
+    val uiState: StateFlow<ForumUiState> = forumRepository.observeCategoryUpdates()
+        .map { it.result.toUiState(it.isRefresh) }
         .keepContentDuringRefresh(
             isLoading = { it is ForumUiState.Loading },
             isContent = { it is ForumUiState.Content },
@@ -43,6 +50,15 @@ class ForumViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
             initialValue = ForumUiState.Loading,
         )
+
+    internal fun onCategoriesPresented(generation: Int, isCurrentRoute: Boolean) {
+        if (!isCurrentRoute) return
+        val current = uiState.value as? ForumUiState.Content ?: return
+        if (generation == current.listGeneration && generation != presentedListGeneration) {
+            presentedListGeneration = generation
+            networkActions.recordSafely(NetworkAction.LIST)
+        }
+    }
 
     fun refresh() {
         viewModelScope.launch {
@@ -55,10 +71,15 @@ class ForumViewModel @Inject constructor(
         }
     }
 
-    private fun ForumResult<List<Category>>.toUiState(): ForumUiState =
+    private fun ForumResult<List<Category>>.toUiState(isRefresh: Boolean): ForumUiState =
         when (this) {
             ForumResult.Loading -> ForumUiState.Loading
-            is ForumResult.Success -> ForumUiState.Content(value)
+            is ForumResult.Success -> {
+                // Cache and revalidation belong to the same presentation. An explicit refresh
+                // can be a new presentation even when the categories haven't changed.
+                if (listGeneration == 0 || isRefresh) listGeneration++
+                ForumUiState.Content(value, listGeneration)
+            }
             // #324 — kind derives from the exception TYPE so the screen can tell an HFR
             // 5xx outage from a local network cut.
             is ForumResult.Failure -> ForumUiState.Error(cause.message, classifyHfrError(cause))

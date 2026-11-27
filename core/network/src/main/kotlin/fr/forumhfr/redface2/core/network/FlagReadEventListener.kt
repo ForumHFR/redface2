@@ -130,4 +130,10 @@ internal class FlagReadEventListener(
     override fun cacheConditionalHit(call: Call, cachedResponse: Response) {
         delegate.cacheConditionalHit(call, cachedResponse)
     }
+    override fun retryDecision(call: Call, exception: IOException, retry: Boolean) {
+        delegate.retryDecision(call, exception, retry)
+    }
+    override fun followUpDecision(call: Call, networkResponse: Response, nextRequest: Request?) {
+        delegate.followUpDecision(call, networkResponse, nextRequest)
+    }
 }

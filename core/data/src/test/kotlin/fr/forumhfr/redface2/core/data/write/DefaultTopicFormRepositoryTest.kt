@@ -3,6 +3,8 @@ package fr.forumhfr.redface2.core.data.write
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageFailure
 import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageMutationResult
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
 import fr.forumhfr.redface2.core.model.write.MissingFirstPostSubcategoryException
 import fr.forumhfr.redface2.core.model.write.NewTopicContext
@@ -47,6 +49,7 @@ class DefaultTopicFormRepositoryTest {
     private lateinit var diagnostics: DiagnosticsLog
     private lateinit var repository: DefaultTopicFormRepository
     private lateinit var usage: SmileyUsageRecorderFixture
+    private val actions = mutableListOf<NetworkAction>()
 
     @Before
     fun setUp() {
@@ -68,6 +71,7 @@ class DefaultTopicFormRepositoryTest {
             diagnostics = diagnostics,
             smileyUsageRecorder = usage.recorder,
             ioDispatcher = Dispatchers.Unconfined,
+            networkActions = NetworkActionRecorder { action, _, _ -> actions += action },
         )
     }
 
@@ -458,6 +462,22 @@ class DefaultTopicFormRepositoryTest {
         assertEquals(null, success.newNumreponse)
         assertEquals(23, success.targetCat)
         assertEquals(562, success.targetSubcat)
+        assertEquals(listOf(NetworkAction.WRITE), actions)
+    }
+
+    @Test
+    fun `HFR refusal after the new-topic POST records no write`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("write_create_topic_form_android_cat.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_invalid_token_error.html")))
+        val context = NewTopicContext(cat = 23, entrySubcat = 550)
+        val form = repository.fetchNewTopicForm(context)
+
+        val result = repository.submitNewTopic(context, form, "Sujet", "Contenu", 562)
+
+        assertTrue(result is NewTopicSubmitResult.Failure)
+        assertEquals("GET", server.takeRequest().method)
+        assertEquals("POST", server.takeRequest().method)
+        assertTrue(actions.isEmpty())
     }
 
     @Test

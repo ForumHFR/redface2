@@ -41,6 +41,8 @@ import fr.forumhfr.redface2.core.domain.topic.NoTopicSearchResultsException
 import fr.forumhfr.redface2.core.domain.topic.TopicPageEmission
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicSearchRepository
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
 import fr.forumhfr.redface2.core.model.TopicSearchForm
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import fr.forumhfr.redface2.core.model.TopicSearchRequest
@@ -1139,14 +1141,18 @@ class TopicViewModelTest {
         val cached = fakeTopic(page = 1, totalPages = 3, title = "cached")
         val fresh = fakeTopic(page = 1, totalPages = 5, title = "fresh")
         val controlled = MutableSharedFlow<TopicPageEmission>(replay = 0)
+        val repository = FakeStreamingEmissionTopicRepository(controlled)
+        val actions = mutableListOf<NetworkAction>()
         val viewModel = topicViewModel(
             request = topicRequest(page = 1),
-            topicRepository = FakeStreamingEmissionTopicRepository(controlled),
+            topicRepository = repository,
+            networkActions = NetworkActionRecorder { action, _, _ -> actions += action },
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
         )
 
         viewModel.state.test {
             assertMode<TopicUiState.Mode.Loading>(awaitItem())
+            assertTrue(actions.isEmpty())
 
             controlled.emit(TopicPageEmission(cached, provisional = true))
             val provisional = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
@@ -1160,6 +1166,48 @@ class TopicViewModelTest {
 
             cancelAndIgnoreRemainingEvents()
         }
+        advanceUntilIdle()
+        assertEquals(listOf(2), repository.prefetches)
+        assertEquals(listOf(NetworkAction.TOPIC_PAGE), actions)
+        viewModel.switchToPage(2)
+        assertEquals(listOf(NetworkAction.TOPIC_PAGE), actions)
+        controlled.emit(TopicPageEmission(fakeTopic(page = 2, totalPages = 5), provisional = false))
+        assertEquals(listOf(NetworkAction.TOPIC_PAGE, NetworkAction.TOPIC_PAGE), actions)
+    }
+
+    @Test
+    fun `failed and superseded topic loads count only the page that reaches the screen`() = runTest {
+        var attempts = 0
+        var retryCancelled = false
+        val repository = FakeStreamingEmissionTopicRepository(flow {
+            when (++attempts) {
+                1 -> throw IOException("offline")
+                2 -> try {
+                    kotlinx.coroutines.awaitCancellation()
+                } finally {
+                    retryCancelled = true
+                }
+                else -> emit(TopicPageEmission(fakeTopic(page = 2, totalPages = 5), provisional = false))
+            }
+        })
+        val actions = mutableListOf<NetworkAction>()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            networkActions = NetworkActionRecorder { action, _, _ -> actions += action },
+        )
+        assertMode<TopicUiState.Mode.Error>(viewModel.state.value)
+        assertTrue(actions.isEmpty())
+
+        viewModel.send(TopicIntent.Retry)
+        assertMode<TopicUiState.Mode.Loading>(viewModel.state.value)
+        assertTrue(actions.isEmpty())
+        viewModel.switchToPage(2)
+
+        assertTrue(retryCancelled)
+        assertEquals(2, assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.page)
+        assertEquals(listOf(NetworkAction.TOPIC_PAGE), actions)
     }
 
     @Test
@@ -7293,6 +7341,7 @@ class TopicViewModelTest {
         // #895 étape 4 — a fresh handle per test ; the process-restore tests pass the SAME handle
         // to a second ViewModel to simulate death + recreation.
         savedStateHandle: SavedStateHandle = SavedStateHandle(),
+        networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
     ): TopicViewModel = TopicViewModel(
         request = request,
         savedStateHandle = savedStateHandle,
@@ -7309,6 +7358,7 @@ class TopicViewModelTest {
         flagRepository = flagRepository,
         draftStore = draftStore,
         externalScope = externalScope,
+        networkActions = networkActions,
     )
 
     /**
@@ -9393,6 +9443,7 @@ private class FakeStreamingEmissionTopicRepository(
     private val refreshTopicsToReturn: List<Topic> = emptyList(),
 ) : TopicRepository {
     private val refreshQueue = ArrayDeque(refreshTopicsToReturn)
+    val prefetches = mutableListOf<Int>()
     val refreshCalls: MutableList<Triple<Int, Int, Int>> = mutableListOf()
     var refreshHook: (suspend (cat: Int, post: Int, page: Int) -> Unit)? = null
 
@@ -9409,7 +9460,7 @@ private class FakeStreamingEmissionTopicRepository(
         Result.success(emptyList())
 
     override suspend fun prefetch(cat: Int, post: Int, page: Int) {
-        // no-op
+        prefetches += page
     }
 }
 

@@ -4,6 +4,9 @@ import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.recordSafely
 import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -66,6 +69,7 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
     private val diagnostics: DiagnosticsLog,
     private val smileyUsageRecorder: SuccessfulSmileyUsageRecorder,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    private val networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
 ) : PrivateMessageWriteRepository {
 
     override suspend fun fetchReplyForm(
@@ -235,6 +239,7 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
                 val responseHtml = hfrClient.submitReply(formBody)
                 val outcome = replySubmitResponseParser.parse(responseHtml)
                 if (outcome is ReplySubmitResult.Success) {
+                    networkActions.recordSafely(NetworkAction.WRITE)
                     smileyUsageRecorder.record(
                         smileyUsageOwner, formBody, options.smileyDisabled,
                     )
@@ -358,6 +363,7 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
                 val responseHtml = hfrClient.submitReply(formBody)
                 val outcome = replySubmitResponseParser.parse(responseHtml)
                 if (outcome is ReplySubmitResult.Success) {
+                    networkActions.recordSafely(NetworkAction.WRITE)
                     smileyUsageRecorder.record(
                         smileyUsageOwner, formBody, options.smileyDisabled,
                     )

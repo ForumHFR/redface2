@@ -3,6 +3,10 @@ package fr.forumhfr.redface2.core.domain.diagnostics
 import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshPolicy
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshCategory
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.NetworkTrigger
+import fr.forumhfr.redface2.core.domain.stats.recordSafely
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.FlagType
 import java.util.concurrent.atomic.AtomicBoolean
@@ -31,6 +35,7 @@ class FlagRefreshDiagnostics @Inject constructor(
     private val foreground: AppForegroundDiagnostics = AppForegroundDiagnostics(log),
     private val clock: DiagnosticsClock = DiagnosticsClock(System::nanoTime),
     private val activity: HfrRefreshActivity = HfrRefreshActivity(),
+    private val networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
 ) {
     private val sequence = AtomicLong()
     @Volatile var policy = FlagsRefreshPolicy()
@@ -39,21 +44,26 @@ class FlagRefreshDiagnostics @Inject constructor(
     suspend fun <T> withRefresh(block: suspend () -> T): T = activity.withRefresh(block)
 
     /** An unowned fetch gets a source identity from the same sequence, without beginning a refresh. */
-    fun fetch(type: FlagType, refreshId: Long?): FlagFetchTrace =
-        FlagFetchTrace(refreshId ?: sequence.incrementAndGet(), type)
+    fun fetch(type: FlagType, refreshId: Long?, trigger: FlagRefreshTrigger? = null): FlagFetchTrace =
+        FlagFetchTrace(refreshId ?: sequence.incrementAndGet(), type, trigger)
 
     fun begin(
         trigger: FlagRefreshTrigger,
         types: List<FlagType>,
         startedNanos: Long = System.nanoTime(),
     ): FlagRefreshTrace {
+        networkActions.recordSafely(
+            NetworkAction.FLAG_REFRESH_ADMITTED, NetworkTrigger.fromFlags(trigger), types.size.toLong(),
+        )
         val environment = FlagRefreshEnvironment(foreground, networkContext, clock, activity.begin())
         val timing = foreground.snapshot()
         val network = runCatching { networkContext.snapshot() }.getOrElse { NetworkDiagnosticsContext() }
         val restrictions = runCatching { networkContext.restrictions() }
             .getOrElse { NetworkDiagnosticsRestrictions() }
         val contextLine = "${policy.diagnosticLine()} ${restrictions.line()} ${network.line()} ${timing.line()}"
-        val trace = FlagRefreshTrace(sequence.incrementAndGet(), types, log, startedNanos, contextLine, environment)
+        val trace = FlagRefreshTrace(
+            sequence.incrementAndGet(), trigger, types, log, startedNanos, contextLine, environment,
+        )
         log.record(DiagnosticsLog.Level.INFO, TAG,
             "refresh=${trace.id} trigger=${trigger.label} types=${types.joinToString { it.name }} " +
                 "begin ${environment.beginLine()} $contextLine")
@@ -66,6 +76,10 @@ class FlagRefreshDiagnostics @Inject constructor(
         throttled: Boolean,
         deferredTypes: List<FlagType> = emptyList(),
     ) {
+        networkActions.recordSafely(
+            NetworkAction.FLAG_REFRESH_IGNORED, NetworkTrigger.fromFlags(trigger),
+            (types.size - deferredTypes.size).toLong(),
+        )
         log.record(DiagnosticsLog.Level.INFO, TAG,
             "trigger=${trigger.label} types=${types.joinToString { it.name }} " +
                 "${policy.diagnosticLine()} ignored=${if (throttled) "throttle" else "reentrance"} " +
@@ -76,8 +90,11 @@ class FlagRefreshDiagnostics @Inject constructor(
 }
 
 /** A refresh owns its lifetime; detached fetches retain their own measurements for late joiners. */
-class FlagRefreshTrace internal constructor(
+class FlagRefreshTrace
+@Suppress("LongParameterList") // The trace carries its refresh origin through detached fetches.
+internal constructor(
     val id: Long,
+    val trigger: FlagRefreshTrigger,
     private val types: List<FlagType>,
     private val log: DiagnosticsLog,
     private val started: Long,
@@ -228,7 +245,11 @@ class FlagRefreshTrace internal constructor(
 }
 
 /** Only safe transport summaries and numeric counters are retained, for the fetch's lifetime. */
-class FlagFetchTrace(val refreshId: Long, val type: FlagType) : AbstractCoroutineContextElement(Key) {
+class FlagFetchTrace(
+    val refreshId: Long,
+    val type: FlagType,
+    val trigger: FlagRefreshTrigger? = null,
+) : AbstractCoroutineContextElement(Key) {
     private val calls = mutableListOf<HfrCallSummary>()
     private val catalogues = linkedSetOf<HfrCatalogueTrace>()
     private val stickySweeps = linkedSetOf<FlagFetchTrace>()

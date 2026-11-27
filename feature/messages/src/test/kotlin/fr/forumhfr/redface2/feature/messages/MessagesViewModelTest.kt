@@ -7,6 +7,8 @@ import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageReadPositionSeeder
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageSeedOutcome
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageListPage
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
@@ -16,7 +18,9 @@ import io.mockk.every
 import io.mockk.mockk
 import java.io.IOException
 import java.time.Instant
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,6 +65,58 @@ class MessagesViewModelTest {
         assertEquals(1, state.page)
         assertEquals(3, state.totalPages)
         assertTrue(state.canGoNext)
+    }
+
+    @Test
+    fun `only the inbox load that reaches content counts as a displayed list`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery { repository.getPrivateMessageList(page = 1) } coAnswers { awaitCancellation() }
+        coEvery { repository.getPrivateMessageList(page = 2) } throws IOException("offline")
+        coEvery { repository.getPrivateMessageList(page = 3) } returns PrivateMessageListPage(3, 3, emptyList())
+        val actions = mutableListOf<NetworkAction>()
+        val viewModel = viewModel(
+            repository,
+            networkActions = NetworkActionRecorder { action, _, _ -> actions += action },
+        )
+
+        assertTrue(actions.isEmpty())
+        viewModel.selectPage(2)
+        assertTrue(viewModel.state.value.mode is MessagesUiState.Mode.Error)
+        assertTrue(actions.isEmpty())
+        viewModel.selectPage(3)
+        assertTrue(viewModel.state.value.mode is MessagesUiState.Mode.Content)
+        viewModel.onInboxPresented(viewModel.state.value.networkLoadGeneration, isCurrentRoute = true)
+        assertEquals(listOf(NetworkAction.LIST), actions)
+    }
+
+    @Test
+    fun `a refresh completed behind a conversation only counts when the inbox is presented again`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        val initial = PrivateMessageListPage(1, 1, listOf(summary(10)))
+        val refreshed = PrivateMessageListPage(1, 1, listOf(summary(10), summary(20)))
+        val pendingRefresh = CompletableDeferred<PrivateMessageListPage>()
+        coEvery { repository.getPrivateMessageList(page = 1) } returns initial
+        val actions = mutableListOf<NetworkAction>()
+        val viewModel = viewModel(
+            repository,
+            networkActions = NetworkActionRecorder { action, _, _ -> actions += action },
+        )
+        val initialGeneration = viewModel.state.value.networkLoadGeneration
+        viewModel.onInboxPresented(initialGeneration, isCurrentRoute = true)
+
+        coEvery { repository.getPrivateMessageList(page = 1) } coAnswers { pendingRefresh.await() }
+        viewModel.refresh()
+        assertTrue(viewModel.state.value.isRefreshing)
+        pendingRefresh.complete(refreshed)
+        val state = viewModel.state.value
+        assertEquals(MessagesUiState.Mode.Content(refreshed.items), state.mode)
+        viewModel.onInboxPresented(state.networkLoadGeneration, isCurrentRoute = false)
+        assertEquals(listOf(NetworkAction.LIST), actions)
+        coVerify(exactly = 2) { repository.getPrivateMessageList(page = 1) }
+
+        viewModel.onInboxPresented(state.networkLoadGeneration, isCurrentRoute = true)
+        viewModel.onInboxPresented(state.networkLoadGeneration, isCurrentRoute = true)
+        assertEquals(listOf(NetworkAction.LIST, NetworkAction.LIST), actions)
     }
 
     @Test
@@ -308,11 +364,13 @@ class MessagesViewModelTest {
         authRepository: AuthRepository = FakeAuthRepository(),
         preferences: UserPreferencesRepository = fakePreferences(showDt = false),
         seeder: MpStorageReadPositionSeeder = fakeSeeder(),
+        networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
     ) = MessagesViewModel(
         repository = repository,
         authRepository = authRepository,
         userPreferencesRepository = preferences,
         mpStorageReadPositionSeeder = seeder,
+        networkActions = networkActions,
     )
 
     private fun fakePreferences(showDt: Boolean) = mockk<UserPreferencesRepository> {

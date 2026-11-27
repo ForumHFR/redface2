@@ -16,6 +16,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorWriteOwner
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
 import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import fr.forumhfr.redface2.core.network.di.NetworkModule
+import fr.forumhfr.redface2.core.network.stats.testClientListeners
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.util.concurrent.CountDownLatch
@@ -79,7 +80,10 @@ class HfrClientWriteTimeoutTest(private val path: HfrClientWriteReplayTest.Write
                     throw refusal
                 }
             }.build()
-        mutation = NetworkModule.provideMutationClient(base, cookies).newBuilder()
+        val production = NetworkModule.provideMutationClient(base, cookies, testClientListeners())
+        // The production factory replaces the base listener: keep the timeout witness beside it.
+        mutation = production.newBuilder()
+            .eventListenerFactory { call -> timeout + production.eventListenerFactory.create(call) }
             // Bound a broken setup; rearm to 50 ms only after the tested boundary has been reached.
             .callTimeout(5, TimeUnit.SECONDS).build()
         client = HfrClient(mutation, mutation, mutation, server.url("/"), Dispatchers.IO)
