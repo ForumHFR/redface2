@@ -707,12 +707,16 @@ class FlagRequestBudgetTest {
             val client = OkHttpClient.Builder().apply {
                 if (!wire) dns(Dns { error("Unexpected DNS lookup for $it") }).addInterceptor(http)
             }.build()
+            val authenticatedClient = if (wire) client.newBuilder().addInterceptor { chain ->
+                val request = chain.request().newBuilder().header("Cookie", "md_id=1; md_user=XaT; md_passs=test-session").build()
+                chain.proceed(request)
+            }.build() else client
             val breaker = HfrRestCircuitBreaker(
                 DataStoreHfrRestCooldownStore(store), clock, diagnostics, monotonicClock,
             )
             val dao = snapshotDao()
             val api = HfrApiClient(
-                authenticated = client,
+                authenticated = authenticatedClient,
                 anonymous = client,
                 baseUrl = http.baseUrl,
                 ioDispatcher = http,

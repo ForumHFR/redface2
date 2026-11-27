@@ -1,8 +1,11 @@
 package fr.forumhfr.redface2.core.network
 
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.error.HfrRestBlockedException
 import fr.forumhfr.redface2.core.domain.error.HfrRestRecoveryPendingException
+import fr.forumhfr.redface2.core.network.cookie.CookieStore
+import fr.forumhfr.redface2.core.network.cookie.PersistentCookieJar
 import io.mockk.every
 import io.mockk.mockk
 import java.io.IOException
@@ -15,8 +18,10 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import okhttp3.Cookie
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -24,6 +29,7 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -37,7 +43,7 @@ class HfrRestExchangeTest {
         chain.proceed(chain.request().newBuilder().header("User-Agent", USER_AGENT).build())
     }.build()
     private val authenticated = client.newBuilder().addInterceptor { chain ->
-        chain.proceed(chain.request().newBuilder().header("Cookie", "test_session=present").build())
+        chain.proceed(chain.request().newBuilder().header("Cookie", SESSION_COOKIES).build())
     }.build()
 
     @Test
@@ -111,7 +117,7 @@ class HfrRestExchangeTest {
             assertTrue(runCatching { breaker.checkProbeAllowed() }.isFailure)
             val sent = requireNotNull(server.takeRequest(1, TimeUnit.SECONDS))
             assertEquals(USER_AGENT, sent.getHeader("User-Agent"))
-            assertEquals("test_session=present", sent.getHeader("Cookie"))
+            assertEquals(SESSION_COOKIES, sent.getHeader("Cookie"))
         }
     }
 
@@ -133,16 +139,67 @@ class HfrRestExchangeTest {
     @Test
     fun `a cold flags catalogue uses authentication when recovering authenticated REST`() = runBlocking {
         val saved = HfrRestCooldown(clock.instant(), 0, HfrRestContext.AUTHENTICATED)
-        val breaker = breaker(MemoryStore(saved))
+        val store = MemoryStore(saved)
+        val breaker = breaker(store)
         val api = api(breaker)
         server.enqueue(MockResponse().setBody("catalogue"))
 
         assertEquals("catalogue", withContext(FlagReadSession()) { api.getCategories() })
         breaker.checkProbeAllowed()
+        assertNull(store.saved)
         assertEquals(1, server.requestCount)
         val sent = requireNotNull(server.takeRequest(1, TimeUnit.SECONDS))
-        assertEquals("test_session=present", sent.getHeader("Cookie"))
+        assertEquals(SESSION_COOKIES, sent.getHeader("Cookie"))
         assertEquals(USER_AGENT, sent.getHeader("User-Agent"))
+    }
+
+    @Test
+    fun `a public catalogue received after local cookie expiry keeps an authenticated pause`() = runBlocking {
+        val saved = HfrRestCooldown(clock.instant(), 0, HfrRestContext.AUTHENTICATED)
+        val store = MemoryStore(saved)
+        val breaker = breaker(store)
+        val host = server.url("/").host
+        val expiredCookies = listOf(
+            Cookie.Builder().name("md_user").value("tester").domain(host).expiresAt(1).build(),
+            Cookie.Builder().name("md_passs").value("test-session").domain(host).expiresAt(1).build(),
+        )
+        val cookieStore = object : CookieStore {
+            override fun observe() = flowOf(expiredCookies)
+            override suspend fun save(cookies: List<Cookie>) = Unit
+            override suspend fun clear() = Unit
+        }
+        server.enqueue(MockResponse().setBody("public catalogue"))
+
+        PersistentCookieJar(cookieStore, Dispatchers.IO).use { jar ->
+            val api = api(breaker, client.newBuilder().cookieJar(jar).build())
+            val error = runCatching { withContext(FlagReadSession()) { api.getCategories() } }.exceptionOrNull()
+
+            assertEquals(1, server.requestCount)
+            assertNull(requireNotNull(server.takeRequest(1, TimeUnit.SECONDS)).getHeader("Cookie"))
+            assertTrue(error is HfrRestRecoveryPendingException)
+            assertEquals(saved, store.saved)
+            assertTrue(runCatching { breaker.checkProbeAllowed() }.exceptionOrNull() is HfrRestBlockedException)
+        }
+    }
+
+    @Test
+    fun `a login page during authenticated recovery surfaces the expired session`() = runBlocking {
+        val saved = HfrRestCooldown(clock.instant(), 0, HfrRestContext.AUTHENTICATED)
+        val store = MemoryStore(saved)
+        val breaker = breaker(store)
+        val api = api(breaker)
+        server.enqueue(MockResponse().setHeader("Content-Type", "text/html").setBody(
+            """<form action="login_validation.php"><input name="pseudo"><input name="password"></form>""",
+        ))
+
+        val error = runCatching { withContext(FlagReadSession()) { api.getCategories() } }.exceptionOrNull()
+
+        assertEquals(1, server.requestCount)
+        val sent = requireNotNull(server.takeRequest(1, TimeUnit.SECONDS))
+        assertEquals(SESSION_COOKIES, sent.getHeader("Cookie"))
+        assertEquals(sent.requestUrl.toString(), (error as? SessionExpiredException)?.finalUrl)
+        assertEquals(saved, store.saved)
+        assertTrue(runCatching { breaker.checkProbeAllowed() }.exceptionOrNull() is HfrRestBlockedException)
     }
 
     @Test
@@ -158,7 +215,7 @@ class HfrRestExchangeTest {
         assertEquals(1, server.requestCount)
         val sent = requireNotNull(server.takeRequest(1, TimeUnit.SECONDS))
         assertEquals(USER_AGENT, sent.getHeader("User-Agent"))
-        assertEquals("test_session=present", sent.getHeader("Cookie"))
+        assertEquals(SESSION_COOKIES, sent.getHeader("Cookie"))
     }
 
     @Test
@@ -193,8 +250,8 @@ class HfrRestExchangeTest {
         store, clock, log, mockk { every { nowNanos() } answers { nanos.get() } },
     )
 
-    private fun api(breaker: HfrRestCircuitBreaker) =
-        HfrApiClient(authenticated, client, server.url("/"), Dispatchers.IO, breaker = breaker)
+    private fun api(breaker: HfrRestCircuitBreaker, authenticatedClient: OkHttpClient = authenticated) =
+        HfrApiClient(authenticatedClient, client, server.url("/"), Dispatchers.IO, breaker = breaker)
 
     private class MemoryStore(var saved: HfrRestCooldown? = null) : HfrRestCooldownStore {
         override suspend fun read(): HfrRestCooldown? = saved
@@ -203,6 +260,7 @@ class HfrRestExchangeTest {
 
     private companion object {
         const val USER_AGENT = "Redface2/test (Android; dev)"
+        const val SESSION_COOKIES = "md_id=1; md_user=tester; md_passs=test-session"
         fun refused() = MockResponse().setResponseCode(429)
     }
 }

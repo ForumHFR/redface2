@@ -292,7 +292,10 @@ class HfrApiClient @Inject constructor(
                             reply = classified
                             throw session.blocked(response.code)
                         }
-                        readJson(response, body, useAuth).also { reply = classified }
+                        readJson(response, body, useAuth).also {
+                            response.checkRecoveryContext(admission)
+                            reply = classified
+                        }
                     }
                 })
             }
@@ -302,9 +305,12 @@ class HfrApiClient @Inject constructor(
         } catch (error: IOException) {
             if (!admission.isRecovery) throw error
             // A recovery whose only exchange failed must not take the executor's retry path.
-            val pending = HfrRestRecoveryPendingException()
-            session?.abort(pending)
-            throw pending
+            val failure = when (error) {
+                is SessionExpiredException, is HfrRestRecoveryPendingException -> error
+                else -> HfrRestRecoveryPendingException()
+            }
+            session?.abort(failure)
+            throw failure
         } finally {
             withContext(NonCancellable) { breaker.complete(admission, reply) }
         }
@@ -312,6 +318,26 @@ class HfrApiClient @Inject constructor(
 
     private fun FlagReadSession?.blocked(code: Int): HfrRestBlockedException =
         HfrRestBlockedException(code).also { this?.abort(it) }
+
+    private fun Response.checkRecoveryContext(admission: HfrRestCircuitBreaker.Admission) {
+        if (!admission.isRecovery) return
+        // OkHttp's outer response request predates cookie selection. Use the wire request.
+        val exchange = networkResponse?.takeIf { it.isRestReply && it.isSuccessful }
+        val expectsAuthentication = admission.context == HfrRestContext.AUTHENTICATED
+        if (exchange?.request?.hasHfrSession() != expectsAuthentication) {
+            throw HfrRestRecoveryPendingException()
+        }
+    }
+
+    private fun Request.hasHfrSession(): Boolean {
+        val cookieNames = headers.values("Cookie").flatMap { it.split(';') }.mapNotNull { entry ->
+            val cookie = entry.trim()
+            cookie.substringBefore('=').takeIf { cookie.substringAfter('=', "").isNotBlank() }
+        }
+        // Same session marker as login and the editor guard: HFR's password cookie is `md_passs`, not
+        // `md_pass`, so requiring a second name here would never confirm a real authenticated recovery.
+        return "md_user" in cookieNames
+    }
 
     private fun readJson(response: Response, body: String, useAuth: Boolean): String {
         if (!response.isSuccessful) {
