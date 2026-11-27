@@ -1,5 +1,4 @@
-Redface 2 v0.71.1 — dev.
-- Éditeur : plus de plantage à l’ouverture sur certaines densités d’écran.
-- Drapeaux : lectures bornées à 15 en parallèle au lieu de 5.
-- Diagnostics : « Tester la connexion » signale les vagues perturbées.
-- Diagnostics : l’export inclut la pile du dernier plantage.
+Redface 2 v0.72.0 — dev.
+- Réglages › Maintenance › Statistiques réseau : l'app compte sur l'appareil les requêtes envoyées à HFR, les erreurs et les pics, sur 90 jours.
+- « Copier le résumé » donne les totaux par jour, à coller sur le forum.
+- Rien n'est envoyé automatiquement ; ni URL, ni sujet, ni pseudo.
