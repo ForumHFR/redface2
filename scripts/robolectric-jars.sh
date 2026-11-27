@@ -3,18 +3,24 @@
 # `android-all-instrumented` depuis Maven Central, hors de Gradle et donc hors du cache de
 # `setup-gradle` : chaque runner neuf retirait ~800 Mo, et un téléchargement refusé ou coupé faisait
 # tomber toutes les classes de la JVM de test concernée (`MavenArtifactFetcher.java:130`).
-# Ce script précharge ces jars avec reprises et contrôle SHA-512, dans le dépôt Maven local que lisent
-# les JVM de test ; le workflow met ce dossier en cache.
+# Le 27/11/2026, Maven Central répondait 429 aux runners GitHub sur ces jars (les pom et .sha512
+# passaient), avec un Retry-After de ~17 h.
+#
+# Ce script précharge ces jars dans le dépôt Maven local que lisent les JVM de test ; le workflow met
+# ce dossier en cache. Les empreintes SHA-512 viennent d'abord de Maven Central ; les jars et pom
+# d'abord du miroir Google de Maven Central, Central en repli. Reprises bornées, gérées ici : curl ne
+# suit pas le Retry-After (il bloquerait le job jusqu'à son délai maximal).
 #
 # Robolectric 4.17 (`MavenArtifactFetcher.fetchArtifact`) ne télécharge rien si le jar existe déjà
-# dans le dépôt local. Il reste en ligne : un niveau d'API absent de la liste ci-dessous coûte un
-# téléchargement par Robolectric, pas un échec. Le jar est donc déposé en dernier, par `mv`, après
-# contrôle de son empreinte.
+# dans le dépôt local. Le jar est donc déposé en dernier, par `mv`, après contrôle de son empreinte.
+# Un niveau d'API absent de la liste ci-dessous serait téléchargé par Robolectric lui-même, depuis
+# Maven Central, sans ces protections.
 #
 # Usage :
 #   robolectric-jars.sh dir       affiche le dossier `android-all-instrumented` du dépôt local
 #   robolectric-jars.sh prefetch  télécharge les jars manquants de la liste
-# Env : ROBOLECTRIC_REPO_URL (défaut Maven Central), JAVA (défaut `java` du PATH, sinon $JAVA_HOME).
+# Env : ROBOLECTRIC_CHECKSUM_REPOS, ROBOLECTRIC_ARTIFACT_REPOS (URL séparées par des espaces, dans
+# l'ordre d'essai), JAVA (défaut `java` du PATH, sinon $JAVA_HOME/bin/java).
 set -euo pipefail
 
 # Versions `android-all-instrumented` des tests (Robolectric 4.17, préinstrumentation i7,
@@ -29,8 +35,12 @@ VERSIONS=(
   14-robolectric-10818077-i7
   16-robolectric-13921718-i7
 )
-REPO_URL=${ROBOLECTRIC_REPO_URL:-https://repo1.maven.org/maven2}
+CENTRAL=https://repo1.maven.org/maven2
+GOOGLE_MIRROR=https://maven-central.storage-download.googleapis.com/maven2
+read -r -a CHECKSUM_REPOS <<< "${ROBOLECTRIC_CHECKSUM_REPOS:-$CENTRAL $GOOGLE_MIRROR}"
+read -r -a ARTIFACT_REPOS <<< "${ROBOLECTRIC_ARTIFACT_REPOS:-$GOOGLE_MIRROR $CENTRAL}"
 ARTIFACT_PATH=org/robolectric/android-all-instrumented
+ROUNDS=3
 
 java_bin() {
   if [[ -n "${JAVA:-}" ]]; then echo "$JAVA"
@@ -56,16 +66,25 @@ local_repo() {
   echo "$home/.m2/repository"
 }
 
-# Télécharge $1 (chemin relatif au dépôt) vers $2, avec reprises (Retry-After respecté sur 429/503).
+# fetch <chemin relatif> <sortie> <dépôt>... : essaie chaque dépôt dans l'ordre, sur ROUNDS tours
+# espacés de 20 s, 40 s… Chaque échec est journalisé avec son code HTTP (000 = pas de réponse).
 fetch() {
-  local url="$REPO_URL/$1" out="$2" code
-  code=$(curl --fail --location --no-progress-meter --show-error \
-    --retry 6 --retry-delay 15 --retry-all-errors --connect-timeout 30 --max-time 900 \
-    --write-out '%{http_code}' --output "$out" "$url") || {
-    echo "::error::échec du téléchargement de $url (HTTP ${code:-?})" >&2
-    return 1
-  }
-  echo "  $1 : HTTP $code, $(stat -c %s "$out") octets"
+  local path="$1" out="$2" round base code
+  shift 2
+  for ((round = 1; round <= ROUNDS; round++)); do
+    for base in "$@"; do
+      if code=$(curl --fail --location --no-progress-meter --show-error \
+        --connect-timeout 30 --max-time 900 \
+        --write-out '%{http_code}' --output "$out" "$base/$path"); then
+        echo "  $(basename "$path") : HTTP $code, $(stat -c %s "$out") octets, $base"
+        return 0
+      fi
+      echo "  $(basename "$path") : HTTP ${code:-000}, $base (tour $round/$ROUNDS)" >&2
+    done
+    ((round < ROUNDS)) && sleep $((round * 20))
+  done
+  echo "::error::échec du téléchargement de $path depuis : $*" >&2
+  return 1
 }
 
 # Contrôle $1 contre l'empreinte hexadécimale contenue dans $2.
@@ -84,11 +103,12 @@ cleanup() { [[ -n "$TMP_DIR" ]] && rm -rf "$TMP_DIR"; return 0; }
 trap cleanup EXIT
 
 prefetch() {
-  local repo dir version base tmp
+  local repo dir version base rel tmp
   repo=$(local_repo)
   for version in "${VERSIONS[@]}"; do
     dir="$repo/$ARTIFACT_PATH/$version"
     base="android-all-instrumented-$version"
+    rel="$ARTIFACT_PATH/$version/$base"
     if [[ -f "$dir/$base.jar" ]]; then
       echo "$version : déjà présent"
       continue
@@ -97,10 +117,10 @@ prefetch() {
     mkdir -p "$dir"
     tmp=$(mktemp -d "$dir/.prefetch.XXXXXX")
     TMP_DIR=$tmp
-    fetch "$ARTIFACT_PATH/$version/$base.pom" "$tmp/$base.pom"
-    fetch "$ARTIFACT_PATH/$version/$base.pom.sha512" "$tmp/$base.pom.sha512"
-    fetch "$ARTIFACT_PATH/$version/$base.jar.sha512" "$tmp/$base.jar.sha512"
-    fetch "$ARTIFACT_PATH/$version/$base.jar" "$tmp/$base.jar"
+    fetch "$rel.pom.sha512" "$tmp/$base.pom.sha512" "${CHECKSUM_REPOS[@]}"
+    fetch "$rel.jar.sha512" "$tmp/$base.jar.sha512" "${CHECKSUM_REPOS[@]}"
+    fetch "$rel.pom" "$tmp/$base.pom" "${ARTIFACT_REPOS[@]}"
+    fetch "$rel.jar" "$tmp/$base.jar" "${ARTIFACT_REPOS[@]}"
     check_sha512 "$tmp/$base.pom" "$tmp/$base.pom.sha512"
     check_sha512 "$tmp/$base.jar" "$tmp/$base.jar.sha512"
     mv "$tmp/$base.pom" "$tmp/$base.pom.sha512" "$tmp/$base.jar.sha512" "$dir/"

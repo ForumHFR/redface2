@@ -110,8 +110,10 @@ jobs:
 
       # #1681 — Robolectric downloads its android-all-instrumented jars (~0.8 GB) from Maven Central
       # itself, outside Gradle and the setup-gradle cache: one refused or cut download failed every
-      # class of the test JVM concerned. Restore them from a cache; on a miss, prefetch them with
-      # retries and SHA-512 checks (scripts/robolectric-jars.sh) before Gradle starts. Only push runs
+      # class of the test JVM concerned; on 27/11/2026 Central answered 429 to runners on these jars
+      # with a ~17 h Retry-After. Restore them from a cache; on a miss, prefetch them before Gradle
+      # starts (scripts/robolectric-jars.sh: Google's Maven Central mirror first, Central as fallback,
+      # bounded retries, SHA-512 from Central first). Only push runs
       # on main and dev save the entry, as with `cache-read-only` above: PR runs restore their base
       # branch's entry without storing a ~0.8 GB copy each. The path is the JVM's user.home, which is
       # not $HOME in this container job.
