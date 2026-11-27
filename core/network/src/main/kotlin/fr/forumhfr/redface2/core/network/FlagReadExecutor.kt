@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.network
 
 import fr.forumhfr.redface2.core.domain.error.HfrRestBlockedException
+import fr.forumhfr.redface2.core.domain.error.HfrRestRecoveryPendingException
 import fr.forumhfr.redface2.core.network.diagnostics.HfrCallTag
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -36,7 +37,7 @@ class FlagReadExecutor @Inject constructor(
         request: Request,
         operation: FlagReadOperation,
         session: FlagReadSession,
-        executeCall: suspend (Call) -> T,
+        executeCall: suspend (Call, () -> Unit) -> T,
     ): T {
         require(request.method == "GET")
         require(operation in ALLOWED_OPERATIONS)
@@ -49,6 +50,8 @@ class FlagReadExecutor @Inject constructor(
                 Result.success(session.attempt(client, request, phase, retry = false, executeCall))
             } catch (blocked: HfrRestBlockedException) {
                 Result.failure(blocked)
+            } catch (pending: HfrRestRecoveryPendingException) {
+                Result.failure(pending)
             } catch (error: IOException) {
                 currentCoroutineContext().ensureActive()
                 session.checkBudget()
@@ -59,7 +62,8 @@ class FlagReadExecutor @Inject constructor(
                 currentCoroutineContext().ensureActive()
                 session.checkBudget()
                 // No loop: the second application Call is the final attempt, whatever its outcome.
-                Result.success(session.attempt(client, request, FlagReadConnectionPhase(), retry = true, executeCall))
+                val retryPhase = FlagReadConnectionPhase()
+                Result.success(session.attempt(client, request, retryPhase, retry = true, executeCall))
             }
         } ?: throw FlagReadDeadlineException()
         return result.getOrThrow()
@@ -70,7 +74,7 @@ class FlagReadExecutor @Inject constructor(
         request: Request,
         phase: FlagReadConnectionPhase,
         retry: Boolean,
-        executeCall: suspend (Call) -> T,
+        executeCall: suspend (Call, () -> Unit) -> T,
     ): T {
         val tag = request.tag(HfrCallTag::class.java)
         val attemptRequest = if (tag == null) request else request.newBuilder()
@@ -93,8 +97,7 @@ class FlagReadExecutor @Inject constructor(
                 if (configuredNanos == 0L) remaining else minOf(remaining, configuredNanos),
                 TimeUnit.NANOSECONDS,
             )
-            session.applicationCall(retry)
-            executeCall(call).also {
+            executeCall(call) { session.applicationCall(retry) }.also {
                 session.checkBudget()
                 session.succeeded(retry)
             }

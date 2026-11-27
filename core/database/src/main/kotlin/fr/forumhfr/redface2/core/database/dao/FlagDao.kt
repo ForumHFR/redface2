@@ -121,6 +121,12 @@ interface FlagDao {
         upsertCoverage(snapshot.coverage)
     }
 
+    /** A topic-read reconciliation commits all affected tab snapshots in the same transaction. */
+    @Transaction
+    suspend fun replaceSnapshots(userId: String, snapshots: Map<FlagType, FlagCacheSnapshot>) {
+        snapshots.forEach { (type, snapshot) -> replaceSnapshot(userId, type, snapshot) }
+    }
+
     /**
      * Atomic replace of the cached drapeaux for a tab. The two-statement form
      * matches what HFR returns (a full listing per tab, not a delta) and keeps

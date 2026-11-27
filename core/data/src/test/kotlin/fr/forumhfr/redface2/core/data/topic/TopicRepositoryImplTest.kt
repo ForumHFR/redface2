@@ -108,7 +108,7 @@ class TopicRepositoryImplTest {
         val read = TopicRead(1, 999_395)
 
         repository.prefetch(read.cat, read.topicId, page = 1)
-        assertTrue(topicReads.drain("XaT", topicReads.checkpoint()).isEmpty())
+        assertTrue(topicReads.pending("XaT", topicReads.checkpoint()).isEmpty())
 
         // A search result or deep link uses the ordinary cache-first topic entry point.
         repository.observeTopicPage(read.cat, read.topicId, page = 1).test {
@@ -116,13 +116,16 @@ class TopicRepositoryImplTest {
             assertFalse(awaitItem().provisional)
             awaitComplete()
         }
-        assertEquals(setOf(read), topicReads.drain("xat", topicReads.checkpoint()))
+        val checkpoint = topicReads.checkpoint()
+        val pending = topicReads.pending("xat", checkpoint)
+        assertEquals(setOf(read), pending.keys)
+        topicReads.acknowledge("xat", checkpoint, pending)
         repository.observeTopicPage(read.cat, read.topicId, page = 1).first()
-        assertTrue(topicReads.drain("XaT", topicReads.checkpoint()).isEmpty())
+        assertTrue(topicReads.pending("XaT", topicReads.checkpoint()).isEmpty())
 
         auth.value = AuthState.Anonymous
         repository.refreshTopicPage(read.cat, read.topicId, page = 1)
-        assertTrue(topicReads.drain("XaT", topicReads.checkpoint()).isEmpty())
+        assertTrue(topicReads.pending("XaT", topicReads.checkpoint()).isEmpty())
         assertEquals(3, server.requestCount)
     }
 

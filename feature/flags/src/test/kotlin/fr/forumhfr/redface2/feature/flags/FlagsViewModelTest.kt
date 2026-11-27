@@ -14,6 +14,8 @@ import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.flags.FlagLookup
+import fr.forumhfr.redface2.core.domain.flags.FlagReconciliationResult
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshClock
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshCategory
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
@@ -76,7 +78,10 @@ import fr.forumhfr.redface2.core.model.mpstorage.MpStorageDocument
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageResult
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageWriteResult
+import io.mockk.every
+import io.mockk.mockk
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -96,6 +101,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.onSubscription
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -113,7 +119,8 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class FlagsViewModelTest {
 
-    private val fixedClock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+    private val start = Instant.parse("2026-06-11T12:00:00Z")
+    private val fixedClock = SteppingClock(start)
     private val topicReads = TopicReadQueue()
 
     @Before
@@ -323,6 +330,39 @@ class FlagsViewModelTest {
         vm.retryRefreshWarning(oldWarning)
         advanceUntilIdle()
         assertEquals(listOf(FlagType.CYAN, FlagType.CYAN), flags.refreshCalls)
+    }
+
+    @Test
+    fun `wall clock jumps neither rearm the automatic window nor shorten the manual floor`() = runTest {
+        val flags = FakeFlagRepository()
+        val clock = SteppingClock(fixedClock.instant())
+        val elapsed = mockk<FlagRefreshClock> {
+            every { nowNanos() } answers { testScheduler.currentTime * 1_000_000L }
+        }
+        val auth = FakeAuthRepository(AuthState.Authenticated("xaat"))
+        val vm = viewModelWithClock(auth, flags, clock, elapsed = elapsed)
+        vm.maybeAutoRefresh()
+        advanceUntilIdle()
+
+        clock.now = clock.now.plusSeconds(86_400)
+        vm.maybeAutoRefresh()
+        vm.refresh()
+        advanceUntilIdle()
+        assertEquals(1, flags.refreshCalls.size)
+
+        advanceTimeBy(30_000)
+        vm.refresh()
+        advanceUntilIdle()
+        assertEquals(2, flags.refreshCalls.size)
+
+        clock.now = clock.now.minusSeconds(172_800)
+        vm.maybeAutoRefresh()
+        advanceUntilIdle()
+        assertEquals(2, flags.refreshCalls.size)
+        advanceTimeBy(90_000)
+        vm.maybeAutoRefresh()
+        advanceUntilIdle()
+        assertEquals(listOf(FlagType.CYAN, FlagType.CYAN, FlagType.CYAN), flags.refreshCalls)
     }
 
     @Test
@@ -3320,6 +3360,9 @@ class FlagsViewModelTest {
             messagesRepository = messages,
             mpStorageRepository = mpStorage,
             clock = fixedClock,
+            refreshClock = mockk<FlagRefreshClock> {
+                every { nowNanos() } answers { Duration.between(start, fixedClock.instant()).toNanos() }
+            },
             externalScope = externalScope,
             refreshDiagnostics = FlagRefreshDiagnostics(diagnostics, networkActions = networkActions),
             networkActions = networkActions,
@@ -3333,9 +3376,11 @@ class FlagsViewModelTest {
         flags: FakeFlagRepository,
         clock: Clock,
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
+        elapsed: FlagRefreshClock? = null,
     ): FlagsViewModel {
         val forum = FakeForumRepository()
         val prefs = FakeUserPreferencesRepository()
+        val initial = clock.instant()
         return FlagsViewModel(
             authRepository = auth,
             flagRepository = flags,
@@ -3346,6 +3391,9 @@ class FlagsViewModelTest {
             messagesRepository = FakeMessagesRepository(),
             mpStorageRepository = FakeMpStorageRepository(),
             clock = clock,
+            refreshClock = elapsed ?: mockk<FlagRefreshClock> {
+                every { nowNanos() } answers { Duration.between(initial, clock.instant()).toNanos() }
+            },
             externalScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
             refreshDiagnostics = FlagRefreshDiagnostics(diagnostics),
             topicReads = topicReads,
@@ -3467,8 +3515,13 @@ class FlagsViewModelTest {
             private set
         val reconciledReads = mutableListOf<Set<TopicRead>>()
 
-        override suspend fun reconcileTopicReads(reads: Set<TopicRead>, visibleTypes: List<FlagType>) {
-            reconciledReads += reads
+        override suspend fun reconcileTopicReads(
+            reads: Map<TopicRead, Set<FlagType>>,
+            visibleType: FlagType?,
+            maxRequests: Int,
+        ): FlagReconciliationResult {
+            reconciledReads += reads.keys
+            return FlagReconciliationResult(covered = reads.mapValues { setOf(requireNotNull(visibleType)) })
         }
         var clearSessionCacheCallCount: Int = 0
             private set

@@ -7,7 +7,7 @@ import fr.forumhfr.redface2.core.network.FlagReadDeadlineException
 import java.time.Clock
 
 /** Accumulates only complete source partitions. Collection cancellation never discards completed work. */
-internal class FlagRefreshCollection(private val clock: Clock) {
+internal class FlagRefreshCollection(private val clock: Clock, private val startedOrder: Long) {
     var categories: List<Category>? = null
     private val outcomes = linkedMapOf<Pair<Int, FlagSource>, CategoryRefreshOutcome>()
     private val retained = mutableSetOf<Pair<Int, FlagSource>>()
@@ -40,6 +40,7 @@ internal class FlagRefreshCollection(private val clock: Clock) {
                     category.id, source, receivedAt = clock.instant(),
                     failure = if (deadline) FlagFailureKind.DEADLINE else
                         failure?.toFlagFailureKind() ?: FlagFailureKind.UNKNOWN,
+                    readOrder = startedOrder,
                 )
             }
         }

@@ -43,8 +43,12 @@ interface FlagRepository {
      */
     suspend fun refresh(type: FlagType): FlagsResult
 
-    /** Re-read touched categories for visible types and other cached types containing those topics. */
-    suspend fun reconcileTopicReads(reads: Set<TopicRead>, visibleTypes: List<FlagType>) = Unit
+    /** Re-read one touched category for the visible type and cached types containing those topics. */
+    suspend fun reconcileTopicReads(
+        reads: Map<TopicRead, Set<FlagType>>,
+        visibleType: FlagType?,
+        maxRequests: Int,
+    ): FlagReconciliationResult = FlagReconciliationResult()
 
     /**
      * Passive cache invalidation signal for cache-only consumers. Unlike [observe], subscribing here
@@ -166,3 +170,9 @@ sealed interface FlagLookup {
     data object Absent : FlagLookup
     data object Unavailable : FlagLookup
 }
+
+/** Completed coverage and unsuccessful types, for queue acknowledgement and manual pull feedback. */
+data class FlagReconciliationResult(
+    val covered: Map<TopicRead, Set<FlagType>> = emptyMap(),
+    val failedTypes: Set<FlagType> = emptySet(),
+)

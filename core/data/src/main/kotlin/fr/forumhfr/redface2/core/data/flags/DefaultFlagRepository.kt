@@ -5,6 +5,8 @@ import fr.forumhfr.redface2.core.data.forum.RestListEnvelope
 import fr.forumhfr.redface2.core.data.forum.RestTopic
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.error.HfrRestRecoveryPendingException
+import fr.forumhfr.redface2.core.database.dao.FlagCacheSnapshot
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagFetchTrace
@@ -18,6 +20,7 @@ import fr.forumhfr.redface2.core.domain.flags.FlagCoverage
 import fr.forumhfr.redface2.core.domain.flags.FlagLookup
 import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshStrategy
 import fr.forumhfr.redface2.core.domain.flags.FlagPullBatch
+import fr.forumhfr.redface2.core.domain.flags.FlagReconciliationResult
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.flags.TopicRead
@@ -46,6 +49,7 @@ import java.time.Clock
 import java.time.Instant
 import java.util.EnumMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.cancellation.CancellationException
@@ -149,10 +153,11 @@ class DefaultFlagRepository @Inject constructor(
         }
     private val cacheWriteMutexes: Map<FlagType, Mutex> = FlagType.entries.associateWith { Mutex() }
     private val reconciliationMutex = Mutex()
-    private var reconciliationSequence = 0L
-    // A completed targeted read owns its category over this inventory generation and its sweep.
-    // Guarded by cachedSuccesses, like the other cache generations.
-    private val reconciledCategories = mutableMapOf<Pair<FlagType, Int>, Int>()
+    private val sourceReadSequence = AtomicLong()
+    private val committedSourceReads = mutableMapOf<Triple<FlagType, Int, FlagSource>, Long>()
+    // The cache monitor guards ownership of staged reads and adoption by a concurrent pull.
+    private var targetedRead: TargetedRead? = null
+    private var adoptedRead: AdoptedRead? = null
 
     private val cacheUpdates = MutableSharedFlow<FlagType>(
         replay = 0,
@@ -202,10 +207,23 @@ class DefaultFlagRepository @Inject constructor(
         val sweepGeneration: Int,
         val policyGeneration: Int,
         val resolutionCat: Int? = null,
-        val reconciliationId: Long? = null,
+    )
+
+    private class TargetedRead(
+        val cat: Int,
+        val keys: Map<FlagType, FetchKey>,
+        val buckets: Map<FlagType, Deferred<BucketPage>>,
+        val sticky: Deferred<StickyPage>?,
+        val globals: Map<FlagType, Deferred<FlagRefreshBatch>>,
     ) {
-        val forced: Boolean get() = reconciliationId != null
+        fun jobs() = buckets.values + listOfNotNull(sticky) + globals.values
     }
+
+    private data class AdoptedRead(val sweepGeneration: Int, val staged: TargetedRead, val types: Set<FlagType>)
+
+    private data class BucketPage(val body: String, val readOrder: Long)
+    private data class BucketRows(val flags: List<Flag>, val readOrder: Long)
+    private data class StickyPage(val body: Result<String>, val readOrder: Long)
 
     private class ActiveRefresh(val key: FetchKey, var callers: Int = 1) {
         // Under generationMutex; retained through publication, even after the Deferred completes.
@@ -359,7 +377,7 @@ class DefaultFlagRepository @Inject constructor(
                 ?: run {
                     if (pull == null || pullSweep != (pull to sweepGeneration)) {
                         sweepGeneration++
-                        reconciledCategories.clear()
+                        adoptPendingReads(type, userId, pull)
                         pullSweep = pull?.let { it to sweepGeneration }
                     }
                     ActiveRefresh(fetchKey(type, userId.orEmpty())).also { activeRefreshes[type] = it }
@@ -369,61 +387,230 @@ class DefaultFlagRepository @Inject constructor(
         active
     }
 
-    override suspend fun reconcileTopicReads(reads: Set<TopicRead>, visibleTypes: List<FlagType>) {
-        val userId = currentUserId() ?: return
-        reconciliationMutex.withLock {
-            if (reads.isEmpty() || userId != currentUserId()) return@withLock
-            val typesByCategory = reconciliationTypes(userId, reads, visibleTypes)
-            val reconciliationId = ++reconciliationSequence
-            try {
-                typesByCategory.forEach { (cat, types) ->
-                    reconcileCategory(userId, cat, types, reconciliationId)
-                }
-            } finally {
-                synchronized(stickySweeps) {
-                    stickySweeps.keys.removeAll { it.reconciliationId == reconciliationId }
-                }
-            }
+    /** Called with the generation barrier and cache monitor held. Stop uncovered staged buckets. */
+    private fun adoptPendingReads(type: FlagType, userId: String?, pull: FlagPullBatch?) {
+        val staged = targetedRead?.takeIf { it.keys.values.first().userId == userId }
+        val retired = adoptedRead?.staged
+        if (retired !== staged) retired?.jobs()?.forEach { it.cancel(SupersededFetchException()) }
+        adoptedRead = staged?.let { AdoptedRead(sweepGeneration, it, pull?.types.orEmpty() + type) }
+        val adoption = adoptedRead ?: return
+        (adoption.staged.keys.keys - adoption.types).forEach { uncovered ->
+            adoption.staged.buckets[uncovered]?.cancel(SupersededFetchException())
+            adoption.staged.globals[uncovered]?.cancel(SupersededFetchException())
         }
     }
 
-    private suspend fun reconciliationTypes(
-        userId: String,
-        reads: Set<TopicRead>,
-        visibleTypes: List<FlagType>,
-    ): Map<Int, List<FlagType>> {
-        val cachedReads = FlagType.entries.associateWith { type ->
-            val cached = synchronized(cachedSuccesses) { cachedSuccesses[type] }
-                ?: flagCacheStore.load(type, userId)?.result
-            cached?.flags.orEmpty().asSequence().map { TopicRead(it.cat, it.topicId) }
-                .filter { it in reads }.toSet()
-        }
-        return reads.groupBy { it.cat }.mapValues { (_, topics) ->
-            FlagType.entries.filter { type -> type in visibleTypes || topics.any { it in cachedReads.getValue(type) } }
-        }.filterValues { it.isNotEmpty() }
-    }
-
-    private suspend fun reconcileCategory(userId: String, cat: Int, types: List<FlagType>, id: Long) {
-        if (userId != currentUserId()) return
-        val trace = refreshDiagnostics.begin(FlagRefreshTrigger.TOPIC_RECONCILE, types)
+    override suspend fun reconcileTopicReads(
+        reads: Map<TopicRead, Set<FlagType>>,
+        visibleType: FlagType?,
+        maxRequests: Int,
+    ): FlagReconciliationResult = reconciliationMutex.withLock {
+        var affected = visibleType?.let(::setOf) ?: reads.values.flatten().toSet()
         try {
-            withContext(trace) {
-                types.map { type ->
-                    async {
-                        fetchDeduplicated(type, userId, resolutionCat = cat, reconciliationId = id) { result ->
-                            if (result is FlagsResult.Failure) trace.failure(result.cause)
-                            if (result is FlagsResult.Success) {
-                                refreshes.getValue(type).emit(result)
-                                trace.published()
-                            }
-                        }
-                    }
-                }.awaitAll()
+            if (reads.isEmpty() || maxRequests <= 0) return@withLock FlagReconciliationResult()
+            val userId = currentUserId() ?: return@withLock FlagReconciliationResult()
+            policyOwner.synchronize()
+            val global = policyOwner.current.strategy == FlagsRefreshStrategy.GLOBAL_ONLY
+            val selection = selectReconciliation(userId, reads, visibleType, maxRequests, global)
+                ?: return@withLock FlagReconciliationResult()
+            affected = selection.values.flatten().toSet()
+            reconcileCategory(userId, selection, affected, global)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            Log.w(LOG_TAG, "Could not reconcile flags after a topic read", error)
+            FlagReconciliationResult(failedTypes = affected)
+        }
+    }
+
+    private suspend fun selectReconciliation(
+        userId: String,
+        reads: Map<TopicRead, Set<FlagType>>,
+        visibleType: FlagType?,
+        maxRequests: Int,
+        global: Boolean,
+    ): Map<TopicRead, Set<FlagType>>? {
+        if (global && visibleType != null) {
+            return reads.filterValues { visibleType in it }.mapValues { setOf(visibleType) }.takeIf { it.isNotEmpty() }
+        }
+        val snapshots = FlagType.entries.associateWith { type ->
+            synchronized(cachedSuccesses) { cachedSuccesses[type] } ?: flagCacheStore.load(type, userId)?.result
+        }
+        val cachedReads = snapshots.mapValues { (_, cached) ->
+            cached?.flags.orEmpty().mapTo(hashSetOf()) { TopicRead(it.cat, it.topicId) }
+        }
+        val visibleCoverage = snapshots[visibleType]?.coverage
+        val relevant = reads.mapValues { (read, pending) ->
+            val visibleInventory = visibleType.takeIf { visibleCoverage?.covers(read.cat) == true }
+            pending.filterTo(linkedSetOf()) { it == visibleInventory || read in cachedReads.getValue(it) }
+        }.filterValues { it.isNotEmpty() }
+        // One category per landing, starting with its most recent topic read.
+        return relevant.entries.reversed().groupBy { it.key.cat }.values.firstNotNullOfOrNull { entries ->
+            val types = entries.flatMap { it.value }.toSet()
+            val cost = types.size + if (global) 0 else 1
+            if (cost > maxRequests) null else if (global) {
+                relevant.mapValues { (_, pending) -> pending.intersect(types) }.filterValues { it.isNotEmpty() }
+            } else {
+                entries.associate { it.toPair() }
             }
+        }
+    }
+
+    private suspend fun reconcileCategory(
+        userId: String,
+        selection: Map<TopicRead, Set<FlagType>>,
+        types: Set<FlagType>,
+        global: Boolean,
+    ): FlagReconciliationResult {
+        val trace = refreshDiagnostics.begin(FlagRefreshTrigger.TOPIC_RECONCILE, types.toList())
+        return try {
+            val staged = policyOwner.withPolicy { policy ->
+                generationMutex.withLock {
+                    if (currentUserId() != userId ||
+                        global != (policy.strategy == FlagsRefreshStrategy.GLOBAL_ONLY)
+                    ) return@withLock null
+                    synchronized(cachedSuccesses) {
+                        // The admitted pull owns the traffic budget. Retain any read too recent
+                        // for its checkpoint for the next landing.
+                        if (activeRefreshes.values.any { it.key == currentFetchKey(it.key) }) return@withLock null
+                        val keys = types.associateWith { fetchKey(it, userId) }
+                        val session = FlagReadSession(flagReadClock::nowNanos, policy, singleExchange = true)
+                        stageReconciliation(selection.keys.first().cat, keys, trace, session, global)
+                            .also { targetedRead = it }
+                    }
+                }
+            } ?: return FlagReconciliationResult()
+            try {
+                val batches = collectReconciliation(staged)
+                val covered = commitReconciliation(staged, batches)
+                if (covered) trace.published()
+                FlagReconciliationResult(covered = if (covered) reconciledTopics(selection, batches) else emptyMap())
+            } finally {
+                synchronized(cachedSuccesses) {
+                    if (targetedRead === staged) targetedRead = null
+                    if (adoptedRead?.staged !== staged) staged.jobs().forEach { it.cancel() }
+                }
+            }
+        } catch (_: SupersededFetchException) {
+            currentCoroutineContext().ensureActive()
+            FlagReconciliationResult()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            trace.failure(error)
+            throw error
         } finally {
             trace.finish()
         }
     }
+
+    private fun reconciledTopics(
+        selection: Map<TopicRead, Set<FlagType>>,
+        batches: Map<FlagType, FlagRefreshBatch>,
+    ): Map<TopicRead, Set<FlagType>> {
+        if (batches.values.none { it.globalOnly }) return selection
+        val observed = batches.mapValues { (_, batch) ->
+            batch.observations.mapTo(hashSetOf()) { TopicRead(it.cat, it.topicId) }
+        }
+        return selection.mapValues { (read, pending) ->
+            pending.filterTo(hashSetOf()) { read in observed.getValue(it) }
+        }.filterValues { it.isNotEmpty() }
+    }
+
+    private fun stageReconciliation(
+        cat: Int,
+        keys: Map<FlagType, FetchKey>,
+        trace: FlagRefreshTrace,
+        session: FlagReadSession,
+        global: Boolean,
+    ): TargetedRead {
+        val traces = keys.keys.associateWith { type ->
+            refreshDiagnostics.fetch(type, trace.id, trace.trigger).also { fetch ->
+                fetch.categoryCount = if (global) 0 else 1
+                fetch.readLimit = session.policy.effectiveConcurrency ?: 0
+                fetch.policy = session.policy
+                fetch.readCounterOwner = session
+                fetch.readCounters = session::counters
+                trace.attach(fetch, wasJoined = false)
+                trace.result(type, fetch)
+            }
+        }
+        if (global) {
+            val globals = keys.keys.associateWith { type ->
+                fetchScope.async(traces.getValue(type) + session + HfrRequestQueued(), start = CoroutineStart.LAZY) {
+                    refreshDiagnostics.withRefresh { globalRefresh.collect(type) }
+                }
+            }
+            return TargetedRead(cat, keys, emptyMap(), null, globals)
+        }
+        val buckets = keys.keys.associateWith { type ->
+            fetchScope.async(traces.getValue(type) + session + HfrRequestQueued(), start = CoroutineStart.LAZY) {
+                refreshDiagnostics.withRefresh { fetchBucketPage(cat, type.toBucket(), page = 1) }
+            }
+        }
+        val sweepTrace = traces.values.first()
+        val sticky = fetchScope.async(sweepTrace + session + HfrRequestQueued(), start = CoroutineStart.LAZY) {
+            withContext(session.startStickyPhase()) {
+                refreshDiagnostics.withRefresh { readStickyPage(cat, AtomicBoolean(false), sweepTrace) }
+            }
+        }
+        return TargetedRead(cat, keys, buckets, sticky, emptyMap())
+    }
+
+    private suspend fun collectReconciliation(staged: TargetedRead): Map<FlagType, FlagRefreshBatch> {
+        if (staged.globals.isNotEmpty()) {
+            staged.globals.values.forEach { it.start() }
+            return staged.globals.mapValues { (_, deferred) ->
+                deferred.await().also { it.cause?.let { cause -> throw cause } }
+            }
+        }
+        staged.buckets.values.forEach { it.start() }
+        val buckets = staged.buckets.mapValues { (type, deferred) ->
+            val page = deferred.await()
+            val envelope = decodeFlagPage(json, page.body)
+            val flags = RestFlagMappers.toFlags(envelope, type, staged.cat)
+            if (flags.size < envelope.resource.resultsCount) throw FlagPageCapException()
+            CategoryRefreshOutcome(staged.cat, FlagSource.BUCKET, flags, clock.instant(), readOrder = page.readOrder)
+        }
+        val sticky = checkNotNull(staged.sticky).await()
+        val envelope = decodeFlagPage(json, sticky.body.getOrThrow())
+        return buckets.mapValues { (type, bucket) ->
+            val present = bucket.flags.mapTo(hashSetOf()) { it.topicId }
+            val pins = RestFlagMappers.toStickyFlags(envelope, type, staged.cat).filterNot { it.topicId in present }
+            FlagRefreshBatch(null, listOf(bucket, CategoryRefreshOutcome(
+                staged.cat, FlagSource.STICKY, pins, clock.instant(), readOrder = sticky.readOrder,
+            )), clock.instant(), resolutionCat = staged.cat)
+        }
+    }
+
+    private suspend fun commitReconciliation(
+        staged: TargetedRead,
+        batches: Map<FlagType, FlagRefreshBatch>,
+    ): Boolean = withCacheWriteLocks(staged.keys.keys.sorted()) {
+        generationMutex.withLock {
+            val owned = synchronized(cachedSuccesses) { staged.keys.values.all { it == currentFetchKey(it) } }
+            val userId = staged.keys.values.first().userId
+            if (!owned || currentUserId() != userId) return@withLock false
+            val snapshots = batches.mapValues { (type, batch) ->
+                flagCacheStore.merge(userId, type, orderedBatch(type, batch))
+            }
+            withContext(NonCancellable) {
+                flagCacheStore.saveAll(userId, snapshots.filterKeys { !batches.getValue(it).isEmptyGlobalSuccess })
+                staged.keys.forEach { (type, key) ->
+                    val result = snapshots.getValue(type).toResult()
+                    if (cacheFetchedResult(key, result, null, orderedBatch(type, batches.getValue(type)))) {
+                        refreshes.getValue(type).tryEmit(result)
+                    }
+                }
+            }
+            true
+        }
+    }
+
+    private suspend fun <T> withCacheWriteLocks(types: List<FlagType>, block: suspend () -> T): T =
+        if (types.isEmpty()) block() else cacheWriteMutexes.getValue(types.first()).withLock {
+            withCacheWriteLocks(types.drop(1), block)
+        }
 
     override fun observeCacheUpdates(types: Set<FlagType>): Flow<FlagType> {
         if (types.isEmpty()) return emptyFlow()
@@ -444,6 +631,11 @@ class DefaultFlagRepository @Inject constructor(
             cachedFetchTraces.clear()
             cachedFetchKeys.clear()
             activeRefreshes.clear()
+            committedSourceReads.clear()
+            targetedRead?.jobs()?.forEach { it.cancel() }
+            adoptedRead?.staged?.jobs()?.forEach { it.cancel() }
+            targetedRead = null
+            adoptedRead = null
             sessionGeneration++
             FlagType.entries.forEach { type -> bumpCacheGeneration(type) }
             synchronized(favoriteResolutionMemos) { favoriteResolutionMemos.clear() }
@@ -728,7 +920,7 @@ class DefaultFlagRepository @Inject constructor(
                 type = FlagType.FAVORITE,
                 failOnTruncation = true,
             rejectDivergentCount = true,
-            ).any { it.topicId == topicId }
+            ).flags.any { it.topicId == topicId }
             if (bucketMatch) {
                 true
             } else {
@@ -952,7 +1144,7 @@ class DefaultFlagRepository @Inject constructor(
     /** Must be called under [cachedSuccesses]' monitor. */
     private fun bumpCacheGeneration(type: FlagType) {
         cacheGenerations[type] = cacheGenerations.getValue(type) + 1
-        reconciledCategories.keys.removeAll { it.first == type }
+        committedSourceReads.keys.removeAll { it.first == type }
         cachedFetchKeys.remove(type)
     }
 
@@ -1013,7 +1205,6 @@ class DefaultFlagRepository @Inject constructor(
         type: FlagType,
         userId: String,
         resolutionCat: Int? = null,
-        reconciliationId: Long? = null,
         publish: (suspend (FlagsResult) -> Unit)? = null,
     ): FlagsResult {
         policyOwner.synchronize()
@@ -1025,7 +1216,7 @@ class DefaultFlagRepository @Inject constructor(
                 admission = admission.withPolicy(policy)
                 generationMutex.withLock {
                     val key = synchronized(cachedSuccesses) {
-                        fetchKey(type, userId).copy(resolutionCat = resolutionCat, reconciliationId = reconciliationId)
+                        fetchKey(type, userId).copy(resolutionCat = resolutionCat)
                     }
                     val observed = joinOrStartFetch(key, caller, admission)
                     key to observed
@@ -1169,25 +1360,39 @@ class DefaultFlagRepository @Inject constructor(
             }
         } ?: return@withLock null
         caller?.result(type, resultTrace)
+        // Keep warm content visible when the recovery exchange produces no publishable result.
+        val display = if (owned is FlagsResult.Failure && owned.cause is HfrRestRecoveryPendingException) {
+            synchronized(cachedSuccesses) { cachedSuccesses[type] } ?: owned
+        } else {
+            owned
+        }
         // Both the per-type mutation lock and sweep barrier cover acceptance + publication.
-        publish?.invoke(owned)
+        publish?.invoke(display)
         owned
     }
 
-    /** Both callers hold the cache monitor. A reconcile may commit between fetch and publication. */
-    private fun latestResult(key: FetchKey, result: FlagsResult?): FlagsResult? {
-        if (key.forced) return result
-        val hasReconciliation = reconciledCategories.any { (partition, generation) ->
-            val catMatches = key.resolutionCat == null || key.resolutionCat == partition.second
-            catMatches && partition.first == key.type && generation == key.sweepGeneration
+    /** A targeted commit may have published a newer snapshot after the fetch finished. */
+    private fun latestResult(key: FetchKey, result: FlagsResult?): FlagsResult? =
+        if (result is FlagsResult.Success && cachedFetchKeys[key.type] == fetchKey(key.type, key.userId)) {
+            cachedSuccesses[key.type] ?: result
+        } else {
+            result
         }
-        return if (hasReconciliation) cachedSuccesses[key.type] ?: result else result
-    }
 
-    private fun currentFetchKey(key: FetchKey): FetchKey = fetchKey(key.type, key.userId).copy(
-        resolutionCat = key.resolutionCat,
-        reconciliationId = key.reconciliationId,
-    )
+    private fun currentFetchKey(key: FetchKey): FetchKey =
+        fetchKey(key.type, key.userId).copy(resolutionCat = key.resolutionCat)
+
+    private fun adoptedSources(key: FetchKey): TargetedRead? = synchronized(cachedSuccesses) {
+        val adoption = adoptedRead ?: return@synchronized null
+        val staged = adoption.staged
+        val original = staged.keys.values.first()
+        val cacheMatches = staged.keys[key.type]?.let { key.cacheGeneration == it.cacheGeneration } ?: true
+        val sameSession = key.userId == original.userId && key.policyGeneration == original.policyGeneration &&
+            key.sessionGeneration == original.sessionGeneration
+        val inPull = key.resolutionCat == null && key.sweepGeneration == adoption.sweepGeneration &&
+            key.type in adoption.types
+        staged.takeIf { sameSession && inPull && cacheMatches }
+    }
 
     /** Must be called under [cachedSuccesses]' monitor. */
     private fun fetchKey(type: FlagType, userId: String): FetchKey = FetchKey(
@@ -1203,7 +1408,7 @@ class DefaultFlagRepository @Inject constructor(
         val batch = try {
             val strategy = currentCoroutineContext()[FlagReadSession]?.policy?.strategy
             if (key.resolutionCat == null && strategy in GLOBAL_STRATEGIES) {
-                val global = globalRefresh.collect(key.type)
+                val global = adoptedSources(key)?.globals?.get(key.type)?.await() ?: globalRefresh.collect(key.type)
                 if (strategy == FlagsRefreshStrategy.GLOBAL_ONLY) {
                     return@withContext commitFetchedSuccess(key, global) ?: FlagsResult.Loading
                 }
@@ -1216,11 +1421,6 @@ class DefaultFlagRepository @Inject constructor(
         } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
             Log.w(LOG_TAG, "Flags REST fetch failed for ${key.type}", error)
             FlagRefreshBatch(null, emptyList(), clock.instant(), error)
-        }
-        if (key.forced && (batch.outcomes.size != 2 || batch.outcomes.any { it.failure != null })) {
-            return@withContext FlagsResult.Failure(
-                batch.cause ?: IllegalStateException("Incomplete flags reconciliation for cat=${key.resolutionCat}"),
-            )
         }
         commitFetchedSuccess(key, batch.copy(resolutionCat = key.resolutionCat)) ?: FlagsResult.Loading
     }
@@ -1239,7 +1439,7 @@ class DefaultFlagRepository @Inject constructor(
 
     private suspend fun collectRefresh(key: FetchKey): FlagRefreshBatch {
         val session = checkNotNull(currentCoroutineContext()[FlagReadSession])
-        val collection = FlagRefreshCollection(clock)
+        val collection = FlagRefreshCollection(clock, sourceReadSequence.incrementAndGet())
         var catalogueIds: List<Int> = emptyList()
         var buckets: List<CategoryRefreshOutcome>? = null
         val completed = try {
@@ -1256,7 +1456,7 @@ class DefaultFlagRepository @Inject constructor(
                 val bucketCats = resolutionBuckets(key, cats)
                 (cats - bucketCats.toSet()).forEach { collection.retain(it.id, FlagSource.BUCKET) }
                 val outcomes = measured(FlagRefreshPhase.BUCKETS) {
-                    collectBuckets(bucketCats, key.type, expired, collection)
+                    collectBuckets(bucketCats, key, expired, collection)
                 }
                 if (shouldCollectStickies(expired, outcomes, bucketCats.size < cats.size)) buckets = outcomes
                 true
@@ -1288,7 +1488,7 @@ class DefaultFlagRepository @Inject constructor(
         }
 
     private fun resolutionBuckets(key: FetchKey, cats: List<Category>): List<Category> {
-        if (key.resolutionCat == null || key.forced) return cats
+        if (key.resolutionCat == null) return cats
         val coverage = synchronized(cachedSuccesses) { cachedSuccesses[key.type]?.coverage }
         return cats.filterNot { coverage?.isGlobalObservation == false && coverage.covers(it.id, FlagSource.BUCKET) }
     }
@@ -1301,17 +1501,21 @@ class DefaultFlagRepository @Inject constructor(
 
     private suspend fun collectBuckets(
         cats: List<Category>,
-        type: FlagType,
+        key: FetchKey,
         expired: AtomicBoolean,
         collection: FlagRefreshCollection,
     ): List<CategoryRefreshOutcome> = coroutineScope {
+        val adopted = adoptedSources(key)
         cats.map { category ->
             async(HfrRequestQueued()) {
+                val order = sourceReadSequence.incrementAndGet()
                 val outcome = try {
-                    val flags = fetchAllPages(category.id, type.toBucket(), type,
-                        failOnTruncation = true, sessionExpired = expired)
+                    val first = adopted?.takeIf { it.cat == category.id }?.buckets?.get(key.type)?.await()
+                    val bucket = fetchAllPages(category.id, key.type.toBucket(), key.type,
+                        failOnTruncation = true, sessionExpired = expired, firstPage = first)
                     currentCoroutineContext()[FlagReadSession]?.checkBudget()
-                    CategoryRefreshOutcome(category.id, FlagSource.BUCKET, flags, clock.instant())
+                    CategoryRefreshOutcome(category.id, FlagSource.BUCKET, bucket.flags, clock.instant(),
+                        readOrder = bucket.readOrder)
                 } catch (cancellation: CancellationException) {
                     throw cancellation
                 } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
@@ -1319,7 +1523,7 @@ class DefaultFlagRepository @Inject constructor(
                     if (failure == FlagFailureKind.SESSION) expired.set(true)
                     collection.failed(error)
                     CategoryRefreshOutcome(category.id, FlagSource.BUCKET, receivedAt = clock.instant(),
-                        failure = failure)
+                        failure = failure, readOrder = order)
                 }
                 outcome.also(collection::record)
             }
@@ -1334,12 +1538,15 @@ class DefaultFlagRepository @Inject constructor(
         return cacheWriteMutexes.getValue(type).withLock {
             generationMutex.withLock commit@{
                 trace?.phase(FlagRefreshPhase.MUTEX, mutexStart)
-                val retained = if (currentUserId() == key.userId) categoriesToRetain(key) else null
-                if (retained == null) {
+                val owned = synchronized(cachedSuccesses) { currentFetchKey(key) == key }
+                if (!owned || currentUserId() != key.userId) {
                     trace?.gap(FlagRefreshGap.CACHE_GENERATION)
                     return@commit null
                 }
-                val snapshot = flagCacheStore.merge(key.userId, type, batch, retained)
+                val pendingRecovery = batch.cause as? HfrRestRecoveryPendingException
+                if (pendingRecovery != null) return@commit FlagsResult.Failure(pendingRecovery)
+                val ordered = orderedBatch(type, batch)
+                val snapshot = flagCacheStore.merge(key.userId, type, ordered)
                 currentCoroutineContext()[FlagReadSession]?.expiredCategories(
                     snapshot.coverage.filter { it.failure == FlagFailureKind.DEADLINE }.map { it.cat }.distinct().size,
                 )
@@ -1355,42 +1562,46 @@ class DefaultFlagRepository @Inject constructor(
                         it.copy(name = batch.categoryNames[it.id])
                     }))
                 }
-                val writeError = if (emptyGlobal) null else measured(FlagRefreshPhase.ROOM) {
-                    persistFlags(key.userId, type, snapshot).exceptionOrNull()
-                }
-                if (key.forced && writeError != null) return@commit FlagsResult.Failure(writeError)
-                cacheFetchedResult(key, result, trace)
+                if (!emptyGlobal) measured(FlagRefreshPhase.ROOM) { persistFlags(key.userId, type, snapshot) }
+                cacheFetchedResult(key, result, trace, ordered)
                 result
             }
         }
     }
 
-    private fun cacheFetchedResult(key: FetchKey, result: FlagsResult.Success, trace: FlagFetchTrace?) {
+    private fun cacheFetchedResult(
+        key: FetchKey,
+        result: FlagsResult.Success,
+        trace: FlagFetchTrace?,
+        batch: FlagRefreshBatch,
+    ): Boolean {
         val type = key.type
         synchronized(cachedSuccesses) {
-            if (currentFetchKey(key) != key) return
-            if (key.forced) reconciledCategories[type to requireNotNull(key.resolutionCat)] = key.sweepGeneration
+            if (currentFetchKey(key) != key) return false
+            batch.outcomes.forEach { outcome ->
+                val source = Triple(type, outcome.cat, outcome.source)
+                committedSourceReads.merge(source, outcome.readOrder, ::maxOf)
+            }
             cachedSuccesses[type] = result
             cachedFetchKeys[type] = key.takeIf { it.resolutionCat == null } ?: fetchKey(type, key.userId)
             if (trace != null) cachedFetchTraces[type] = trace else cachedFetchTraces.remove(type)
         }
         publishCacheUpdate(type)
+        return true
     }
 
-    private fun categoriesToRetain(key: FetchKey): Set<Int>? = synchronized(cachedSuccesses) {
-        when {
-            currentFetchKey(key) != key -> null
-            key.forced -> emptySet()
-            else -> reconciledCategories.entries.mapNotNullTo(hashSetOf()) { (partition, generation) ->
-                partition.second.takeIf { partition.first == key.type && generation == key.sweepGeneration }
-            }
+    private fun orderedBatch(type: FlagType, batch: FlagRefreshBatch): FlagRefreshBatch =
+        synchronized(cachedSuccesses) {
+            batch.copy(outcomes = batch.outcomes.filter { outcome ->
+                val last = committedSourceReads[Triple(type, outcome.cat, outcome.source)] ?: 0
+                outcome.readOrder >= last
+            })
         }
-    }
 
     private suspend fun persistFlags(
         userId: String,
         type: FlagType,
-        snapshot: fr.forumhfr.redface2.core.database.dao.FlagCacheSnapshot,
+        snapshot: FlagCacheSnapshot,
     ): Result<Unit> {
         val trace = currentCoroutineContext()[FlagFetchTrace]
         return runCatching { flagCacheStore.save(userId, type, snapshot) }.onFailure { throwable ->
@@ -1446,6 +1657,13 @@ class DefaultFlagRepository @Inject constructor(
         }
     }
 
+    private suspend fun fetchBucketPage(cat: Int, bucket: HfrRestFlagBucket, page: Int): BucketPage {
+        val order = sourceReadSequence.incrementAndGet()
+        return BucketPage(apiClient.getCategoryFlagTopics(
+            cat = cat, bucket = bucket, page = page, resultsPerPage = DEFAULT_RESULTS_PER_PAGE, useAuth = true,
+        ), order)
+    }
+
     /**
      * Walks every page of `categories/{cat}/topics/{bucket}/` until we have accumulated
      * at least `results_count` rows, the server returns an empty page (defensive —
@@ -1465,8 +1683,10 @@ class DefaultFlagRepository @Inject constructor(
         failOnTruncation: Boolean = false,
         sessionExpired: AtomicBoolean? = null,
         rejectDivergentCount: Boolean = false,
-    ): List<Flag> {
+        firstPage: BucketPage? = null,
+    ): BucketRows {
         val accumulated = mutableListOf<Flag>()
+        var readOrder = 0L
         val trace = currentCoroutineContext()[FlagFetchTrace]
         var page = 1
         var lastResultsCount = 0
@@ -1474,14 +1694,9 @@ class DefaultFlagRepository @Inject constructor(
             trace?.page(sticky = false)
             val envelope = try {
                 checkFlagSession(sessionExpired)
-                val body = apiClient.getCategoryFlagTopics(
-                    cat = cat,
-                    bucket = bucket,
-                    page = page,
-                    resultsPerPage = DEFAULT_RESULTS_PER_PAGE,
-                    useAuth = true,
-                )
-                decodeFlagPage(json, body)
+                val response = firstPage?.takeIf { page == 1 } ?: fetchBucketPage(cat, bucket, page)
+                if (page == 1) readOrder = response.readOrder
+                decodeFlagPage(json, response.body)
             } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
                 trace?.failed(FlagRefreshPhase.BUCKETS, error, fatal = true)
                 throw error
@@ -1499,7 +1714,7 @@ class DefaultFlagRepository @Inject constructor(
                 check(!rejectDivergentCount || accumulated.size >= lastResultsCount) {
                     "Incomplete favourite position lookup"
                 }
-                return accumulated
+                return BucketRows(accumulated, readOrder)
             }
             page += 1
         }
@@ -1516,7 +1731,7 @@ class DefaultFlagRepository @Inject constructor(
                 throw FlagPageCapException()
             }
         }
-        return accumulated
+        return BucketRows(accumulated, readOrder)
     }
 
     /**
@@ -1589,22 +1804,23 @@ class DefaultFlagRepository @Inject constructor(
         val bodies = synchronized(sweep.bodies) { sweep.bodies.toMap() }
         return cats.mapNotNull { category ->
             val body = bodies[category.id] ?: if (sweep.deferred.isCompleted) {
-                Result.failure(FlagReadDeadlineException())
+                StickyPage(Result.failure(FlagReadDeadlineException()), sweep.startedOrder)
             } else {
                 return@mapNotNull null
             }
             try {
-                val envelope = decodeFlagPage(json, body.getOrThrow())
+                val envelope = decodeFlagPage(json, body.body.getOrThrow())
                 val flags = RestFlagMappers.toStickyFlags(envelope, type, category.id)
                     .filter { (it.cat to it.topicId) !in present }
-                CategoryRefreshOutcome(category.id, FlagSource.STICKY, flags, clock.instant())
+                CategoryRefreshOutcome(category.id, FlagSource.STICKY, flags, clock.instant(),
+                    readOrder = body.readOrder)
             } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
-                if (body.isSuccess) {
+                if (body.body.isSuccess) {
                     trace?.gap(FlagRefreshGap.STICKY_DECODE, stickyCategory = category.id)
                     trace?.failed(FlagRefreshPhase.STICKIES, error, fatal = false)
                 }
                 CategoryRefreshOutcome(category.id, FlagSource.STICKY, receivedAt = clock.instant(),
-                    failure = error.toFlagFailureKind())
+                    failure = error.toFlagFailureKind(), readOrder = body.readOrder)
             }
         }
     }
@@ -1627,8 +1843,8 @@ class DefaultFlagRepository @Inject constructor(
      * #862 (gate Sol r2) — ONE `topics/last` sweep per REFRESH GENERATION, shared by the three
      * flag types : per-type sweeps would issue 3 × ~19 largely identical GETs on a full refresh
      * (57 instead of 19). This is a COALESCING device, never a temporal cache (no TTL, no wall
-     * clock). The types of one burst share exactly one [Deferred] per category set. A forced topic
-     * reconciliation uses its own sweep identity and discards it after its types finish. One explicit pull, whether
+     * clock). The types of one burst share exactly one [Deferred] per category set. A pull can
+     * adopt the sticky page of a reconciliation already in flight. One explicit pull, whether
      * for one type or a [FlagPullBatch], opens a fresh [sweepGeneration]. A partially failed sweep only
      * ever serves its own generation ; a stale post-[clearSessionCache] caller (its captured
      * session generation no longer matches) gets `null` and degrades instead of creating a sweep
@@ -1653,7 +1869,6 @@ class DefaultFlagRepository @Inject constructor(
                 sweepGeneration = fetch.sweepGeneration,
                 userId = fetch.userId,
                 catIds = cats.map { it.id },
-                reconciliationId = fetch.reconciliationId,
             )
             val existing = stickySweeps[key]
             if (existing != null && !existing.deferred.isCancelled) {
@@ -1662,7 +1877,8 @@ class DefaultFlagRepository @Inject constructor(
                 existing.trace?.let { parentTrace?.sticky(it) }
                 existing
             } else {
-                startStickySweep(cats, parentTrace, session.startStickyPhase()).also { stickySweeps[key] = it }
+                startStickySweep(cats, parentTrace, session.startStickyPhase(), adoptedSources(fetch))
+                    .also { stickySweeps[key] = it }
             }
         }
     }
@@ -1671,11 +1887,13 @@ class DefaultFlagRepository @Inject constructor(
         cats: List<Category>,
         parentTrace: FlagFetchTrace?,
         session: FlagReadSession,
+        adopted: TargetedRead?,
     ): ObservedSweep {
         val trace = parentTrace?.let { parent ->
             FlagFetchTrace(parent.refreshId, parent.type, parent.trigger).also { parent.sticky(it) }
         }
-        val bodies = mutableMapOf<Int, Result<String>>()
+        val bodies = mutableMapOf<Int, StickyPage>()
+        val startedOrder = sourceReadSequence.incrementAndGet()
         val deferred = fetchScope.async((trace ?: kotlin.coroutines.EmptyCoroutineContext) + session) {
             refreshDiagnostics.withRefresh {
                 withTimeoutOrNull(session.remainingMillis().coerceAtLeast(1)) {
@@ -1683,7 +1901,8 @@ class DefaultFlagRepository @Inject constructor(
                         val expired = AtomicBoolean(false)
                         cats.map { category ->
                             async(HfrRequestQueued()) {
-                                val body = fetchStickyBody(category.id, expired, trace)
+                                val body = adopted?.takeIf { it.cat == category.id }?.sticky?.await()
+                                    ?: readStickyPage(category.id, expired, trace)
                                 synchronized(bodies) { bodies[category.id] = body }
                             }
                         }.awaitAll()
@@ -1692,7 +1911,12 @@ class DefaultFlagRepository @Inject constructor(
             }
             synchronized(bodies) { bodies.toMap() }
         }
-        return ObservedSweep(deferred, trace, bodies)
+        return ObservedSweep(deferred, trace, bodies, startedOrder)
+    }
+
+    private suspend fun readStickyPage(cat: Int, expired: AtomicBoolean, trace: FlagFetchTrace?): StickyPage {
+        val order = sourceReadSequence.incrementAndGet()
+        return StickyPage(fetchStickyBody(cat, expired, trace), order)
     }
 
     private suspend fun fetchStickyBody(
@@ -1718,13 +1942,13 @@ class DefaultFlagRepository @Inject constructor(
         val sweepGeneration: Int,
         val userId: String,
         val catIds: List<Int>,
-        val reconciliationId: Long?,
     )
 
     private class ObservedSweep(
-        val deferred: Deferred<Map<Int, Result<String>>>,
+        val deferred: Deferred<Map<Int, StickyPage>>,
         val trace: FlagFetchTrace?,
-        val bodies: MutableMap<Int, Result<String>>,
+        val bodies: MutableMap<Int, StickyPage>,
+        val startedOrder: Long,
     ) {
         var callers = 1 // Under stickySweeps; released even when await is cancelled.
     }
@@ -1733,14 +1957,18 @@ class DefaultFlagRepository @Inject constructor(
 
     /** Fence publication before closing admission and draining all owners in the policy controller. */
     private suspend fun retirePolicy(): List<kotlinx.coroutines.Job> = generationMutex.withLock {
-        synchronized(cachedSuccesses) {
+        val staged = synchronized(cachedSuccesses) {
             policyGeneration++
             sweepGeneration++
-            reconciledCategories.clear()
+            val jobs = (targetedRead?.jobs().orEmpty() + adoptedRead?.staged?.jobs().orEmpty()).distinct()
+            jobs.forEach { it.cancel() }
+            targetedRead = null
+            adoptedRead = null
             activeRefreshes.clear()
             cachedFetchKeys.clear()
+            jobs
         }
-        val jobs = synchronized(inFlightFetches) { inFlightFetches.values.map { it.deferred } } +
+        val jobs = staged + synchronized(inFlightFetches) { inFlightFetches.values.map { it.deferred } } +
             synchronized(stickySweeps) { stickySweeps.values.map { it.deferred } }
         cancelSupersededFetches()
         jobs

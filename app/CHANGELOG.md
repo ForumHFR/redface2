@@ -19,8 +19,8 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 ## À paraître
 
 - Drapeaux ([#1684](https://github.com/ForumHFR/redface2/issues/1684)) — 5 requêtes en parallèle par défaut et 10 au maximum. Le pull sur Super partage le balayage des épinglés entre ses trois types. Chaque page de ce balayage ne demande qu’un sujet ordinaire en plus des épinglés.
-- Drapeaux — dans la fenêtre automatique de deux minutes, revenir d’un sujet relit seulement sa catégorie, y compris après un lien ou une recherche. Le geste d’actualisation et « Réessayer » attendent 30 secondes après la dernière collecte et indiquent quand un nouvel essai est possible si elle a échoué.
-- Une pause avec échéance visible limite les requêtes REST après des refus répétés de HFR. Le test de connexion est suspendu pendant cette pause et utilise 16 requêtes par test.
+- Drapeaux — dans la fenêtre automatique de deux minutes, le retour d’un sujet peut relire sa catégorie sur Cyan, Rouge ou Favoris, y compris après un lien ou une recherche. Super conserve son affichage en cache jusqu’à une actualisation. Le geste d’actualisation et « Réessayer » attendent 30 secondes après la dernière tentative et indiquent quand réessayer en cas d’échec.
+- Une pause avec échéance visible suspend les échanges REST après des refus répétés de HFR. Après l’échéance, une lecture ordinaire avec la même authentification confirme la reprise. Le test de connexion redevient alors disponible et utilise 16 requêtes.
 - Le User-Agent identifie la version et la variante de l’app. [#1683](https://github.com/ForumHFR/redface2/issues/1683)
 
 ## `0.72.0` — `internal` (dev) — 2026-11-27

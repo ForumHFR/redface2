@@ -2,11 +2,15 @@ package fr.forumhfr.redface2.core.network
 
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.error.HfrRestBlockedException
+import io.mockk.every
+import io.mockk.mockk
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
@@ -19,6 +23,7 @@ import okhttp3.Request
 import okhttp3.Response
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -57,7 +62,7 @@ class HfrRestCircuitBreakerTest {
         assertNull(store.saved)
 
         breaker.reply(refused())
-        assertEquals(HfrRestCooldown(time.now.plusSeconds(600), level = 0), store.saved)
+        assertEquals(HfrRestCooldown(time.now.plusSeconds(600), level = 0, HfrRestContext.ANONYMOUS), store.saved)
         assertBlocked { breaker.admit() }
     }
 
@@ -70,18 +75,19 @@ class HfrRestCircuitBreakerTest {
 
         val restarted = newBreaker()
         val deadline = time.now.plusSeconds(1800)
-        assertEquals(HfrRestCooldown(deadline, level = 0), store.saved)
+        assertEquals(HfrRestCooldown(deadline, level = 0, HfrRestContext.ANONYMOUS), store.saved)
         assertBlocked { restarted.admit() }
         assertBlocked { restarted.checkProbeAllowed() }
 
-        time.now = deadline
+        time.moveTo(deadline)
         val recovery = restarted.admit()
-        assertBlocked { restarted.admit() }
+        val sibling = async { runCatching { restarted.admit() } }
+        runCurrent()
+        assertFalse(sibling.isCompleted)
         assertBlocked { restarted.checkProbeAllowed() }
         restarted.complete(recovery, null)
-        val next = restarted.admit()
-        assertBlocked { restarted.admit() }
-        restarted.complete(next, success)
+        assertTrue(sibling.await().isFailure)
+        restarted.complete(restarted.admit(), success)
         assertNull(store.saved)
         restarted.checkProbeAllowed()
     }
@@ -92,29 +98,31 @@ class HfrRestCircuitBreakerTest {
         for ((attempt, minutes) in listOf(10L, 20L, 40L, 60L, 60L).withIndex()) {
             breaker.reply(refused())
             val deadline = time.now.plusSeconds(minutes * 60)
-            assertEquals(HfrRestCooldown(deadline, level = attempt.coerceAtMost(3)), store.saved)
-            time.now = deadline
+            val expected = HfrRestCooldown(deadline, level = attempt.coerceAtMost(3), HfrRestContext.ANONYMOUS)
+            assertEquals(expected, store.saved)
+            time.moveTo(deadline)
         }
         breaker.reply(success)
         breaker.reply(refused())
         assertNull(store.saved)
         breaker.reply(refused())
-        assertEquals(HfrRestCooldown(time.now.plusSeconds(600), level = 0), store.saved)
+        assertEquals(HfrRestCooldown(time.now.plusSeconds(600), level = 0, HfrRestContext.ANONYMOUS), store.saved)
     }
 
     @Test
     fun `HTTP dates and oversized delay seconds are both capped at two hours`() = runTest {
         breaker.reply(refused("Fri, 27 Nov 2026 13:00:00 GMT"))
         breaker.reply(refused("Fri, 27 Nov 2026 13:30:00 GMT"))
-        assertEquals(HfrRestCooldown(Instant.parse("2026-11-27T13:30:00Z"), level = 0), store.saved)
+        val expected = HfrRestCooldown(Instant.parse("2026-11-27T13:30:00Z"), 0, HfrRestContext.ANONYMOUS)
+        assertEquals(expected, store.saved)
 
-        time.now = checkNotNull(store.saved).until
+        time.moveTo(checkNotNull(store.saved).until)
         breaker.reply(refused("999999999999999999999999"))
-        assertEquals(HfrRestCooldown(time.now.plusSeconds(7200), level = 1), store.saved)
+        assertEquals(HfrRestCooldown(time.now.plusSeconds(7200), level = 1, HfrRestContext.ANONYMOUS), store.saved)
 
-        time.now = checkNotNull(store.saved).until
+        time.moveTo(checkNotNull(store.saved).until)
         breaker.reply(refused("Fri, 27 Nov 2026 18:00:00 GMT"))
-        assertEquals(HfrRestCooldown(time.now.plusSeconds(7200), level = 2), store.saved)
+        assertEquals(HfrRestCooldown(time.now.plusSeconds(7200), level = 2, HfrRestContext.ANONYMOUS), store.saved)
     }
 
     @Test
@@ -130,7 +138,7 @@ class HfrRestCircuitBreakerTest {
         assertEquals(listOf(deadline), observed)
         assertEquals(listOf(true), probeBlocked)
         assertEquals(HfrRestCooldown(deadline, level = 3), store.saved)
-        time.now = deadline
+        time.moveTo(deadline)
         advanceTimeBy(7_200_000)
         observing.join()
         assertEquals(listOf(deadline, null), observed)
@@ -141,13 +149,32 @@ class HfrRestCircuitBreakerTest {
         assertEquals(listOf(true, false), probeBlocked)
     }
 
+    @Test
+    fun `a late refusal extends the pause and wall-clock jumps do not change its remaining duration`() = runTest {
+        val late = breaker.admit()
+        repeat(2) { breaker.reply(refused()) }
+        breaker.complete(late, refused("9000"))
+        assertEquals(time.now.plusSeconds(7200), store.saved?.until)
+
+        time.now = time.now.plusSeconds(86_400)
+        assertBlocked { breaker.admit() }
+        time.now = time.now.minusSeconds(172_800)
+        time.nanos = Duration.ofHours(2).toNanos() - 1
+        assertBlocked { breaker.admit() }
+        time.nanos++
+        assertNull(breaker.cooldownDeadline())
+        assertNotNull(breaker.admit().outcome)
+    }
+
     private suspend fun HfrRestCircuitBreaker.reply(reply: RestReply) = complete(admit(), reply)
 
     private suspend fun assertBlocked(action: suspend () -> Unit) {
         assertTrue(runCatching { action() }.exceptionOrNull() is HfrRestBlockedException)
     }
 
-    private fun newBreaker() = HfrRestCircuitBreaker(store, time, DiagnosticsLog())
+    private fun newBreaker() = HfrRestCircuitBreaker(store, time, DiagnosticsLog(), mockk {
+        every { nowNanos() } answers { time.nanos }
+    })
 
     private class MemoryStore : HfrRestCooldownStore {
         var saved: HfrRestCooldown? = null
@@ -157,6 +184,11 @@ class HfrRestCircuitBreakerTest {
 
     private class TestClock : Clock() {
         var now: Instant = Instant.parse("2026-11-27T12:00:00Z")
+        var nanos: Long = 0
+        fun moveTo(instant: Instant) {
+            nanos += Duration.between(now, instant).toNanos()
+            now = instant
+        }
         override fun instant(): Instant = now
         override fun getZone(): ZoneId = ZoneOffset.UTC
         override fun withZone(zone: ZoneId): Clock = fixed(now, zone)

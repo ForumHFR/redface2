@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.core.network
 
-import fr.forumhfr.redface2.core.domain.error.HfrRestBlockedException
 import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshPolicy
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicReference
@@ -31,17 +30,24 @@ class FlagReadSession private constructor(
         nanoTime: () -> Long = System::nanoTime,
         policy: FlagsRefreshPolicy = FlagsRefreshPolicy(),
         deadline: Long = nanoTime() + COLLECTION_TIMEOUT_MS * NANOS_PER_MS,
-    ) : this(nanoTime, policy, deadline, Progress())
+        singleExchange: Boolean = false,
+    ) : this(nanoTime, policy, deadline, Progress(singleExchange))
 
     constructor(nanoTime: () -> Long) : this(nanoTime, FlagsRefreshPolicy())
 
-    fun withPolicy(policy: FlagsRefreshPolicy): FlagReadSession = FlagReadSession(nanoTime, policy, deadline)
+    fun withPolicy(policy: FlagsRefreshPolicy): FlagReadSession =
+        FlagReadSession(nanoTime, policy, deadline, singleExchange)
 
-    /** Start the shared sticky sweep with its own deadline and the admission's existing retry quota. */
+    internal val singleExchange: Boolean get() = progress.singleExchange
+
+    /**
+     * Request bar E2 (#1684): the nominal sweep keeps its own 12 s even on a slow line. The old
+     * common deadline could stop before sending all categories. The retry quota remains shared.
+     */
     fun startStickyPhase(): FlagReadSession =
         FlagReadSession(nanoTime, policy, nanoTime() + STICKY_TIMEOUT_MS * NANOS_PER_MS, progress)
 
-    internal fun abort(error: HfrRestBlockedException) { progress.blocked.compareAndSet(null, error) }
+    internal fun abort(error: IOException) { progress.blocked.compareAndSet(null, error) }
     internal fun checkNotBlocked() { progress.blocked.get()?.let { throw it } }
     val wasBlocked: Boolean get() = progress.blocked.get() != null
 
@@ -60,7 +66,8 @@ class FlagReadSession private constructor(
         if (retry) progress.retriesSucceeded++
     }
     fun reserveRetry(): Boolean = synchronized(progress) {
-        val allowed = policy.applicationRetry && progress.successfulCalls > 0 && progress.reservedRetries < MAX_RETRIES
+        val retryEnabled = policy.applicationRetry && !singleExchange
+        val allowed = retryEnabled && progress.successfulCalls > 0 && progress.reservedRetries < MAX_RETRIES
         if (allowed) progress.reservedRetries++
         allowed
     }
@@ -78,8 +85,8 @@ class FlagReadSession private constructor(
         )
     }
 
-    private class Progress {
-        val blocked = AtomicReference<HfrRestBlockedException?>()
+    private class Progress(val singleExchange: Boolean) {
+        val blocked = AtomicReference<IOException?>()
         var successfulCalls = 0
         var logicalOperations = 0
         var applicationCalls = 0

@@ -45,6 +45,29 @@ class FlagDaoTest {
     }
 
     @Test
+    fun `a failed replacement in the second type rolls back the first type too`() = runTest {
+        val initial = mapOf(
+            FlagType.CYAN to FlagCacheSnapshot(listOf(row("alice", 1, FlagType.CYAN)), emptyList()),
+            FlagType.RED to FlagCacheSnapshot(listOf(row("alice", 2, FlagType.RED)), emptyList()),
+        )
+        dao.replaceSnapshots("alice", initial)
+        database.openHelper.writableDatabase.execSQL(
+            "CREATE TRIGGER reject_second_type BEFORE INSERT ON flag_topics WHEN NEW.topicId = 4 " +
+                "BEGIN SELECT RAISE(ABORT, 'test failure'); END",
+        )
+
+        val failure = runCatching {
+            dao.replaceSnapshots("alice", mapOf(
+                FlagType.CYAN to FlagCacheSnapshot(listOf(row("alice", 3, FlagType.CYAN)), emptyList()),
+                FlagType.RED to FlagCacheSnapshot(listOf(row("alice", 4, FlagType.RED)), emptyList()),
+            ))
+        }
+
+        assertTrue(failure.isFailure)
+        initial.forEach { (type, snapshot) -> assertEquals(snapshot, dao.getSnapshot("alice", type)) }
+    }
+
+    @Test
     fun `unknown persisted row and coverage sources are neutral instead of crashing - P2c fix`() = runTest {
         val now = Instant.parse("2026-11-16T12:00:00Z")
         dao.upsertAll(listOf(row("alice", 1, FlagType.CYAN)))

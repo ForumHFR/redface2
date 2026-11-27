@@ -192,7 +192,11 @@ class FlagsViewModel @Inject constructor(
 interface FlagRepository {
     fun observe(type: FlagType): Flow<FlagsResult>
     suspend fun refresh(type: FlagType): FlagsResult
-    suspend fun reconcileTopicReads(reads: Set<TopicRead>, visibleTypes: List<FlagType>) = Unit
+    suspend fun reconcileTopicReads(
+        reads: Map<TopicRead, Set<FlagType>>,
+        visibleType: FlagType?,
+        maxRequests: Int,
+    ): FlagReconciliationResult = FlagReconciliationResult()
     fun clearSessionCache()
 }
 

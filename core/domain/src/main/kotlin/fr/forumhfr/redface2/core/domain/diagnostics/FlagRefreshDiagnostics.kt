@@ -75,14 +75,20 @@ class FlagRefreshDiagnostics @Inject constructor(
         types: List<FlagType>,
         throttled: Boolean,
         deferredTypes: List<FlagType> = emptyList(),
+        paused: Boolean = false,
     ) {
         networkActions.recordSafely(
             NetworkAction.FLAG_REFRESH_IGNORED, NetworkTrigger.fromFlags(trigger),
             (types.size - deferredTypes.size).toLong(),
         )
+        val reason = when {
+            paused -> "cooldown"
+            throttled -> "throttle"
+            else -> "reentrance"
+        }
         log.record(DiagnosticsLog.Level.INFO, TAG,
             "trigger=${trigger.label} types=${types.joinToString { it.name }} " +
-                "${policy.diagnosticLine()} ignored=${if (throttled) "throttle" else "reentrance"} " +
+                "${policy.diagnosticLine()} ignored=$reason " +
                 "deferredTypes=${deferredTypes.joinToString { it.name }}")
     }
 

@@ -21,6 +21,7 @@ internal data class CategoryRefreshOutcome(
     val flags: List<Flag> = emptyList(),
     val receivedAt: Instant,
     val failure: FlagFailureKind? = null,
+    val readOrder: Long = 0,
 )
 
 internal data class FlagRefreshBatch(
@@ -47,15 +48,7 @@ internal fun mergeFlagSnapshot(
     batch: FlagRefreshBatch,
 ): FlagCacheSnapshot {
     if (batch.globalOnly) return mergeGlobalFlagSnapshot(old, userId, type, batch)
-    val outcomes = batch.outcomes.ifEmpty {
-        val cats = (old.rows.map { it.cat } + old.coverage.map { it.cat }).distinct().filter { it > 0 }
-        cats.flatMap { cat ->
-            listOf(FlagSource.BUCKET, FlagSource.STICKY).map { source ->
-                CategoryRefreshOutcome(cat, source, receivedAt = batch.attemptedAt,
-                    failure = batch.cause?.toFlagFailureKind())
-            }
-        }
-    }
+    val outcomes = sourceOutcomes(old, batch)
     val coverage = old.coverage.filter { previous ->
         (batch.categoryIds == null || previous.cat in batch.categoryIds) &&
             (!previous.isGlobalMarker() || batch.resolutionCat != null) &&
@@ -82,6 +75,17 @@ internal fun mergeFlagSnapshot(
     val rows = (retained + incoming)
         .associateBy { it.cat to it.topicId }.values.toList()
     return FlagCacheSnapshot(rows, coverage + unverified)
+}
+
+private fun sourceOutcomes(old: FlagCacheSnapshot, batch: FlagRefreshBatch): List<CategoryRefreshOutcome> {
+    val failure = batch.cause?.toFlagFailureKind()
+    if (failure == null || batch.outcomes.isNotEmpty() || batch.categoryIds != null) return batch.outcomes
+    val cats = (old.rows.map { it.cat } + old.coverage.map { it.cat }).distinct().filter { it > 0 }
+    return cats.flatMap { cat ->
+        listOf(FlagSource.BUCKET, FlagSource.STICKY).map { source ->
+            CategoryRefreshOutcome(cat, source, receivedAt = batch.attemptedAt, failure = failure)
+        }
+    }
 }
 
 internal fun FlagCacheSnapshot.toResult(): FlagsResult.Success {

@@ -1,17 +1,21 @@
 package fr.forumhfr.redface2.core.domain.flags
 
+import fr.forumhfr.redface2.core.model.FlagType
+
 data class TopicRead(val cat: Int, val topicId: Int)
 
-/** Process-local handoff from authenticated topic loads to the next Flags landing. */
+/** Process-local handoff from authenticated topic loads to Flags, acknowledged by each source. */
 class TopicReadQueue {
-    private val pending = linkedMapOf<Pair<String, TopicRead>, Long>()
+    private data class Entry(val version: Long, val types: Set<FlagType>)
+
+    private val pending = linkedMapOf<Pair<String, TopicRead>, Entry>()
     private var sequence = 0L
 
     @Synchronized
     fun record(pseudo: String, read: TopicRead) {
         val key = pseudo.lowercase() to read
         pending.remove(key)
-        pending[key] = ++sequence
+        pending[key] = Entry(++sequence, FlagType.entries.toSet())
         if (pending.size > MAX_PENDING_READS) pending.remove(pending.keys.first())
     }
 
@@ -19,25 +23,24 @@ class TopicReadQueue {
     fun checkpoint(): Long = sequence
 
     @Synchronized
-    fun hasPending(pseudo: String, through: Long): Boolean {
+    fun pending(pseudo: String, through: Long): Map<TopicRead, Set<FlagType>> {
         val account = pseudo.lowercase()
-        return pending.any { (key, version) -> key.first == account && version <= through }
+        return pending.entries.mapNotNull { (key, entry) ->
+            if (key.first == account && entry.version <= through) key.second to entry.types else null
+        }.toMap()
     }
 
     @Synchronized
-    fun drain(pseudo: String, through: Long): Set<TopicRead> {
+    fun acknowledge(pseudo: String, through: Long, covered: Map<TopicRead, Set<FlagType>>) {
         val account = pseudo.lowercase()
-        val reads = linkedSetOf<TopicRead>()
-        pending.entries.removeAll { (key, version) ->
-            (version <= through).also { consumed ->
-                if (consumed && key.first == account) reads.add(key.second)
-            }
+        covered.forEach { (read, types) ->
+            val key = account to read
+            val entry = pending[key] ?: return@forEach
+            if (entry.version > through) return@forEach
+            val remaining = entry.types - types
+            if (remaining.isEmpty()) pending.remove(key) else pending[key] = entry.copy(types = remaining)
         }
-        return reads
     }
-
-    @Synchronized
-    fun clear() = pending.clear()
 }
 
 private const val MAX_PENDING_READS = 64

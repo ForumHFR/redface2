@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.data.forum.DefaultForumRepository
 import fr.forumhfr.redface2.core.data.forum.RestCategory
 import fr.forumhfr.redface2.core.data.forum.RestListEnvelope
 import fr.forumhfr.redface2.core.data.forum.RestTopic
+import fr.forumhfr.redface2.core.data.preferences.DataStoreHfrRestCooldownStore
 import fr.forumhfr.redface2.core.data.preferences.DataStoreUserPreferencesRepository
 import fr.forumhfr.redface2.core.database.dao.FlagCacheSnapshot
 import fr.forumhfr.redface2.core.database.dao.FlagDao
@@ -15,11 +16,14 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
 import fr.forumhfr.redface2.core.domain.error.HfrRestBlockedException
+import fr.forumhfr.redface2.core.domain.error.HfrRestRecoveryPendingException
 import fr.forumhfr.redface2.core.domain.flags.FlagPullBatch
 import fr.forumhfr.redface2.core.domain.flags.FlagLookup
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.flags.TopicRead
+import fr.forumhfr.redface2.core.domain.flags.TopicReadQueue
+import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshStrategy
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Flag
@@ -31,10 +35,13 @@ import fr.forumhfr.redface2.core.network.FlagReadExecutor
 import fr.forumhfr.redface2.core.network.FlagReadJitter
 import fr.forumhfr.redface2.core.network.FlagReadLimiter
 import fr.forumhfr.redface2.core.network.HfrApiClient
+import fr.forumhfr.redface2.core.network.HfrRestCircuitBreaker
+import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import java.io.Closeable
+import java.io.IOException
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -55,6 +62,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -62,13 +70,16 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.Dns
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Protocol
-import okhttp3.Request
 import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okhttp3.mockwebserver.Dispatcher
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
@@ -81,7 +92,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * REST requests at OkHttp entry with 20 categories. Peak counts concurrent requests in the interceptor.
+ * Request budgets with 20 categories. Scenarios using the wire harness count exchanges received
+ * by MockWebServer. The other scenarios count application calls and measure their peak in flight.
  *
  * | Operation | Requests before → after | Peak before → after |
  * | --- | ---: | ---: |
@@ -94,7 +106,7 @@ import org.robolectric.annotation.Config
  * | CYAN topic return after 2 min | 40 → 40 | 15 → 5 |
  * | Read from a link/search, back to CYAN after 30 s | 40 → 2 | 15 → 1 |
  * | Two successive reads of the same category from CYAN | 80 → 4 | 15 → 1 |
- * | Topic return on Super, no other landing | 0 → 4 | 0 → 3 |
+ * | Topic return on Super, no other landing | 0 → 0 (ViewModel test) | 0 → 0 |
  * | Refused pull or banner/snackbar retry within 30 s, one type / Super | 40 / 120 → 0 / 0 | 15 → 0 |
  * | Resume at 30 s then 90 s then 130 s from the first refresh | 40 + 40 + 40 → 0 + 0 + 40 | 15 → 5 |
  * | One Apache 403 amid other HTTP failures, then a healthy pull | 20 + 40 → 5 + 40 | 15 → 5 |
@@ -129,7 +141,7 @@ class FlagRequestBudgetTest {
 
     @Test
     fun `CYAN refresh pays for the catalogue once and sweeps each category on both pulls`() = runTest {
-        repositories {
+        repositories(wire = true) {
             val cold = request { flags.refresh(FlagType.CYAN) }
             assertComplete(cold, FlagType.CYAN)
             assertSweep("participated", catalogueCalls = 1, peak = 5)
@@ -190,7 +202,7 @@ class FlagRequestBudgetTest {
 
     @Test
     fun `Super pull refreshes three buckets with one shared sticky sweep`() = runTest {
-        repositories {
+        repositories(wire = true) {
             warmCatalogue()
             val batch = listOf(
                 FlagType.CYAN to "participated",
@@ -211,7 +223,7 @@ class FlagRequestBudgetTest {
 
     @Test
     fun `a topic return reads its bucket and a fresh sticky page each time`() = runTest {
-        repositories {
+        repositories(wire = true) {
             val old = primeCyan()
             val read = TopicRead(23, 35395)
             repeat(2) { index ->
@@ -220,7 +232,7 @@ class FlagRequestBudgetTest {
                 val published = start {
                     flags.observe(FlagType.CYAN).drop(1).first { it is FlagsResult.Success }
                 }
-                request { flags.reconcileTopicReads(setOf(read), listOf(FlagType.CYAN)) }
+                request { flags.reconcileTopicReads(pending(read), FlagType.CYAN, 4) }
                 val refreshed = published.await() as FlagsResult.Success
                 assertRead(refreshed, old, read, anchor)
                 assertReconcileBudget(read.cat, setOf("participated"), peak = 1)
@@ -230,7 +242,7 @@ class FlagRequestBudgetTest {
 
     @Test
     fun `a cached topic in another type reconciles that type with one shared sticky page`() = runTest {
-        repositories {
+        repositories(wire = true) {
             val cyan = primeCyan()
             val favorite = request { flags.refresh(FlagType.FAVORITE) } as FlagsResult.Success
             assertSweep("favorites", catalogueCalls = 0, peak = 5)
@@ -238,7 +250,7 @@ class FlagRequestBudgetTest {
             val anchor = 28_173_035L
             replaceReadState(read, Kind.STICKY, anchor = anchor)
 
-            request { flags.reconcileTopicReads(setOf(read), listOf(FlagType.CYAN)) }
+            request { flags.reconcileTopicReads(pending(read), FlagType.CYAN, 4) }
 
             assertRead(snapshot(FlagType.FAVORITE), favorite, read, anchor)
             val updatedCyan = snapshot(FlagType.CYAN)
@@ -250,14 +262,43 @@ class FlagRequestBudgetTest {
     }
 
     @Test
-    fun `Super reconciles all three backing types with one sticky page`() = runTest {
-        repositories {
-            warmCatalogue()
+    fun `one pass over a full queue on Super reads only the cached matching types of one category`() = runTest {
+        repositories(wire = true) {
+            request { flags.refresh(FlagType.CYAN) }
+            val red = request { flags.refresh(FlagType.RED) } as FlagsResult.Success
+            val favorite = request { flags.refresh(FlagType.FAVORITE) } as FlagsResult.Success
+            http.takeRequests()
+            val queue = TopicReadQueue()
             val read = TopicRead(DISCUSSIONS, RED_PIN)
-            request { flags.reconcileTopicReads(setOf(read), FlagType.entries) }
-            assertPinned(snapshot(FlagType.RED).flags.single(), FlagType.RED)
-            assertPinned(snapshot(FlagType.FAVORITE).flags.single(), FlagType.FAVORITE)
-            assertReconcileBudget(read.cat, setOf("participated", "read", "favorites"), peak = 3)
+            repeat(62) { queue.record("xat", TopicRead(categoryIds.elementAt(it % categoryIds.size), -it - 1)) }
+            queue.record("xat", TopicRead(IA, CYAN_PIN))
+            queue.record("xat", read)
+            val pending = queue.pending("xat", queue.checkpoint())
+            assertEquals(64, pending.size)
+            val anchor = 28_173_035L
+            replaceReadState(read, Kind.STICKY, anchor = anchor)
+            val result = request { flags.reconcileTopicReads(pending, null, 4) }
+
+            assertEquals(mapOf(read to setOf(FlagType.RED)), result.covered)
+            assertRead(snapshot(FlagType.RED), red, read, anchor)
+            assertEquals(favorite, snapshot(FlagType.FAVORITE))
+            assertReconcileBudget(read.cat, setOf("read"), peak = null)
+        }
+    }
+
+    @Test
+    fun `global-only reconciliation sends one global GET for the selected type`() = runTest {
+        repositories(strategy = FlagsRefreshStrategy.GLOBAL_ONLY, wire = true) {
+            val result = request { flags.refresh(FlagType.CYAN) } as FlagsResult.Success
+            val flag = result.flags.first()
+            http.takeRequests()
+            val read = TopicRead(flag.cat, flag.topicId)
+            assertEquals(mapOf(read to setOf(FlagType.CYAN)),
+                request { flags.reconcileTopicReads(pending(read), FlagType.CYAN, 4) }.covered)
+            assertBudget(RequestCounts(global = 1), peak = null)
+            val after = snapshot(FlagType.CYAN)
+            assertEquals(FlagRefreshStatus.PARTIAL, after.refreshStatus)
+            assertEquals(result.flags, after.flags)
         }
     }
 
@@ -269,7 +310,7 @@ class FlagRequestBudgetTest {
             replaceReadState(read, Kind.BUCKET, "participated", anchor = 2_783_260L)
             http.failedKind = Kind.STICKY
 
-            request { flags.reconcileTopicReads(setOf(read), listOf(FlagType.CYAN)) }
+            request { flags.reconcileTopicReads(pending(read), FlagType.CYAN, 4) }
 
             assertEquals(old, snapshot(FlagType.CYAN))
             assertReconcileBudget(read.cat, setOf("participated"), peak = 1)
@@ -280,31 +321,149 @@ class FlagRequestBudgetTest {
     }
 
     @Test
-    fun `full collection started before the topic read cannot overwrite a newer reconciliation`() = runTest {
-        repositories {
+    fun `a pull admitted first absorbs the reconciliation within forty exchanges`() = runTest {
+        repositories(wire = true) {
             val old = primeCyan()
+            val read = TopicRead(23, 35395)
             val inventory = start { flags.refresh(FlagType.CYAN) }
-            // Wait for the actual OKHttp calls. Dispatcher waves can include continuation work.
             while (http.requestCounts()[Kind.BUCKET] != categoryIds.size) driveWave()
-            val release = http.holdNextCall() // Leave the full sweep in flight while the reconcile commits.
+            val release = http.holdNextCall()
+
+            // HFR changes the anchor only after all full bucket reads have already returned.
+            replaceReadState(read, Kind.BUCKET, "participated", anchor = 2_783_260L)
+            val reconciliation = request { flags.reconcileTopicReads(pending(read), FlagType.CYAN, 4) }
+            assertTrue(reconciliation.covered.isEmpty())
+            assertFalse(inventory.isCompleted)
+            release()
+
+            val result = request { inventory.await() }
+            assertComplete(result, FlagType.CYAN)
+            assertEquals(old, result)
+            assertEquals(old, snapshot(FlagType.CYAN))
+            assertBudget(RequestCounts(bucket = 20, sticky = 20), peak = null)
+        }
+    }
+
+    @Test
+    fun `a pull adopts a targeted bucket that already reached HFR within forty exchanges`() = runTest {
+        repositories(wire = true) {
+            val old = primeCyan()
             val read = TopicRead(23, 35395)
             val anchor = 2_783_260L
             replaceReadState(read, Kind.BUCKET, "participated", anchor)
-
-            request { flags.reconcileTopicReads(setOf(read), listOf(FlagType.CYAN)) }
-            assertFalse(inventory.isCompleted)
-            assertRead(snapshot(FlagType.CYAN), old, read, anchor)
-
+            val reconciliation = start { flags.reconcileTopicReads(pending(read), FlagType.CYAN, 4) }
+            while (http.requestCounts()[Kind.BUCKET] != 1) driveWave()
+            val release = http.holdNextCall()
+            val inventory = start { flags.refresh(FlagType.CYAN) }
             release()
+
             assertRead(request { inventory.await() } as FlagsResult.Success, old, read, anchor)
+            assertTrue(reconciliation.await().failedTypes.isEmpty())
             assertRead(snapshot(FlagType.CYAN), old, read, anchor)
-            assertBudget(RequestCounts(bucket = 21, sticky = 21), peak = 5)
+            assertBudget(RequestCounts(bucket = 20, sticky = 20), peak = null)
+        }
+    }
+
+    @Test
+    fun `read lookup and the grouped Room write failures are isolated and preserve both snapshots`() = runTest {
+        repositories {
+            val cyan = primeCyan()
+            val favorite = request { flags.refresh(FlagType.FAVORITE) } as FlagsResult.Success
+            assertSweep("favorites", catalogueCalls = 0, peak = 5)
+            val read = TopicRead(DISCUSSIONS, FAVORITE_PIN)
+            replaceReadState(read, Kind.STICKY, anchor = 28_173_035L)
+            val dao = dao
+            coEvery { dao.getSnapshot("xat", FlagType.RED) } throws IOException("read failed")
+            val lookup = request { flags.reconcileTopicReads(pending(read), FlagType.CYAN, 4) }
+            assertEquals(setOf(FlagType.CYAN), lookup.failedTypes)
+            assertBudget(RequestCounts(), peak = 0)
+            coEvery { dao.getSnapshot("xat", FlagType.RED) } returns FlagCacheSnapshot(emptyList(), emptyList())
+
+            coEvery { dao.replaceSnapshots("xat", any()) } throws IOException("write failed")
+            val write = request { flags.reconcileTopicReads(pending(read), FlagType.CYAN, 4) }
+            assertEquals(setOf(FlagType.CYAN, FlagType.FAVORITE), write.failedTypes)
+            assertTrue(write.covered.isEmpty())
+            assertEquals(cyan, snapshot(FlagType.CYAN))
+            assertEquals(favorite, snapshot(FlagType.FAVORITE))
+            assertReconcileBudget(read.cat, setOf("participated", "favorites"), peak = 2)
+        }
+    }
+
+    @Test
+    fun `a later Super phase replaces an earlier category read but retains its newer sticky source`() = runTest {
+        repositories {
+            val cat = DISCUSSIONS
+            val read = TopicRead(cat, 35395)
+            val sticky = TopicRead(cat, RED_PIN)
+            http.overrideBody(RecordedRequest(Kind.BUCKET, cat, "read", page = 1),
+                fixture("rest_cat23_participated.json"))
+            request { flags.refresh(FlagType.RED) }
+            val batch = FlagPullBatch()
+            request { withContext(batch) { flags.refresh(FlagType.CYAN) } }
+            replaceReadState(read, Kind.BUCKET, "read", anchor = 2_783_260L)
+            replaceReadState(sticky, Kind.STICKY, anchor = 28_173_035L)
+            val reconciled = request { flags.reconcileTopicReads(pending(read), FlagType.RED, 4) }
+            assertEquals(setOf(FlagType.RED), reconciled.covered[read])
+            replaceReadState(read, Kind.BUCKET, "read", anchor = 2_783_261L)
+            val result = request { withContext(batch) { flags.refresh(FlagType.RED) } } as FlagsResult.Success
+            assertEquals(FlagRefreshStatus.COMPLETE, result.refreshStatus)
+            assertFalse(result.flags.single { it.topicId == read.topicId }.hasUnread)
+            assertEquals(2_783_261L, result.flags.single { it.topicId == read.topicId }.lastPostReadId)
+            assertFalse(result.flags.single { it.topicId == sticky.topicId }.hasUnread)
+            assertEquals(28_173_035L, result.flags.single { it.topicId == sticky.topicId }.lastPostReadId)
+        }
+    }
+
+    @Test
+    fun `a warm collection waits for one recovery and sends forty exchanges only on success`() = runTest {
+        repositories(wire = true) {
+            val old = primeCyan()
+            val read = TopicRead(23, 35395)
+            val anchor = 2_783_260L
+            replaceReadState(read, Kind.BUCKET, "participated", anchor)
+            http.failureCode = 429
+            repeat(2) {
+                assertTrue(request { runCatching { api.getCategoryFlagTopics(13, HfrRestFlagBucket.READ) } }.isFailure)
+            }
+            assertBudget(RequestCounts(bucket = 2), peak = null)
+            request { flags.refresh(FlagType.CYAN) }
+            assertBudget(RequestCounts(), peak = null)
+
+            advanceTimeBy(600_000)
+            assertBlockedWarm(old, bucketCalls = 1)
+            advanceTimeBy(1_200_000)
+            http.failureCode = null
+            http.headerDelayMs = 100
+            val recovered = request { flags.refresh(FlagType.CYAN) } as FlagsResult.Success
+            assertRead(recovered, old, read, anchor)
+            assertSweep("participated", catalogueCalls = 0, peak = null)
+        }
+    }
+
+    @Test
+    fun `a failed half-open exchange leaves the warm snapshot undisturbed and sends no sticky sweep`() = runTest {
+        repositories(wire = true) {
+            val old = primeCyan()
+            http.failureCode = 429
+            repeat(2) {
+                assertTrue(request { runCatching { api.getCategoryFlagTopics(13, HfrRestFlagBucket.READ) } }.isFailure)
+            }
+            assertBudget(RequestCounts(bucket = 2), peak = null)
+            advanceTimeBy(600_000)
+            http.failureCode = 503
+            http.headerDelayMs = 100
+
+            val result = request { flags.refresh(FlagType.CYAN) } as FlagsResult.Failure
+            assertTrue(result.cause is HfrRestRecoveryPendingException)
+            assertEquals(old, snapshot(FlagType.CYAN))
+            assertBudget(RequestCounts(bucket = 1), peak = null)
         }
     }
 
     @Test
     fun `one qualifying 403 stops the current collection without opening the breaker`() = runTest {
-        repositories {
+        repositories(wire = true) {
+            http.headerDelayMs = 100
             val cached = primeCyan()
             http.failureCode = 500
             http.forbiddenCategory = categoryIds.first()
@@ -326,7 +485,8 @@ class FlagRequestBudgetTest {
 
     @Test
     fun `Apache 403 with a warm catalogue stops after the first wave and retains pinned rows`() = runTest {
-        repositories {
+        repositories(wire = true) {
+            http.headerDelayMs = 100
             val cached = primeCyan()
             http.failureCode = 403
             assertBlockedWarm(cached, bucketCalls = 5)
@@ -336,7 +496,8 @@ class FlagRequestBudgetTest {
 
     @Test
     fun `Apache 403 with no catalogue opens after two calls then refuses a third pull`() = runTest {
-        repositories {
+        repositories(wire = true) {
+            http.headerDelayMs = 100
             http.failureCode = 403
             repeat(2) { assertBlockedCold(code = 403) }
             assertBlockedCold(code = null)
@@ -345,7 +506,8 @@ class FlagRequestBudgetTest {
 
     @Test
     fun `429 Retry-After with a warm catalogue suppresses the next pull and ancillary REST calls`() = runTest {
-        repositories {
+        repositories(wire = true) {
+            http.headerDelayMs = 100
             val cached = primeCyan()
             http.failureCode = 429
             val startedAt = currentTime
@@ -353,7 +515,7 @@ class FlagRequestBudgetTest {
             assertBlockedWarm(cached, bucketCalls = 0)
 
             val pausedSnapshot = snapshot(FlagType.CYAN)
-            request { flags.reconcileTopicReads(setOf(TopicRead(23, 35395)), listOf(FlagType.CYAN)) }
+            request { flags.reconcileTopicReads(pending(TopicRead(23, 35395)), FlagType.CYAN, 4) }
             assertEquals(pausedSnapshot, snapshot(FlagType.CYAN))
             assertBudget(RequestCounts(), peak = 0)
 
@@ -371,7 +533,8 @@ class FlagRequestBudgetTest {
 
     @Test
     fun `429 Retry-After with no catalogue opens after two calls then refuses a third pull`() = runTest {
-        repositories {
+        repositories(wire = true) {
+            http.headerDelayMs = 100
             http.failureCode = 429
             val startedAt = currentTime
             repeat(2) { assertBlockedCold(code = 429) }
@@ -509,14 +672,16 @@ class FlagRequestBudgetTest {
 
     private suspend fun TestScope.repositories(
         persistLegacy: Boolean = false,
+        wire: Boolean = false,
+        strategy: FlagsRefreshStrategy? = null,
         block: suspend Repositories.() -> Unit,
     ) {
         val dispatcher = StandardTestDispatcher(testScheduler)
         val settingsFile = temporaryFolder.root.resolve("user.preferences_pb")
         val store = PreferenceDataStoreFactory.create(scope = backgroundScope) { settingsFile }
-        if (persistLegacy) {
+        if (persistLegacy || strategy != null) {
             store.edit {
-                it[stringPreferencesKey("flags_refresh_strategy")] = "legacy"
+                it[stringPreferencesKey("flags_refresh_strategy")] = strategy?.id ?: "legacy"
                 it[intPreferencesKey("flags_refresh_concurrency")] = 5
             }
         }
@@ -538,17 +703,21 @@ class FlagRequestBudgetTest {
         val auth = mockk<AuthRepository> {
             every { observeAuthState() } returns flowOf(AuthState.Authenticated("XaT"))
         }
-        CountingHttp(responseBodies()).use { http ->
-            val client = OkHttpClient.Builder()
-                .dns(Dns { error("Unexpected DNS lookup for $it") })
-                .addInterceptor(http)
-                .build()
+        CountingHttp(responseBodies(), if (wire) MockWebServer() else null).use { http ->
+            val client = OkHttpClient.Builder().apply {
+                if (!wire) dns(Dns { error("Unexpected DNS lookup for $it") }).addInterceptor(http)
+            }.build()
+            val breaker = HfrRestCircuitBreaker(
+                DataStoreHfrRestCooldownStore(store), clock, diagnostics, monotonicClock,
+            )
+            val dao = snapshotDao()
             val api = HfrApiClient(
                 authenticated = client,
                 anonymous = client,
-                baseUrl = "https://hfr.test/".toHttpUrl(),
+                baseUrl = http.baseUrl,
                 ioDispatcher = http,
                 flagReadExecutor = FlagReadExecutor(limiter, FlagReadJitter()),
+                breaker = breaker,
             )
             val forum = DefaultForumRepository(api, json, dispatcher, clock)
             val flags = DefaultFlagRepository(
@@ -558,7 +727,7 @@ class FlagRequestBudgetTest {
                 flagDeleteResponseParser = mockk(),
                 forumRepository = forum,
                 authRepository = auth,
-                flagCacheStore = FlagCacheStore(snapshotDao(), clock, dispatcher),
+                flagCacheStore = FlagCacheStore(dao, clock, dispatcher),
                 json = json,
                 ioDispatcher = dispatcher,
                 clock = clock,
@@ -568,7 +737,7 @@ class FlagRequestBudgetTest {
                 preferences = preferences,
                 readLimiter = limiter,
             )
-            Repositories(this, flags, forum, http).block()
+            Repositories(this, flags, forum, http, api, dao).block()
         }
     }
 
@@ -581,14 +750,19 @@ class FlagRequestBudgetTest {
             coEvery { replaceSnapshot("xat", any(), any()) } coAnswers {
                 snapshots[secondArg<FlagType>()] = thirdArg<FlagCacheSnapshot>()
             }
+            coEvery { replaceSnapshots("xat", any()) } coAnswers {
+                snapshots.putAll(secondArg<Map<FlagType, FlagCacheSnapshot>>())
+            }
         }
     }
 
     private inner class Repositories(
-        private val scope: TestScope,
+        val scope: TestScope,
         val flags: DefaultFlagRepository,
         val forum: DefaultForumRepository,
         val http: CountingHttp,
+        val api: HfrApiClient,
+        val dao: FlagDao,
     ) {
         fun <T> start(operation: suspend () -> T): Deferred<T> =
             scope.async { operation() }.also { scope.runCurrent() }
@@ -620,7 +794,7 @@ class FlagRequestBudgetTest {
             ))))
         }
 
-        fun assertReconcileBudget(cat: Int, buckets: Set<String>, peak: Int) {
+        fun assertReconcileBudget(cat: Int, buckets: Set<String>, peak: Int?) {
             val calls = assertBudget(RequestCounts(bucket = buckets.size, sticky = 1), peak)
             assertEquals(buckets.map { RecordedRequest(Kind.BUCKET, cat, it, page = 1) }.toSet() +
                 RecordedRequest(Kind.STICKY, cat, page = 1, resultsPerPage = 1), calls.toSet())
@@ -635,7 +809,7 @@ class FlagRequestBudgetTest {
         suspend fun primeCyan(): FlagsResult.Success {
             val cached = request { flags.refresh(FlagType.CYAN) } as FlagsResult.Success
             assertComplete(cached, FlagType.CYAN)
-            assertSweep("participated", catalogueCalls = 1, peak = 5)
+            assertSweep("participated", catalogueCalls = 1, peak = if (http.wire) null else 5)
             return cached
         }
 
@@ -645,7 +819,7 @@ class FlagRequestBudgetTest {
             assertEquals(cached.flags, result.flags)
             assertEquals(cached.cachedAt, result.cachedAt)
             assertCoverage(result, failure = FlagFailureKind.BLOCKED)
-            val calls = assertBudget(RequestCounts(bucket = bucketCalls), peak = bucketCalls)
+            val calls = assertBudget(RequestCounts(bucket = bucketCalls), peak = if (http.wire) null else bucketCalls)
             assertEquals(bucketCalls, calls.map { it.cat }.distinct().size)
             assertTrue(calls.all { it.cat in categoryIds && it.bucket == "participated" && it.page == 1 })
         }
@@ -658,7 +832,7 @@ class FlagRequestBudgetTest {
             assertBudget(RequestCounts(catalogue = sent), peak = sent)
         }
 
-        fun assertSweep(bucket: String, catalogueCalls: Int, peak: Int) {
+        fun assertSweep(bucket: String, catalogueCalls: Int, peak: Int?) {
             val calls = assertBudget(RequestCounts(catalogue = catalogueCalls, bucket = 20, sticky = 20), peak)
             assertCategoryPages(calls, Kind.BUCKET, bucket)
             assertCategoryPages(calls, Kind.STICKY)
@@ -677,7 +851,7 @@ class FlagRequestBudgetTest {
             assertEquals(expected, calls.filter { it.kind == kind }.toSet())
         }
 
-        fun assertBudget(expected: RequestCounts, peak: Int): List<RecordedRequest> {
+        fun assertBudget(expected: RequestCounts, peak: Int?): List<RecordedRequest> {
             val calls = http.takeRequests()
             val counts = calls.groupingBy { it.kind }.eachCount()
             assertEquals(expected, RequestCounts(
@@ -688,7 +862,8 @@ class FlagRequestBudgetTest {
                 subcategories = counts[Kind.SUBCATEGORIES] ?: 0,
                 other = counts[Kind.OTHER] ?: 0,
             ))
-            assertEquals("peak in-flight requests", peak, http.takePeak())
+            val measuredPeak = http.takePeak()
+            if (!http.wire && peak != null) assertEquals("peak in-flight calls", peak, measuredPeak)
             return calls
         }
     }
@@ -698,7 +873,10 @@ class FlagRequestBudgetTest {
      * then enters OkHttp on a worker and waits for the other admitted Calls. The barrier size
      * comes from the scheduler's queue, so a different limiter policy changes the measured peak.
      */
-    private class CountingHttp(private val bodies: Map<RecordedRequest, String>) :
+    private class CountingHttp(
+        private val bodies: Map<RecordedRequest, String>,
+        private val server: MockWebServer?,
+    ) :
         CoroutineDispatcher(), Interceptor, Closeable {
         private val pending = ConcurrentLinkedQueue<Runnable>()
         private val requests = ConcurrentLinkedQueue<RecordedRequest>()
@@ -711,6 +889,23 @@ class FlagRequestBudgetTest {
         var forbiddenCategory: Int? = null
         var failedKind: Kind? = null
         private val overrides = mutableMapOf<RecordedRequest, String>()
+
+        val wire: Boolean get() = server != null
+        var headerDelayMs = 0L
+        val baseUrl = server?.url("/") ?: "https://hfr.test/".toHttpUrl()
+
+        init {
+            server?.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: okhttp3.mockwebserver.RecordedRequest): MockResponse {
+                    val entry = requireNotNull(request.requestUrl).record()
+                    requests.add(entry)
+                    val reply = replyFor(entry)
+                    return MockResponse().setResponseCode(reply.code).setHeader("Content-Type", reply.contentType)
+                        .apply { if (reply.code == 429) setHeader("Retry-After", "120") }
+                        .setHeadersDelay(headerDelayMs, TimeUnit.MILLISECONDS).setBody(reply.body)
+                }
+            }
+        }
 
         fun body(entry: RecordedRequest): String = overrides[entry] ?: bodies[entry] ?: EMPTY_LIST
 
@@ -748,37 +943,44 @@ class FlagRequestBudgetTest {
         override fun intercept(chain: Interceptor.Chain): Response {
             reachedOkHttp.set(true)
             val request = chain.request()
-            val entry = request.record()
+            val entry = request.url.record()
             requests.add(entry)
             peak.accumulateAndGet(inFlight.incrementAndGet(), ::maxOf)
             try {
                 wave.countDown()
                 check(wave.await(WORKER_TIMEOUT_SECONDS, TimeUnit.SECONDS)) { "HTTP wave did not reach OkHttp" }
-                val defaultCode = if (entry.kind == Kind.OTHER) 404 else 200
-                val code = when {
-                    forbiddenCategory != null && entry.cat == forbiddenCategory -> 403
-                    entry.kind == failedKind -> 500
-                    else -> failureCode ?: defaultCode
-                }
-                val contentType = if (code == 403) "text/html; charset=iso-8859-1" else "application/json"
-                val body = when (code) {
-                    403 -> APACHE_FORBIDDEN
-                    200 -> body(entry.copy(resultsPerPage = null))
-                    else -> "{}"
-                }
+                val reply = replyFor(entry)
                 return Response.Builder()
                     .request(request)
                     .protocol(Protocol.HTTP_1_1)
-                    .code(code)
-                    .message("Test HTTP $code")
-                    .header("Content-Type", contentType)
-                    .apply { if (code == 429) header("Retry-After", "120") }
-                    .body(body.toResponseBody(contentType.toMediaType()))
+                    .code(reply.code)
+                    .message("Test HTTP ${reply.code}")
+                    .header("Content-Type", reply.contentType)
+                    .apply { if (reply.code == 429) header("Retry-After", "120") }
+                    .body(reply.body.toResponseBody(reply.contentType.toMediaType()))
                     .build()
             } finally {
                 inFlight.decrementAndGet()
             }
         }
+
+        private fun replyFor(entry: RecordedRequest): TestReply {
+            val defaultCode = if (entry.kind == Kind.OTHER) 404 else 200
+            val code = when {
+                forbiddenCategory != null && entry.cat == forbiddenCategory -> 403
+                entry.kind == failedKind -> 500
+                else -> failureCode ?: defaultCode
+            }
+            val contentType = if (code == 403) "text/html; charset=iso-8859-1" else "application/json"
+            val body = when (code) {
+                403 -> APACHE_FORBIDDEN
+                200 -> body(entry.copy(resultsPerPage = null))
+                else -> "{}"
+            }
+            return TestReply(code, contentType, body)
+        }
+
+        private data class TestReply(val code: Int, val contentType: String, val body: String)
 
         fun requestCounts(): Map<Kind, Int> = requests.groupingBy { it.kind }.eachCount()
 
@@ -788,6 +990,7 @@ class FlagRequestBudgetTest {
 
         override fun close() {
             workers.shutdownNow()
+            server?.shutdown()
         }
     }
 
@@ -864,20 +1067,22 @@ class FlagRequestBudgetTest {
         val SUBCATEGORY_NAMES = Regex("forums/hardwarefr/categories/(\\d+)/subcategories/")
         val BUCKETS = setOf("participated", "read", "favorites")
 
-        fun Request.record(): RecordedRequest {
-            val uri = url.queryParameter("uri").orEmpty()
+        fun pending(read: TopicRead) = mapOf(read to FlagType.entries.toSet())
+
+        fun HttpUrl.record(): RecordedRequest {
+            val uri = queryParameter("uri").orEmpty()
             val subcategoryNames = SUBCATEGORY_NAMES.matchEntire(uri)
             val globalTopics = GLOBAL_TOPICS.matchEntire(uri)
             val categoryTopics = CATEGORY_TOPICS.matchEntire(uri)
             return when {
-                url.encodedPath != "/webservices/rest_api.php" -> RecordedRequest(Kind.OTHER)
+                encodedPath != "/webservices/rest_api.php" -> RecordedRequest(Kind.OTHER)
                 uri == "forums/hardwarefr/categories/" -> RecordedRequest(Kind.CATALOGUE)
                 subcategoryNames != null ->
                     RecordedRequest(Kind.SUBCATEGORIES, cat = subcategoryNames.groupValues[1].toInt())
                 globalTopics != null -> RecordedRequest(Kind.GLOBAL, bucket = globalTopics.groupValues[1])
                 categoryTopics != null -> categoryTopics.toCategoryRequest(
-                    url.queryParameter("page")?.toIntOrNull(),
-                    url.queryParameter("results_per_page")?.toIntOrNull(),
+                    queryParameter("page")?.toIntOrNull(),
+                    queryParameter("results_per_page")?.toIntOrNull(),
                 )
                 else -> RecordedRequest(Kind.OTHER)
             }

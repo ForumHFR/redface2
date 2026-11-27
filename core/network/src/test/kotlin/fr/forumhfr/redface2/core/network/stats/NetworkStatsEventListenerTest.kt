@@ -26,6 +26,7 @@ import fr.forumhfr.redface2.core.domain.stats.NetworkTrigger
 import fr.forumhfr.redface2.core.domain.stats.NoRequestReason
 import fr.forumhfr.redface2.core.network.HfrApiClient
 import fr.forumhfr.redface2.core.network.HfrFavoriteSmileyClient
+import fr.forumhfr.redface2.core.network.FlagReadClock
 import fr.forumhfr.redface2.core.network.HfrRestCircuitBreaker
 import fr.forumhfr.redface2.core.network.HfrRestCooldownStore
 import fr.forumhfr.redface2.core.network.di.NetworkClientListeners
@@ -312,7 +313,9 @@ class NetworkStatsEventListenerTest {
         server.enqueue(MockResponse().setBody("recovered"))
         val client = NetworkModule.provideAnonymousClient(base, listeners)
         val storage = mockk<HfrRestCooldownStore>(relaxUnitFun = true) { coEvery { read() } returns null }
-        val breaker = HfrRestCircuitBreaker(storage, clock, log)
+        val elapsed = mockk<FlagReadClock>()
+        every { elapsed.nowNanos() } returns 0L
+        val breaker = HfrRestCircuitBreaker(storage, clock, log, elapsed)
         val api = HfrApiClient(client, client, url("/"), Dispatchers.IO, breaker = breaker)
         val probe = OkHttpNetworkProbeRunner(base, url("/"), Dispatchers.IO, traffic, foreground,
             NetworkDiagnosticsContextProvider { NetworkDiagnosticsContext() }, stats, "Redface2/test", breaker)
@@ -330,6 +333,7 @@ class NetworkStatsEventListenerTest {
         assertTrue(rows.noRequests.isEmpty())
 
         clock.now = clock.instant().plusSeconds(1800)
+        every { elapsed.nowNanos() } returns 1_800_000_000_000L
         assertTrue(runCatching { probe.run({}, {}) }.exceptionOrNull() is HfrRestBlockedException)
         assertEquals(2, server.requestCount)
         assertEquals("recovered", api.getCategories())

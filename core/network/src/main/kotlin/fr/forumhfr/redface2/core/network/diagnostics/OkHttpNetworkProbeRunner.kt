@@ -132,8 +132,8 @@ internal constructor(
         timing: ProbeTimingListener,
         dns: ProbeDns,
     ) = withContext(ioDispatcher) {
-        val call = newProbeCall(client, timing)
         val admission = breaker.admit(allowRecovery = false)
+        val call = newProbeCall(client, timing, admission)
         var reply: RestReply? = null
         try {
             executeCall(call, timing, dns) { reply = it }
@@ -142,7 +142,11 @@ internal constructor(
         }
     }
 
-    private fun newProbeCall(client: OkHttpClient, timing: ProbeTimingListener): Call {
+    private fun newProbeCall(
+        client: OkHttpClient,
+        timing: ProbeTimingListener,
+        admission: HfrRestCircuitBreaker.Admission,
+    ): Call {
         val url = baseUrl.newBuilder().encodedPath("/webservices/rest_api.php")
             .query(null).addQueryParameter("uri", "forums/hardwarefr/categories/").build()
         val request = Request.Builder().url(url)
@@ -157,6 +161,7 @@ internal constructor(
             .eventListener(timing + stats.create(NetworkRole.PROBE))
             .addNetworkInterceptor { chain ->
                 if (!exchanged.compareAndSet(false, true)) throw ExchangeLimitExceeded()
+                breaker.checkExchange(admission)
                 val response = chain.proceed(chain.request())
                 if (response.code == 503) response.newBuilder().removeHeader("Retry-After").build() else response
             }

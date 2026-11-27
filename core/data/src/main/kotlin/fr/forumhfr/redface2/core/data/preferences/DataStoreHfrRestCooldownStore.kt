@@ -5,6 +5,8 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import fr.forumhfr.redface2.core.network.HfrRestContext
 import fr.forumhfr.redface2.core.network.HfrRestCooldown
 import fr.forumhfr.redface2.core.network.HfrRestCooldownStore
 import java.time.Instant
@@ -19,7 +21,11 @@ class DataStoreHfrRestCooldownStore @Inject constructor(
     override suspend fun read(): HfrRestCooldown? {
         val preferences = dataStore.data.first()
         return preferences[BLOCKED_UNTIL]?.let {
-            HfrRestCooldown(Instant.ofEpochMilli(it), preferences[LEVEL] ?: 0)
+            HfrRestCooldown(
+                Instant.ofEpochMilli(it), preferences[LEVEL] ?: 0,
+                HfrRestContext.entries.firstOrNull { context -> context.name == preferences[CONTEXT] }
+                    ?: HfrRestContext.UNKNOWN,
+            )
         }
     }
 
@@ -28,15 +34,18 @@ class DataStoreHfrRestCooldownStore @Inject constructor(
             if (cooldown == null) {
                 preferences.remove(BLOCKED_UNTIL)
                 preferences.remove(LEVEL)
+                preferences.remove(CONTEXT)
             } else {
                 preferences[BLOCKED_UNTIL] = cooldown.until.toEpochMilli()
                 preferences[LEVEL] = cooldown.level
+                preferences[CONTEXT] = cooldown.context.name
             }
         }
     }
 
     private companion object {
         val BLOCKED_UNTIL = longPreferencesKey("hfr_rest_blocked_until_ms")
+        val CONTEXT = stringPreferencesKey("hfr_rest_cooldown_context")
         val LEVEL = intPreferencesKey("hfr_rest_cooldown_level")
     }
 }

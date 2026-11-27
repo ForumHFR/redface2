@@ -3,12 +3,14 @@ package fr.forumhfr.redface2.core.network
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.error.HfrRestBlockedException
+import fr.forumhfr.redface2.core.domain.error.HfrRestRecoveryPendingException
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.network.diagnostics.HfrCallTag
 import fr.forumhfr.redface2.core.network.diagnostics.withHfrDiagnostics
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
@@ -53,8 +55,12 @@ class HfrApiClient @Inject constructor(
     private val breaker: HfrRestCircuitBreaker = HfrRestCircuitBreaker.inMemory(),
 ) {
 
-    suspend fun getCategories(useAuth: Boolean = false): String =
-        get(uri = CATEGORIES_URI, useAuth = useAuth, flagOperation = FlagReadOperation.CATALOGUE)
+    suspend fun getCategories(useAuth: Boolean = false): String {
+        val flagsCatalogue = currentCoroutineContext()[FlagReadSession] != null
+        val authenticatedRecovery = flagsCatalogue && breaker.needsAuthenticatedCatalogue()
+        return get(uri = CATEGORIES_URI, useAuth = useAuth || authenticatedRecovery,
+            flagOperation = FlagReadOperation.CATALOGUE)
+    }
 
     /** Grouped-by-category envelope; this dedicated URI is never decoded as a flat topic list. */
     suspend fun getGlobalFlagTopics(bucket: HfrRestFlagBucket): String = get(
@@ -203,6 +209,22 @@ class HfrApiClient @Inject constructor(
         return builder.build()
     }
 
+    private val authenticatedRest = withExchangeGuard(authenticated)
+    private val anonymousRest = withExchangeGuard(anonymous)
+
+    private fun withExchangeGuard(client: OkHttpClient): OkHttpClient = client.newBuilder()
+        .addNetworkInterceptor { chain ->
+            val attempt = checkNotNull(chain.call().request().tag(RestAttempt::class.java))
+            attempt.session?.checkNotBlocked()
+            breaker.checkExchange(checkNotNull(attempt.admission), attempt.session?.singleExchange == true)
+            chain.proceed(chain.request())
+        }
+        .build()
+
+    private class RestAttempt(val session: FlagReadSession?) {
+        @Volatile var admission: HfrRestCircuitBreaker.Admission? = null
+    }
+
     private suspend fun get(
         uri: String,
         useAuth: Boolean,
@@ -214,42 +236,75 @@ class HfrApiClient @Inject constructor(
             .setEncodedQueryParameter(PARAM_URI, uri)
         extraParams.forEach { (name, value) -> builder.addQueryParameter(name, value) }
         val url = builder.build()
-        val request = Request.Builder().url(url).get().build().withHfrDiagnostics(currentCoroutineContext())
-        val client = if (useAuth) authenticated else anonymous
-        val session = currentCoroutineContext()[FlagReadSession]
+        val coroutine = currentCoroutineContext()
+        val session = coroutine[FlagReadSession]
+        val attempt = RestAttempt(session)
+        val request = Request.Builder().url(url).get().tag(RestAttempt::class.java, attempt)
+            .build().withHfrDiagnostics(coroutine)
+        val client = if (useAuth) authenticatedRest else anonymousRest
         return if (session == null || flagOperation == null) {
             client.newCall(request).executeCancellable(useAuth)
         } else {
-            flagReadExecutor.execute(client, request, flagOperation, session) { it.executeCancellable(useAuth) }
+            flagReadExecutor.execute(client, request, flagOperation, session) { call, admitted ->
+                call.executeCancellable(useAuth, admitted)
+            }
         }
     }
 
     /** Keep the cancellation bridge alive through both headers and body, as in [HfrClient]. */
-    private suspend fun Call.executeCancellable(useAuth: Boolean): String = withContext(ioDispatcher) {
+    private suspend fun Call.executeCancellable(
+        useAuth: Boolean,
+        admitted: () -> Unit = {},
+    ): String = withContext(ioDispatcher) {
         val call = this@executeCancellable
         val session = currentCoroutineContext()[FlagReadSession]
         session?.checkNotBlocked()
         session?.checkBudget()
-        val admission = breaker.admit()
+        val context = if (useAuth) HfrRestContext.AUTHENTICATED else HfrRestContext.ANONYMOUS
+        val admission = try {
+            breaker.admit(context)
+        } catch (blocked: HfrRestBlockedException) {
+            session?.abort(blocked)
+            throw blocked
+        } catch (pending: HfrRestRecoveryPendingException) {
+            session?.abort(pending)
+            throw pending
+        }
         var reply: RestReply? = null
         try {
+            checkNotNull(call.request().tag(RestAttempt::class.java)).admission = admission
             suspendCancellableCoroutine { continuation ->
                 continuation.invokeOnCancellation { call.cancel() }
                 continuation.resumeWith(runCatching {
                     session?.checkNotBlocked()
                     session?.checkBudget()
+                    admitted()
                     call.request().tag(HfrCallTag::class.java)?.executing()
                     call.execute().use { response ->
-                        // A 429 still qualifies if its body cannot be read.
-                        reply = response.restReply()
-                        if (reply?.qualifying == true) throw session.blocked(response.code)
+                        val metadata = response.restReply()
+                        if (metadata?.qualifying == true) {
+                            reply = metadata
+                            throw session.blocked(response.code)
+                        }
                         val body = response.body.string()
-                        reply = response.restReply(body)
-                        if (reply?.qualifying == true) throw session.blocked(response.code)
-                        readJson(response, body, useAuth)
+                        val classified = response.restReply(body)
+                        if (classified?.qualifying == true) {
+                            reply = classified
+                            throw session.blocked(response.code)
+                        }
+                        readJson(response, body, useAuth).also { reply = classified }
                     }
                 })
             }
+        } catch (blocked: HfrRestBlockedException) {
+            session?.abort(blocked)
+            throw blocked
+        } catch (error: IOException) {
+            if (!admission.isRecovery) throw error
+            // A recovery whose only exchange failed must not take the executor's retry path.
+            val pending = HfrRestRecoveryPendingException()
+            session?.abort(pending)
+            throw pending
         } finally {
             withContext(NonCancellable) { breaker.complete(admission, reply) }
         }

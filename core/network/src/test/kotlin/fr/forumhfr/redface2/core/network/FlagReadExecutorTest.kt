@@ -71,7 +71,8 @@ class FlagReadExecutorTest {
         session.succeeded(retry = false)
         coEvery { jitter.pause() } coAnswers { delay(200) }
         val error = runCatching {
-            executor.execute(measuredClient, tagged, FlagReadOperation.CATEGORY_BUCKET, session) { call ->
+            executor.execute(measuredClient, tagged, FlagReadOperation.CATEGORY_BUCKET, session) { call, admitted ->
+                admitted()
                 requireNotNull(call.request().tag(HfrCallTag::class.java))
                     .executing(testScheduler.currentTime * NANOS_PER_MS)
                 call.execute().use { }
@@ -94,7 +95,9 @@ class FlagReadExecutorTest {
         var peak = 0
         val calls = List(18) { index ->
             async {
-                executor.execute(client, request, FlagReadOperation.CATEGORY_BUCKET, sessions[index % sessions.size]) {
+                val session = sessions[index % sessions.size]
+                executor.execute(client, request, FlagReadOperation.CATEGORY_BUCKET, session) { _, admitted ->
+                    admitted()
                     running++
                     peak = maxOf(peak, running)
                     try { close.await() } finally { running-- }
@@ -120,7 +123,8 @@ class FlagReadExecutorTest {
         val calls = List(17) {
             async {
                 runCatching {
-                    executor.execute(client, request, FlagReadOperation.CATEGORY_BUCKET, session) {
+                    executor.execute(client, request, FlagReadOperation.CATEGORY_BUCKET, session) { _, admitted ->
+                        admitted()
                         try { awaitCancellation() } finally { cancelled++ }
                     }
                 }.exceptionOrNull()
@@ -143,7 +147,10 @@ class FlagReadExecutorTest {
         val session = FlagReadSession()
         val failure = runCatching {
             executor.execute(tcpFailureClient(), request,
-                FlagReadOperation.CATEGORY_BUCKET, session) { it.execute().use { } }
+                FlagReadOperation.CATEGORY_BUCKET, session) { call, admitted ->
+                admitted()
+                call.execute().use { }
+            }
         }.exceptionOrNull()
         assertTrue(failure is ConnectException)
         assertEquals(1L, session.counters().getValue("applicationCalls"))
@@ -155,12 +162,15 @@ class FlagReadExecutorTest {
     fun `one retry only and shared refresh ceiling is ten even for concurrent failures`() = runTest {
         coEvery { jitter.pause() } coAnswers { delay(100) }
         val session = FlagReadSession { testScheduler.currentTime * NANOS_PER_MS }
-        executor.execute(client, request, FlagReadOperation.CATEGORY_BUCKET, session) { Unit }
+        executor.execute(client, request, FlagReadOperation.CATEGORY_BUCKET, session) { _, admitted -> admitted() }
         val failures = List(14) {
             async {
                 runCatching {
                     executor.execute(tcpFailureClient(), request,
-                        FlagReadOperation.CATEGORY_BUCKET, session) { it.execute().use { } }
+                        FlagReadOperation.CATEGORY_BUCKET, session) { call, admitted ->
+                        admitted()
+                        call.execute().use { }
+                    }
                 }.exceptionOrNull()
             }
         }
@@ -176,17 +186,21 @@ class FlagReadExecutorTest {
     @Test
     fun `retry releases permit during jitter and reacquires it for the successful Call`() = runTest {
         val session = FlagReadSession { testScheduler.currentTime * NANOS_PER_MS }
-        executor.execute(client, request, FlagReadOperation.CATEGORY_BUCKET, session) { Unit }
+        executor.execute(client, request, FlagReadOperation.CATEGORY_BUCKET, session) { _, admitted -> admitted() }
         coEvery { jitter.pause() } coAnswers {
             assertEquals(0, limiter.heldPermits)
             executor.execute(client, request,
-                FlagReadOperation.CATEGORY_BUCKET, session) { assertEquals(1, limiter.heldPermits) }
+                FlagReadOperation.CATEGORY_BUCKET, session) { _, admitted ->
+                admitted()
+                assertEquals(1, limiter.heldPermits)
+            }
             delay(200)
         }
         var attempt = 0
-        executor.execute(tcpFailureClient(), request, FlagReadOperation.CATEGORY_BUCKET, session) {
+        executor.execute(tcpFailureClient(), request, FlagReadOperation.CATEGORY_BUCKET, session) { call, admitted ->
+            admitted()
             attempt++
-            if (attempt == 1) it.execute().use { } else assertEquals(1, limiter.heldPermits)
+            if (attempt == 1) call.execute().use { } else assertEquals(1, limiter.heldPermits)
         }
         assertEquals(2, attempt)
         assertEquals(1L, session.counters().getValue("retriesSucceeded"))
@@ -197,12 +211,15 @@ class FlagReadExecutorTest {
     fun `cancellation or deadline during jitter never starts another Call`() = runTest {
         listOf(false, true).forEach { cancel ->
             val session = FlagReadSession { testScheduler.currentTime * NANOS_PER_MS }
-            executor.execute(client, request, FlagReadOperation.CATEGORY_BUCKET, session) { Unit }
+            executor.execute(client, request, FlagReadOperation.CATEGORY_BUCKET, session) { _, admitted -> admitted() }
             coEvery { jitter.pause() } coAnswers { delay(20_000) }
             val work = async {
                 runCatching {
                     executor.execute(tcpFailureClient(), request,
-                        FlagReadOperation.CATEGORY_BUCKET, session) { it.execute().use { } }
+                        FlagReadOperation.CATEGORY_BUCKET, session) { call, admitted ->
+                        admitted()
+                        call.execute().use { }
+                    }
                 }
             }
             runCurrent()
@@ -260,10 +277,13 @@ class FlagReadExecutorTest {
     @Test
     fun `unknown phase does not retry even after success`() = runTest {
         val session = FlagReadSession()
-        executor.execute(client, request, FlagReadOperation.CATEGORY_BUCKET, session) { Unit }
+        executor.execute(client, request, FlagReadOperation.CATEGORY_BUCKET, session) { _, admitted -> admitted() }
         val error = runCatching {
             executor.execute(client, request,
-                FlagReadOperation.CATEGORY_BUCKET, session) { throw SocketTimeoutException() }
+                FlagReadOperation.CATEGORY_BUCKET, session) { _, admitted ->
+                admitted()
+                throw SocketTimeoutException()
+            }
         }.exceptionOrNull()
         assertTrue(error is SocketTimeoutException)
         assertEquals(0L, session.counters().getValue("retriesAttempted"))
@@ -274,7 +294,9 @@ class FlagReadExecutorTest {
         val timeouts = mutableListOf<Int>()
         val session = FlagReadSession { testScheduler.currentTime * NANOS_PER_MS }
         advanceTimeBy(2_000)
-        executor.execute(tcpFailureClient(timeouts), request, FlagReadOperation.CATEGORY_BUCKET, session) { call ->
+        val client = tcpFailureClient(timeouts)
+        executor.execute(client, request, FlagReadOperation.CATEGORY_BUCKET, session) { call, admitted ->
+            admitted()
             assertEquals(TimeUnit.SECONDS.toNanos(10), call.timeout().timeoutNanos())
             runCatching { call.execute().use { } }
             currentCoroutineContext().ensureActive()
@@ -288,7 +310,7 @@ class FlagReadExecutorTest {
         val post = request.newBuilder().method("POST", okhttp3.RequestBody.EMPTY).build()
         val error = runCatching {
             executor.execute(client, post,
-                FlagReadOperation.CATEGORY_BUCKET, FlagReadSession()) { error("must not execute") }
+                FlagReadOperation.CATEGORY_BUCKET, FlagReadSession()) { _, _ -> error("must not execute") }
         }.exceptionOrNull()
         assertTrue(error is IllegalArgumentException)
         assertEquals(0, limiter.heldPermits)
@@ -297,7 +319,8 @@ class FlagReadExecutorTest {
     @Test
     fun `captured global operation uses the same read permit`() = runTest {
         var called = false
-        executor.execute(client, request, FlagReadOperation.GLOBAL_BUCKET, FlagReadSession()) {
+        executor.execute(client, request, FlagReadOperation.GLOBAL_BUCKET, FlagReadSession()) { _, admitted ->
+            admitted()
             assertEquals(1, limiter.heldPermits)
             called = true
         }

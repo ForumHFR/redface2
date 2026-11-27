@@ -6,8 +6,12 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
 import fr.forumhfr.redface2.core.domain.error.HfrRestAvailability
+import fr.forumhfr.redface2.core.domain.flags.FlagCategoryCoverage
+import fr.forumhfr.redface2.core.domain.flags.FlagCoverage
 import fr.forumhfr.redface2.core.domain.flags.FlagLookup
 import fr.forumhfr.redface2.core.domain.flags.FlagPullBatch
+import fr.forumhfr.redface2.core.domain.flags.FlagReconciliationResult
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshClock
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
@@ -28,6 +32,7 @@ import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.FlagSource
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
 import io.mockk.every
 import io.mockk.mockk
@@ -62,6 +67,7 @@ import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -75,7 +81,7 @@ import org.junit.Test
  * | Return from a CYAN topic within / past the window | CYAN / CYAN → targeted / CYAN | 0 → 0 |
  * | Return from a topic opened outside Flags after 30 s | CYAN → targeted | 0 → 0 |
  * | Two CYAN topic returns inside the window | CYAN twice → targeted twice | 0 → 0 |
- * | Return on Super, then switch to CYAN | 0 + CYAN → targeted + 0 | 0 → 0 |
+ * | Return on Super, then switch to CYAN | 0 + CYAN → 0 + targeted | 0 → 0 |
  * | Resume after 10 s / 20 s | 0 / CYAN → 0 / 0 | 0 → 0 |
  * | Resume at 30 s / 90 s / 130 s | CYAN / CYAN / CYAN → 0 / 0 / CYAN | 0 → 0 |
  * | CYAN pull | CYAN → CYAN | 0 → 0 |
@@ -150,20 +156,72 @@ class FlagsRefreshTriggerBudgetTest {
     }
 
     @Test
-    fun `returning on Super reconciles all backing types without a second refresh on Cyan`() = runTest {
+    fun `Super stays at zero automatic calls with a full queue and retains the reads for Cyan`() = runTest {
         scenario {
             startOnCyan()
             visit(FlagTab.Super)
             assertCalls()
 
+            fillQueue()
             returnFromTopic()
-
-            assertCalls(reconciles = listOf(FlagType.entries))
-            assertPinned(FlagTab.Super, FlagType.CYAN, explicitRefreshes = 2, read = true)
+            assertCalls()
+            assertPinned(FlagTab.Super, FlagType.CYAN, explicitRefreshes = 1)
 
             visit(FlagTab.Cyan)
-            assertCalls()
+            assertCalls(reconciles = listOf(listOf(FlagType.CYAN)))
             assertPinned(FlagTab.Cyan, FlagType.CYAN, explicitRefreshes = 2, read = true)
+        }
+    }
+
+    @Test
+    fun `failed reconciliation prevents the floor from claiming the previous refresh succeeded`() = runTest {
+        scenario {
+            startOnCyan()
+            flags.reconciliationFails = true
+            returnFromTopic()
+            assertCalls(reconciles = listOf(listOf(FlagType.CYAN)))
+            assertPinned(FlagTab.Cyan, FlagType.CYAN)
+
+            pull(expectAdmission = false)
+            assertCalls()
+            assertTrue(feedback.single() is ManualRefreshFeedback.RetryAt)
+        }
+    }
+
+    @Test
+    fun `an expired Cyan window covers Cyan but leaves the same read for the Favorite window`() = runTest {
+        scenario {
+            startOnCyan()
+            advance(60_000)
+            visit(FlagTab.Favorite)
+            assertCalls(refreshes = listOf(FlagType.FAVORITE), observations = listOf(FlagType.FAVORITE))
+            visit(FlagTab.Cyan)
+            assertCalls()
+            returnFromTopic(afterMillis = 61_000)
+            assertCalls(refreshes = listOf(FlagType.CYAN))
+            visit(FlagTab.Favorite)
+            assertCalls(reconciles = listOf(listOf(FlagType.FAVORITE)))
+            assertPinned(FlagTab.Favorite, FlagType.FAVORITE, explicitRefreshes = 2, read = true)
+        }
+    }
+
+    @Test
+    fun `a pull adopting a reconciliation keeps a newer read of the same topic pending`() = runTest {
+        scenario {
+            startOnCyan()
+            advance(35_000)
+            val release = holdNextReconciliation()
+            returnFromTopic(afterMillis = 0)
+            assertCalls(reconciles = listOf(listOf(FlagType.CYAN)))
+
+            recordTopicRead()
+            pull()
+            assertCalls(refreshes = listOf(FlagType.CYAN))
+            release()
+
+            landAndResume()
+            assertCalls(reconciles = listOf(listOf(FlagType.CYAN)))
+            assertPinned(FlagTab.Cyan, FlagType.CYAN, explicitRefreshes = 4, read = true)
         }
     }
 
@@ -318,9 +376,10 @@ class FlagsRefreshTriggerBudgetTest {
             assertCalls()
             assertEquals(listOf(ManualRefreshFeedback.RetryAt(Instant.EPOCH.plusSeconds(60))), feedback)
 
+            val ignoredBefore = ignored(NetworkTrigger.RESUME)
             returnFromTopic()
             assertCalls()
-            assertEquals(1, ignored(NetworkTrigger.TOPIC_RECONCILE))
+            assertEquals(ignoredBefore + 1, ignored(NetworkTrigger.RESUME))
 
             advance(10_000)
             blockedUntil.value = null
@@ -329,6 +388,8 @@ class FlagsRefreshTriggerBudgetTest {
             pull(expectAdmission = false)
             assertCalls()
             assertEquals(List(2) { ManualRefreshFeedback.RetryAt(Instant.EPOCH.plusSeconds(60)) }, feedback)
+            landAndResume()
+            assertCalls(reconciles = listOf(listOf(FlagType.CYAN)))
         }
     }
 
@@ -421,11 +482,15 @@ class FlagsRefreshTriggerBudgetTest {
             messagesRepository = mockk(),
             mpStorageRepository = mockk(),
             clock = SchedulerClock(testScheduler),
+            refreshClock = mockk<FlagRefreshClock> {
+                every { nowNanos() } answers { testScheduler.currentTime * 1_000_000L }
+            },
             externalScope = backgroundScope,
             refreshDiagnostics = FlagRefreshDiagnostics(DiagnosticsLog(), networkActions = actions),
             topicReads = topicReads,
             restAvailability = object : HfrRestAvailability by HfrRestAvailability.Available {
                 override val blockedUntil: Flow<Instant?> = blockedUntil
+                override suspend fun cooldownDeadline(): Instant? = blockedUntil.value
             },
         )
     }
@@ -467,8 +532,14 @@ class FlagsRefreshTriggerBudgetTest {
             scope.runCurrent()
         }
 
+        fun fillQueue() {
+            repeat(64) { topicReads.record("XaT", TopicRead(CATEGORY_ID, -it - 1)) }
+        }
+
+        fun recordTopicRead() = topicReads.record("XaT", TopicRead(CATEGORY_ID, PINNED_TOPIC_ID))
+
         fun returnFromTopic(afterMillis: Long = 5_000) {
-            topicReads.record("XaT", TopicRead(CATEGORY_ID, PINNED_TOPIC_ID))
+            recordTopicRead()
             advance(afterMillis)
             landAndResume()
         }
@@ -490,6 +561,15 @@ class FlagsRefreshTriggerBudgetTest {
         fun retryWarning() {
             vm.retryRefreshWarning(requireNotNull(vm.refreshWarning.value))
             scope.runCurrent()
+        }
+
+        fun holdNextReconciliation(): () -> Unit {
+            val gate = CompletableDeferred<Unit>()
+            flags.reconciliationGate = gate
+            return {
+                gate.complete(Unit)
+                scope.runCurrent()
+            }
         }
 
         fun holdNextRefresh(): () -> Unit {
@@ -538,6 +618,8 @@ class FlagsRefreshTriggerBudgetTest {
         val initialObserves = mutableListOf<FlagType>()
         val pullBatches = mutableListOf<FlagPullBatch?>()
         val reconciles = mutableListOf<List<FlagType>>()
+        var reconciliationFails = false
+        var reconciliationGate: CompletableDeferred<Unit>? = null
         var incomplete = false
         var refreshGate: CompletableDeferred<Unit>? = null
         private var isRefreshing = false
@@ -570,17 +652,34 @@ class FlagsRefreshTriggerBudgetTest {
             }
         }
 
-        override suspend fun reconcileTopicReads(reads: Set<TopicRead>, visibleTypes: List<FlagType>) {
-            assertEquals(setOf(TopicRead(CATEGORY_ID, PINNED_TOPIC_ID)), reads)
-            reconciles += visibleTypes
-            visibleTypes.forEach { type ->
-                val flag = snapshots.getValue(type).value?.flags?.singleOrNull() ?: return@forEach
+        override suspend fun reconcileTopicReads(
+            reads: Map<TopicRead, Set<FlagType>>,
+            visibleType: FlagType?,
+            maxRequests: Int,
+        ): FlagReconciliationResult {
+            val read = TopicRead(CATEGORY_ID, PINNED_TOPIC_ID)
+            val type = requireNotNull(visibleType)
+            assertTrue(type in reads.getValue(read))
+            reconciles += listOf(type)
+            val gate = reconciliationGate
+            reconciliationGate = null
+            gate?.await()
+            if (reconciliationFails) return FlagReconciliationResult(failedTypes = setOf(type))
+            val flag = snapshots.getValue(type).value?.flags?.singleOrNull()
+            return if (flag == null) {
+                FlagReconciliationResult()
+            } else {
                 publish(flag.copy(hasUnread = false, lastPostReadId = requireNotNull(flag.lastPostReadId) + 1))
+                FlagReconciliationResult(covered = mapOf(read to setOf(type)))
             }
         }
 
         private suspend fun publish(flag: Flag, issue: FlagRefreshIssue? = null): FlagsResult.Success =
-            FlagsResult.Success(listOf(flag), issue).also {
+            FlagsResult.Success(listOf(flag), issue, coverage = FlagCoverage(
+                listOf(FlagSource.BUCKET, FlagSource.STICKY).map {
+                    FlagCategoryCoverage(flag.cat, it, Instant.EPOCH, Instant.EPOCH)
+                },
+            )).also {
                 snapshots.getValue(flag.type).value = it
                 cacheUpdates.emit(flag.type)
             }

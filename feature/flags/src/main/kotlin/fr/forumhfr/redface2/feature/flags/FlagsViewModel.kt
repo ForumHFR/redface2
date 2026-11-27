@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
 import fr.forumhfr.redface2.core.domain.error.HfrRestAvailability
 import fr.forumhfr.redface2.core.domain.flags.FlagPullBatch
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshClock
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
@@ -107,6 +108,7 @@ class FlagsViewModel @Inject constructor(
     private val refreshDiagnostics: FlagRefreshDiagnostics,
     private val restAvailability: HfrRestAvailability = HfrRestAvailability.Available,
     private val topicReads: TopicReadQueue,
+    private val refreshClock: FlagRefreshClock = FlagRefreshClock(),
 ) : ViewModel() {
 
     private var observedPseudo: String? = null
@@ -119,7 +121,9 @@ class FlagsViewModel @Inject constructor(
     private val refreshWarnings = MutableStateFlow<Map<FlagTab, FlagsRefreshWarning>>(emptyMap())
 
     // Both maps are scoped to the active account and cleared with the session.
-    private val lastAutoRefreshAt = mutableMapOf<FlagType, Instant>()
+    private val lastAutoRefreshAt = mutableMapOf<FlagType, Long>()
+    private var pendingReconciliationCheckpoint: Long? = null
+    private val reconciledThrough = mutableMapOf<FlagType, Pair<Long, Int>>()
     private val completedRefreshes = mutableMapOf<FlagType, CompletedRefresh>()
     private val _manualRefreshFeedback = MutableSharedFlow<ManualRefreshFeedback>(extraBufferCapacity = 1)
     internal val manualRefreshFeedback = _manualRefreshFeedback.asSharedFlow()
@@ -1018,18 +1022,20 @@ class FlagsViewModel @Inject constructor(
     }
 
     private fun manualRefreshDenial(types: List<FlagType>): ManualRefreshFeedback? {
-        val now = clock.instant()
+        val now = refreshClock.nowNanos()
         val pause = restBlockedUntil.value
-        if (pause != null && pause.isAfter(now)) {
+        if (pause != null) {
             types.forEach { completedRefreshes[it] = CompletedRefresh(now, successful = false) }
-            return ManualRefreshFeedback.RetryAt(maxOf(pause, now.plus(MANUAL_REFRESH_FLOOR)))
+            return ManualRefreshFeedback.RetryAt(maxOf(pause, clock.instant().plus(MANUAL_REFRESH_FLOOR)))
         }
         val attempts = types.mapNotNull { completedRefreshes[it] }
-        val latest = attempts.filter { it.isWithin(now, MANUAL_REFRESH_FLOOR) }.maxOfOrNull { it.at }
+        val recent = attempts.filter { it.at.isWithin(now, MANUAL_REFRESH_FLOOR) }
+        val youngest = recent.minOfOrNull { now - it.at }
         return when {
-            latest == null -> null
-            attempts.any { !it.successful } -> ManualRefreshFeedback.RetryAt(latest.plus(MANUAL_REFRESH_FLOOR))
-            else -> ManualRefreshFeedback.Updated(Duration.between(latest, now).seconds)
+            youngest == null -> null
+            attempts.any { !it.successful } ->
+                ManualRefreshFeedback.RetryAt(clock.instant().plusNanos(MANUAL_REFRESH_FLOOR.toNanos() - youngest))
+            else -> ManualRefreshFeedback.Updated(Duration.ofNanos(youngest).seconds)
         }
     }
 
@@ -1088,14 +1094,37 @@ class FlagsViewModel @Inject constructor(
         checkpoint: Long,
         startedNanos: Long,
     ) {
+        // Super and DT have no automatic inventory in the request bar. Their topic reads stay
+        // pending for a real tab or a manual pull, which can cover them without adding traffic.
+        val type = tab.flagType ?: return
         val pseudo = account.pseudo
-        if ((authState.value as? AuthState.Authenticated)?.pseudo != pseudo) return
+        val paused = restAvailability.cooldownDeadline() != null
+        if ((authState.value as? AuthState.Authenticated)?.pseudo != pseudo || tab != _selectedTab.value) return
         // The landing and the list observer can see the new account in either order.
         if (observedPseudo != pseudo) clearFlagsCacheIfSessionChanged(account)
-        val type = tab.flagType
-        val now = clock.instant()
-        if (type == null || lastAutoRefreshAt[type]?.isWithin(now, AUTO_REFRESH_THROTTLE) == true) {
-            reconcileLanding(type, trigger, pseudo, checkpoint)
+        if (paused) {
+            refreshDiagnostics.ignored(trigger, listOf(type), throttled = false, paused = true)
+        } else {
+            refreshOrReconcile(type, trigger, pseudo, checkpoint, startedNanos)
+        }
+    }
+
+    private suspend fun refreshOrReconcile(
+        type: FlagType,
+        trigger: FlagRefreshTrigger,
+        pseudo: String,
+        checkpoint: Long,
+        startedNanos: Long,
+    ) {
+        val now = refreshClock.nowNanos()
+        val last = lastAutoRefreshAt[type]
+        if (last?.isWithin(now, AUTO_REFRESH_THROTTLE) == true) {
+            val budget = if (last.isWithin(now, PREVIOUS_AUTO_WINDOW)) {
+                EARLY_RECONCILE_REQUESTS
+            } else {
+                MAX_RECONCILE_REQUESTS
+            }
+            reconcileLanding(type, trigger, pseudo, checkpoint, budget)
         } else {
             refreshLanding(type, trigger, pseudo, checkpoint, startedNanos)
         }
@@ -1108,17 +1137,16 @@ class FlagsViewModel @Inject constructor(
         checkpoint: Long,
         startedNanos: Long,
     ) {
-        val hasReads = topicReads.hasPending(pseudo, checkpoint)
+        val hasReads = topicReads.pending(pseudo, checkpoint).values.any { type in it }
         val refreshTrigger = if (hasReads) FlagRefreshTrigger.RETURN_FROM_TOPIC else trigger
         val landing = DeferredLanding(type, refreshTrigger, checkpoint)
         if (deferLandingIfRefreshing(landing, hasReads)) return
 
-        topicReads.drain(pseudo, checkpoint)
-        lastAutoRefreshAt[type] = clock.instant()
+        lastAutoRefreshAt[type] = refreshClock.nowNanos()
         val generation = beginRefresh(type)
         runRefreshQueue(
             initialTypes = listOf(type), initialGeneration = generation,
-            trigger = refreshTrigger, startedNanos = startedNanos,
+            trigger = refreshTrigger, startedNanos = startedNanos, readCheckpoint = checkpoint,
         ) {
             // A return from a topic keeps the reader's place in the list (#546).
             if (!hasReads) _recallListToTop.value = true
@@ -1126,25 +1154,57 @@ class FlagsViewModel @Inject constructor(
     }
 
     private suspend fun reconcileLanding(
-        type: FlagType?,
+        type: FlagType,
         trigger: FlagRefreshTrigger,
         pseudo: String,
         checkpoint: Long,
+        budget: Int,
     ) {
-        if (!topicReads.hasPending(pseudo, checkpoint)) {
-            if (type != null) refreshDiagnostics.ignored(trigger, listOf(type), throttled = true)
+        val reads = topicReads.pending(pseudo, checkpoint).filterValues { type in it }
+        val alreadyAttempted = reconciledThrough[type]?.let { (through, requests) ->
+            through >= checkpoint && requests >= budget
+        } == true
+        val busy = pendingReconciliationCheckpoint != null || _isRefreshing.value
+        if (reads.isEmpty() || alreadyAttempted || busy) {
+            refreshDiagnostics.ignored(trigger, listOf(type), throttled = true)
             return
         }
-        val types = type?.let(::listOf) ?: SUPER_FAVORITE_BACKING_TYPES
-        val paused = restAvailability.blockedUntil.first()?.isAfter(clock.instant()) == true
-        val sameAccount = (authState.value as? AuthState.Authenticated)?.pseudo == pseudo
-        val reads = if (sameAccount) topicReads.drain(pseudo, checkpoint) else emptySet()
-        if (reads.isEmpty()) return
-        if (paused) {
-            refreshDiagnostics.ignored(FlagRefreshTrigger.TOPIC_RECONCILE, types, throttled = true)
-        } else {
-            flagRepository.reconcileTopicReads(reads, types)
+        val session = flagsSessionGeneration
+        pendingReconciliationCheckpoint = checkpoint
+        reconciledThrough[type] = checkpoint to budget
+        try {
+            val result = flagRepository.reconcileTopicReads(reads, type, budget)
+            if (isCurrentFlagsSession(session, pseudo)) {
+                topicReads.acknowledge(pseudo, checkpoint, result.covered)
+                recordReconciliationFailure(result.failedTypes)
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            android.util.Log.w(LOG_TAG, "Could not reconcile flags after a topic read", error)
+            if (isCurrentFlagsSession(session, pseudo)) recordReconciliationFailure(setOf(type))
+        } finally {
+            pendingReconciliationCheckpoint = null
         }
+    }
+
+    private fun recordReconciliationFailure(types: Set<FlagType>) {
+        val now = refreshClock.nowNanos()
+        types.forEach { completedRefreshes[it] = CompletedRefresh(now, successful = false) }
+    }
+
+    private fun acknowledgeRefresh(
+        pseudo: String?,
+        session: Long,
+        checkpoint: Long,
+        type: FlagType,
+        result: FlagsResult?,
+    ) {
+        if (pseudo == null || result !is FlagsResult.Success || !isCurrentFlagsSession(session, pseudo)) return
+        val covered = topicReads.pending(pseudo, checkpoint).filter { (read, types) ->
+            type in types && result.coverage.covers(read.cat)
+        }.mapValues { setOf(type) }
+        topicReads.acknowledge(pseudo, checkpoint, covered)
     }
 
     private fun diagnosticTriggerFor(trigger: FlagRefreshTrigger): FlagRefreshTrigger = when {
@@ -1204,6 +1264,7 @@ class FlagsViewModel @Inject constructor(
         initialGeneration: Long,
         trigger: FlagRefreshTrigger = FlagRefreshTrigger.PULL,
         startedNanos: Long = System.nanoTime(),
+        readCheckpoint: Long = topicReads.checkpoint(),
         onInitialSuccess: () -> Unit = {},
     ) {
         if (activeRefreshGeneration != initialGeneration) return
@@ -1212,8 +1273,11 @@ class FlagsViewModel @Inject constructor(
         var types = initialTypes
         var initialBatch = true
         var batchStartedNanos = startedNanos
-        var pullBatch = FlagPullBatch()
+        var pullBatch = FlagPullBatch(initialTypes.toSet())
         val session = flagsSessionGeneration
+        // The pull may adopt pages already read by the reconciliation. Those pages cannot
+        // acknowledge a topic read recorded after the reconciliation's checkpoint.
+        val coveredThrough = minOf(readCheckpoint, pendingReconciliationCheckpoint ?: readCheckpoint)
         val pseudo = (authState.value as? AuthState.Authenticated)?.pseudo
         // One bounded aggregate for the whole queue: a Super pull can join an in-flight type and
         // queue the other two. Publish only after all of their outcomes are known.
@@ -1226,6 +1290,7 @@ class FlagsViewModel @Inject constructor(
                     batchStartedNanos, pullBatch,
                 ) { type, result ->
                     recordCompletedRefresh(type, result, issueTypes, session, pseudo)
+                    acknowledgeRefresh(pseudo, session, coveredThrough, type, result)
                 }
                 collectRefreshWarningTabs(warningTabs)
                 if (initialBatch && isCurrentFlagsSession(session, pseudo)) onInitialSuccess()
@@ -1237,7 +1302,7 @@ class FlagsViewModel @Inject constructor(
                 if (deferredLanding?.type in types) discardDeferredLanding()
                 val batchWarningTabs = types.associateWith { requireNotNull(pendingManualWarningTabs.remove(it)) }
                 // A joined Super pull also uses the sticky data of the type it already covered.
-                if (batchWarningTabs.values.none { FlagTab.Super in it }) pullBatch = FlagPullBatch()
+                if (batchWarningTabs.values.none { FlagTab.Super in it }) pullBatch = FlagPullBatch(types.toSet())
                 generation = beginRefresh(
                     type = types.first(), coveredTypes = types.toSet(), warningTabs = batchWarningTabs,
                 )
@@ -1257,7 +1322,7 @@ class FlagsViewModel @Inject constructor(
         pseudo: String?,
     ) {
         if (!isCurrentFlagsSession(session, pseudo)) return
-        completedRefreshes[type] = CompletedRefresh(clock.instant(), result.isCompleteRefresh())
+        completedRefreshes[type] = CompletedRefresh(refreshClock.nowNanos(), result.isCompleteRefresh())
         if (result != null) collectRefreshIssue(type, result, issueTypes)
     }
 
@@ -1600,7 +1665,6 @@ class FlagsViewModel @Inject constructor(
             null -> Unit
             AuthState.Anonymous -> {
                 observedPseudo = null
-                topicReads.clear()
                 resetRefreshWarnings()
                 resetDtState()
                 flagRepository.clearSessionCache()
@@ -1622,6 +1686,7 @@ class FlagsViewModel @Inject constructor(
     private fun resetRefreshWarnings() {
         flagsSessionGeneration++
         lastAutoRefreshAt.clear()
+        reconciledThrough.clear()
         completedRefreshes.clear()
         diagnosticLandingTab = null
         discardDeferredLanding()
@@ -1791,12 +1856,14 @@ private val AUTO_REFRESH_THROTTLE: Duration = Duration.ofMinutes(2)
 /** #1684 — the manual action and both Retry entry points share the last completed attempt. */
 private val MANUAL_REFRESH_FLOOR: Duration = Duration.ofSeconds(30)
 
-private data class CompletedRefresh(val at: Instant, val successful: Boolean) {
-    fun isWithin(now: Instant, window: Duration): Boolean = at.isWithin(now, window)
-}
+private val PREVIOUS_AUTO_WINDOW: Duration = Duration.ofSeconds(15)
+private const val EARLY_RECONCILE_REQUESTS = 3
+private const val MAX_RECONCILE_REQUESTS = 4
 
-private fun Instant.isWithin(now: Instant, window: Duration): Boolean =
-    !isAfter(now) && Duration.between(this, now) < window
+private data class CompletedRefresh(val at: Long, val successful: Boolean)
+
+private fun Long.isWithin(now: Long, window: Duration): Boolean =
+    now - this in 0 until window.toNanos()
 
 private fun FlagsResult?.isCompleteRefresh(): Boolean =
     this is FlagsResult.Success && refreshStatus == FlagRefreshStatus.COMPLETE && issue == null
