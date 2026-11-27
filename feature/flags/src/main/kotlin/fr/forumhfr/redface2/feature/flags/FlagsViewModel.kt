@@ -15,6 +15,7 @@ import fr.forumhfr.redface2.core.domain.flags.FlagPullBatch
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
+import fr.forumhfr.redface2.core.domain.flags.TopicReadQueue
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
@@ -44,16 +45,22 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -98,7 +105,8 @@ class FlagsViewModel @Inject constructor(
     @param:ApplicationScope private val externalScope: CoroutineScope,
     private val networkActions: NetworkActionRecorder = NetworkActionRecorder.None,
     private val refreshDiagnostics: FlagRefreshDiagnostics,
-    restAvailability: HfrRestAvailability = HfrRestAvailability.Available,
+    private val restAvailability: HfrRestAvailability = HfrRestAvailability.Available,
+    private val topicReads: TopicReadQueue,
 ) : ViewModel() {
 
     private var observedPseudo: String? = null
@@ -110,34 +118,11 @@ class FlagsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), null)
     private val refreshWarnings = MutableStateFlow<Map<FlagTab, FlagsRefreshWarning>>(emptyMap())
 
-    /**
-     * #378 — instant of the last refresh triggered through [maybeAutoRefresh], PER [FlagType], for
-     * the throttle. ViewModel-scoped on purpose: the ViewModel survives the screen leaving the
-     * composition (tab switch, topic push), so rapid back-and-forth on the SAME tab shares one
-     * window, while a cold app start (fresh ViewModel) always allows the first auto-refresh.
-     *
-     * One window per type since #743 (styx42): a single shared instant meant that landing on another
-     * tab right after this one's refresh was swallowed by the window, so the freshly shown tab kept
-     * its cache — the throttle is now consulted for the landing tab's own type. Keyed on [FlagType]
-     * rather than [FlagTab] because the throttled unit is `flagRepository.refresh(type)` — the
-     * per-category REST fan-out of ONE type — and every tab that fetches maps 1:1 to a type
-     * (Super/DT carry none and return before the throttle). A future multi-type tab (#668) would
-     * re-decide this key together with the repository-level pull it needs (cf.
-     * `DefaultFlagRepository.refresh`).
-     */
-    private val lastAutoRefreshAt: MutableMap<FlagType, Instant> = mutableMapOf()
-
-    /**
-     * #378 follow-up — generation counter incremented by [onFlagOpened] (a topic was opened from
-     * this list). A refresh CONSUMES the generations it can see at its **call time** by advancing
-     * [flagOpenedGenerationConsumed]; [maybeAutoRefresh] bypasses the throttle while un-consumed
-     * generations remain. A counter (not a boolean) so a read armed WHILE a landing refresh is
-     * suspended on its pref/auth gates is never swallowed by that refresh — it could not have
-     * captured that reading yet (Codex review on this PR). Same ViewModel scoping rationale as
-     * [lastAutoRefreshAt].
-     */
-    private var flagOpenedGeneration = 0L
-    private var flagOpenedGenerationConsumed = 0L
+    // Both maps are scoped to the active account and cleared with the session.
+    private val lastAutoRefreshAt = mutableMapOf<FlagType, Instant>()
+    private val completedRefreshes = mutableMapOf<FlagType, CompletedRefresh>()
+    private val _manualRefreshFeedback = MutableSharedFlow<ManualRefreshFeedback>(extraBufferCapacity = 1)
+    internal val manualRefreshFeedback = _manualRefreshFeedback.asSharedFlow()
 
     /**
      * #743 — the [FlagType] currently being refreshed behind [isRefreshing], the set of types this
@@ -161,6 +146,7 @@ class FlagsViewModel @Inject constructor(
     private val pendingManualDiagnosticStarts = mutableMapOf<FlagType, Long>()
     private var refreshGeneration = 0L
     private var activeRefreshGeneration: Long? = null
+    private var activeRefreshJob: Job? = null
     private var refreshingSessionGeneration: Long? = null
     private var deferredLanding: DeferredLanding? = null
     private var diagnosticLandingTab: FlagTab? = null
@@ -929,6 +915,12 @@ class FlagsViewModel @Inject constructor(
     }
 
     fun refresh() {
+        pullRefresh {}
+    }
+
+    internal fun pullRefresh(onAdmitted: () -> Unit) {
+        val account = authState.value as? AuthState.Authenticated ?: return
+        if (observedPseudo != account.pseudo) clearFlagsCacheIfSessionChanged(account)
         val selected = _selectedTab.value
         val type = selected.flagType
         val types = when {
@@ -937,7 +929,7 @@ class FlagsViewModel @Inject constructor(
             else -> return
         }
         networkActions.recordSafely(NetworkAction.FLAG_PULL)
-        requestManualRefresh(types, selected)
+        if (requestManualRefresh(types, selected)) onAdmitted()
     }
 
     fun consumeRefreshWarning(warning: FlagsRefreshWarning) {
@@ -972,7 +964,7 @@ class FlagsViewModel @Inject constructor(
                 null
             }
             // Repository freshness stays stale for a partial result. Automatic ATTEMPTS still share
-            // their 15 s window; only a pull, Retry or a return from reading bypasses that throttle.
+            // their two-minute window.
             reportedRefreshIssues[type] === issue -> null
             else -> {
                 reportedRefreshIssues[type] = issue
@@ -991,10 +983,13 @@ class FlagsViewModel @Inject constructor(
         refreshWarnings.update { it + (tab to FlagsRefreshWarning(issues, types, tab, session, pseudo)) }
     }
 
-    private fun requestManualRefresh(types: List<FlagType>, warningTab: FlagTab) {
-        // A manual refresh captures the post-reading state too, so the generations visible at this
-        // call would only duplicate the fan-out on the next landing — consume them (#378 follow-up).
-        flagOpenedGenerationConsumed = flagOpenedGeneration
+    private fun requestManualRefresh(types: List<FlagType>, warningTab: FlagTab): Boolean {
+        val feedback = manualRefreshDenial(types)
+        if (feedback != null) {
+            refreshDiagnostics.ignored(FlagRefreshTrigger.PULL, types, throttled = true)
+            _manualRefreshFeedback.tryEmit(feedback)
+            return false
+        }
         // #743 — a pull on the tab whose landing is waiting behind an in-flight refresh IS that
         // landing's fetch: drop the replay so it does not double the fan-out right after the pull.
         if (deferredLanding?.type in types) discardDeferredLanding()
@@ -1016,9 +1011,26 @@ class FlagsViewModel @Inject constructor(
                 pendingManualWarningTabs[type] = pendingManualWarningTabs[type].orEmpty() + warningTab
             }
             pendingManualRefreshTypes.addAll(deferredTypes)
-            return
+        } else {
+            startManualRefresh(types, warningTab)
         }
-        startManualRefresh(types, warningTab)
+        return true
+    }
+
+    private fun manualRefreshDenial(types: List<FlagType>): ManualRefreshFeedback? {
+        val now = clock.instant()
+        val pause = restBlockedUntil.value
+        if (pause != null && pause.isAfter(now)) {
+            types.forEach { completedRefreshes[it] = CompletedRefresh(now, successful = false) }
+            return ManualRefreshFeedback.RetryAt(maxOf(pause, now.plus(MANUAL_REFRESH_FLOOR)))
+        }
+        val attempts = types.mapNotNull { completedRefreshes[it] }
+        val latest = attempts.filter { it.isWithin(now, MANUAL_REFRESH_FLOOR) }.maxOfOrNull { it.at }
+        return when {
+            latest == null -> null
+            attempts.any { !it.successful } -> ManualRefreshFeedback.RetryAt(latest.plus(MANUAL_REFRESH_FLOOR))
+            else -> ManualRefreshFeedback.Updated(Duration.between(latest, now).seconds)
+        }
     }
 
     private fun startManualRefresh(types: List<FlagType>, warningTab: FlagTab) {
@@ -1048,116 +1060,114 @@ class FlagsViewModel @Inject constructor(
         }
     }
 
-    /**
-     * #378 follow-up (retours dev v118) — the screen calls this when the user opens a topic from
-     * the list. The next [maybeAutoRefresh] then BYPASSES the throttle window: coming back from a
-     * just-read topic is precisely when the flag state changed (the read topic should drop out of
-     * an unread-only view), and the 15 s window was eating exactly that case for fast readers
-     * ("je lis vite fait le dernier message → retour → pas de refresh"). The throttle keeps
-     * protecting the no-read round-trips (bottom-tab switches, immediate back-and-forth), which
-     * is what it was for — the REST fan-out is one GET per public category.
-     */
-    fun onFlagOpened() {
-        flagOpenedGeneration++
-    }
-
-    /**
-     * #378 — auto-refresh on landing. Invoked by the screen every time it (re)enters the
-     * composition: app open, back from a topic, return from another bottom tab. Delegates to
-     * [refresh] (same `isRefreshing` indicator — the requested visual cue) when ALL of:
-     *
-     * - the « auto-refresh » preference is on (default; the Settings toggle is the opt-out),
-     * - the user is authenticated (an anonymous landing has no flags to refresh),
-     * - the selected tab has a real [FlagType] (Super/DT placeholders have no backend),
-     * - no refresh is already in flight — a landing on ANOTHER tab that meets one is not dropped
-     *   but replayed once it settles (#743, cf. [deferredLanding]),
-     * - the last auto-refresh OF THAT TAB'S TYPE is older than [AUTO_REFRESH_THROTTLE] (one window
-     *   per type, #743) — the per-tab REST fan-out is ~one GET per public category, so rapid
-     *   back-and-forth between a topic and the list must not multiply it. A manual pull-to-refresh
-     *   is never throttled and does not arm the throttle (it goes straight through [refresh]).
-     */
+    /** Real tabs refresh on an attempt-armed window. A topic read inside it reconciles its category. */
     fun maybeAutoRefresh(trigger: FlagRefreshTrigger = FlagRefreshTrigger.LAUNCH) =
         maybeAutoRefresh(trigger, replay = null)
 
     private fun maybeAutoRefresh(trigger: FlagRefreshTrigger, replay: DeferredLanding?) {
         val startedNanos = System.nanoTime()
-        // Snapshot the tab at CALL time (the landing being refreshed) — re-reading it after the
-        // suspension points below could refresh a different tab than the one that landed, or
-        // no-op on a placeholder while still arming the throttle (Codex review on PR #421).
-        val type = _selectedTab.value.flagType ?: return
+        val tab = _selectedTab.value
+        if (tab == FlagTab.Dt) return
         val diagnosticTrigger = replay?.trigger ?: diagnosticTriggerFor(trigger)
-        diagnosticLandingTab = _selectedTab.value
-        if (deferLandingIfRefreshing(type, diagnosticTrigger)) return
-        // Snapshot at CALL time (same rationale as the tab snapshot above): a read armed AFTER
-        // this landing's call belongs to the NEXT landing. The launch suspends on the pref/auth
-        // gates below — reading the generation there would let this refresh consume a reading it
-        // cannot have captured yet, losing the bypass for the actual return (Codex review).
-        val openedGenerationAtCall = flagOpenedGeneration
+        val checkpoint = replay?.readCheckpoint ?: topicReads.checkpoint()
+        diagnosticLandingTab = tab
         viewModelScope.launch {
-            if (!userPreferencesRepository.observeFlagsAutoRefresh().first() ||
-                authRepository.observeAuthState().first() !is AuthState.Authenticated
-            ) {
+            val account = authState.filterNotNull().first() as? AuthState.Authenticated
+            if (account == null || !userPreferencesRepository.observeFlagsAutoRefresh().first()) {
                 if (replay != null) recordDiscardedLanding(replay)
                 return@launch
             }
-            val now = clock.instant()
-            // #743 — this tab's OWN window: another tab's recent refresh never throttles this landing.
-            val last = lastAutoRefreshAt[type]
-            // Throttle SKIPPED when a topic was opened since the last consuming refresh (see
-            // [onFlagOpened]): that landing is a return from a read, the state most worth
-            // refreshing.
-            val returningFromTopic = openedGenerationAtCall > flagOpenedGenerationConsumed
-            if (!returningFromTopic && last != null && Duration.between(last, now) < AUTO_REFRESH_THROTTLE) {
-                refreshDiagnostics.ignored(diagnosticTrigger, listOf(type), throttled = true)
-                return@launch
-            }
-            // Re-check after the suspensions: a manual pull-to-refresh may have started while
-            // the pref/auth reads were in flight — don't double the REST fan-out (same type), or
-            // defer this landing behind it (other type, #743).
-            if (deferLandingIfRefreshing(type, diagnosticTrigger)) return@launch
-            // Consume ONLY the generations visible at call time — a read armed during the
-            // suspensions above stays pending for the next landing.
-            flagOpenedGenerationConsumed = maxOf(flagOpenedGenerationConsumed, openedGenerationAtCall)
-            lastAutoRefreshAt[type] = now
-            val generation = beginRefresh(type)
-            runRefreshQueue(
-                initialTypes = listOf(type), initialGeneration = generation,
-                trigger = diagnosticTrigger, startedNanos = startedNanos,
-            ) {
-                // #546 — a genuine landing / tab-switch / resume refresh: recall the list to the top
-                // so the freshly prepended flags are visible. A return-from-topic refresh keeps the
-                // reader's current position (it is not a fresh landing). One-shot signal, consumed by
-                // the screen — see [recallListToTop].
-                if (!returningFromTopic) _recallListToTop.value = true
-            }
+            handleFlagsLanding(tab, diagnosticTrigger, account, checkpoint, startedNanos)
+        }
+    }
+
+    private suspend fun handleFlagsLanding(
+        tab: FlagTab,
+        trigger: FlagRefreshTrigger,
+        account: AuthState.Authenticated,
+        checkpoint: Long,
+        startedNanos: Long,
+    ) {
+        val pseudo = account.pseudo
+        if ((authState.value as? AuthState.Authenticated)?.pseudo != pseudo) return
+        // The landing and the list observer can see the new account in either order.
+        if (observedPseudo != pseudo) clearFlagsCacheIfSessionChanged(account)
+        val type = tab.flagType
+        val now = clock.instant()
+        if (type == null || lastAutoRefreshAt[type]?.isWithin(now, AUTO_REFRESH_THROTTLE) == true) {
+            reconcileLanding(type, trigger, pseudo, checkpoint)
+        } else {
+            refreshLanding(type, trigger, pseudo, checkpoint, startedNanos)
+        }
+    }
+
+    private suspend fun refreshLanding(
+        type: FlagType,
+        trigger: FlagRefreshTrigger,
+        pseudo: String,
+        checkpoint: Long,
+        startedNanos: Long,
+    ) {
+        val hasReads = topicReads.hasPending(pseudo, checkpoint)
+        val refreshTrigger = if (hasReads) FlagRefreshTrigger.RETURN_FROM_TOPIC else trigger
+        val landing = DeferredLanding(type, refreshTrigger, checkpoint)
+        if (deferLandingIfRefreshing(landing, hasReads)) return
+
+        topicReads.drain(pseudo, checkpoint)
+        lastAutoRefreshAt[type] = clock.instant()
+        val generation = beginRefresh(type)
+        runRefreshQueue(
+            initialTypes = listOf(type), initialGeneration = generation,
+            trigger = refreshTrigger, startedNanos = startedNanos,
+        ) {
+            // A return from a topic keeps the reader's place in the list (#546).
+            if (!hasReads) _recallListToTop.value = true
+        }
+    }
+
+    private suspend fun reconcileLanding(
+        type: FlagType?,
+        trigger: FlagRefreshTrigger,
+        pseudo: String,
+        checkpoint: Long,
+    ) {
+        if (!topicReads.hasPending(pseudo, checkpoint)) {
+            if (type != null) refreshDiagnostics.ignored(trigger, listOf(type), throttled = true)
+            return
+        }
+        val types = type?.let(::listOf) ?: SUPER_FAVORITE_BACKING_TYPES
+        val paused = restAvailability.blockedUntil.first()?.isAfter(clock.instant()) == true
+        val sameAccount = (authState.value as? AuthState.Authenticated)?.pseudo == pseudo
+        val reads = if (sameAccount) topicReads.drain(pseudo, checkpoint) else emptySet()
+        if (reads.isEmpty()) return
+        if (paused) {
+            refreshDiagnostics.ignored(FlagRefreshTrigger.TOPIC_RECONCILE, types, throttled = true)
+        } else {
+            flagRepository.reconcileTopicReads(reads, types)
         }
     }
 
     private fun diagnosticTriggerFor(trigger: FlagRefreshTrigger): FlagRefreshTrigger = when {
-        flagOpenedGeneration > flagOpenedGenerationConsumed -> FlagRefreshTrigger.RETURN_FROM_TOPIC
         trigger == FlagRefreshTrigger.RESUME -> trigger
         diagnosticLandingTab != null -> FlagRefreshTrigger.TAB
         else -> trigger
     }
 
-    /**
-     * #743 — in-flight guard shared by the two [maybeAutoRefresh] checkpoints. `true` when a refresh
-     * is running (the landing must not start a concurrent fan-out); the landing is then remembered
-     * for replay in [endRefresh] if it targets an uncovered type, and cleared otherwise (latest
-     * landing wins, cf. [deferredLanding]).
-     */
-    private fun deferLandingIfRefreshing(type: FlagType, trigger: FlagRefreshTrigger): Boolean {
+    /** A due landing waits behind an existing full refresh when it still needs a fetch (#743). */
+    private fun deferLandingIfRefreshing(landing: DeferredLanding, hasReads: Boolean): Boolean {
         if (!_isRefreshing.value) return false
+        val types = listOf(landing.type)
+        val shouldReplay = hasReads || landing.type !in refreshingCoveredTypes
         refreshDiagnostics.ignored(
-            trigger, listOf(type), throttled = false,
-            deferredTypes = listOf(type).filterNot { it in refreshingCoveredTypes },
+            landing.trigger, types, throttled = false,
+            deferredTypes = if (shouldReplay) types else emptyList(),
         )
         discardDeferredLanding()
-        deferredLanding = DeferredLanding(type, trigger).takeIf { type !in refreshingCoveredTypes }
+        deferredLanding = landing.takeIf { shouldReplay }
         return true
     }
 
-    private data class DeferredLanding(val type: FlagType, val trigger: FlagRefreshTrigger)
+    private data class DeferredLanding(val type: FlagType, val trigger: FlagRefreshTrigger, val readCheckpoint: Long)
 
     private fun discardDeferredLanding() {
         deferredLanding?.let(::recordDiscardedLanding)
@@ -1196,6 +1206,8 @@ class FlagsViewModel @Inject constructor(
         startedNanos: Long = System.nanoTime(),
         onInitialSuccess: () -> Unit = {},
     ) {
+        if (activeRefreshGeneration != initialGeneration) return
+        activeRefreshJob = currentCoroutineContext()[Job]
         var generation = initialGeneration
         var types = initialTypes
         var initialBatch = true
@@ -1213,14 +1225,12 @@ class FlagsViewModel @Inject constructor(
                     types, if (initialBatch) trigger else FlagRefreshTrigger.PULL,
                     batchStartedNanos, pullBatch,
                 ) { type, result ->
-                    if (isCurrentFlagsSession(session, pseudo)) collectRefreshIssue(type, result, issueTypes)
+                    recordCompletedRefresh(type, result, issueTypes, session, pseudo)
                 }
                 collectRefreshWarningTabs(warningTabs)
-                if (initialBatch) {
-                    onInitialSuccess()
-                    initialBatch = false
-                }
-                if (pendingManualRefreshTypes.isEmpty()) break
+                if (initialBatch && isCurrentFlagsSession(session, pseudo)) onInitialSuccess()
+                initialBatch = false
+                if (pendingManualRefreshTypes.isEmpty() || !isCurrentFlagsSession(session, pseudo)) break
                 types = pendingManualRefreshTypes.toList()
                 batchStartedNanos = types.minOf { pendingManualDiagnosticStarts.remove(it) ?: System.nanoTime() }
                 pendingManualRefreshTypes.clear()
@@ -1237,6 +1247,18 @@ class FlagsViewModel @Inject constructor(
             publishRefreshWarnings(issueTypes, warningTabs, session, pseudo)
             endRefresh(generation)
         }
+    }
+
+    private fun recordCompletedRefresh(
+        type: FlagType,
+        result: FlagsResult?,
+        issueTypes: MutableSet<FlagType>,
+        session: Long,
+        pseudo: String?,
+    ) {
+        if (!isCurrentFlagsSession(session, pseudo)) return
+        completedRefreshes[type] = CompletedRefresh(clock.instant(), result.isCompleteRefresh())
+        if (result != null) collectRefreshIssue(type, result, issueTypes)
     }
 
     private fun collectRefreshIssue(
@@ -1281,15 +1303,14 @@ class FlagsViewModel @Inject constructor(
         trigger: FlagRefreshTrigger,
         startedNanos: Long,
         pullBatch: FlagPullBatch,
-        onResult: (FlagType, FlagsResult) -> Unit,
+        onResult: (FlagType, FlagsResult?) -> Unit,
     ) {
         val trace = refreshDiagnostics.begin(trigger, types, startedNanos)
         try {
             withContext(trace + pullBatch) {
                 types.forEach { type ->
                     refreshingType = type
-                    val result = flagRepository.refresh(type)
-                    onResult(type, result)
+                    refreshType(type, onResult)
                 }
             }
         } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
@@ -1300,6 +1321,18 @@ class FlagsViewModel @Inject constructor(
         }
     }
 
+    private suspend fun refreshType(type: FlagType, onResult: (FlagType, FlagsResult?) -> Unit) {
+        val result = try {
+            flagRepository.refresh(type)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            onResult(type, null)
+            throw error
+        }
+        onResult(type, result)
+    }
+
     /**
      * Clears the loading cue only for the current generation, then replays the landing deferred behind
      * the whole serialized queue (#743) if that landing still targets the selected tab.
@@ -1307,6 +1340,7 @@ class FlagsViewModel @Inject constructor(
     private fun endRefresh(generation: Long) {
         if (activeRefreshGeneration != generation) return
         activeRefreshGeneration = null
+        activeRefreshJob = null
         refreshingSessionGeneration = null
         refreshingType = null
         refreshingCoveredTypes = emptySet()
@@ -1566,6 +1600,7 @@ class FlagsViewModel @Inject constructor(
             null -> Unit
             AuthState.Anonymous -> {
                 observedPseudo = null
+                topicReads.clear()
                 resetRefreshWarnings()
                 resetDtState()
                 flagRepository.clearSessionCache()
@@ -1586,6 +1621,15 @@ class FlagsViewModel @Inject constructor(
 
     private fun resetRefreshWarnings() {
         flagsSessionGeneration++
+        lastAutoRefreshAt.clear()
+        completedRefreshes.clear()
+        diagnosticLandingTab = null
+        discardDeferredLanding()
+        activeRefreshJob?.cancel()
+        activeRefreshGeneration?.let(::endRefresh)
+        pendingManualRefreshTypes.clear()
+        pendingManualWarningTabs.clear()
+        pendingManualDiagnosticStarts.clear()
         refreshWarnings.value = emptyMap()
         reportedRefreshIssues.clear()
     }
@@ -1741,16 +1785,26 @@ sealed interface FlagsContent {
 
 private const val LOG_TAG = "FlagsViewModel"
 
-/**
- * #378 — minimum delay between two auto-refreshes OF THE SAME [FlagType]
- * ([FlagsViewModel.maybeAutoRefresh]; one window per type since #743). 15 s: shorter than any
- * realistic topic-read round-trip (the « back from a topic » trigger stays effective) but long
- * enough that re-landing on a tab — resume, back-and-forth with another tab, popping in and out of
- * a topic — does not re-run its per-category REST fan-out every time. Bouncing across the three
- * tabs costs at most one fan-out per tab per window, and never two at once (refreshes stay
- * sequential, cf. [FlagsViewModel.maybeAutoRefresh]).
- */
-private val AUTO_REFRESH_THROTTLE: Duration = Duration.ofSeconds(15)
+/** #1684 — full automatic attempts are spaced per account and type, including after a failure. */
+private val AUTO_REFRESH_THROTTLE: Duration = Duration.ofMinutes(2)
+
+/** #1684 — the manual action and both Retry entry points share the last completed attempt. */
+private val MANUAL_REFRESH_FLOOR: Duration = Duration.ofSeconds(30)
+
+private data class CompletedRefresh(val at: Instant, val successful: Boolean) {
+    fun isWithin(now: Instant, window: Duration): Boolean = at.isWithin(now, window)
+}
+
+private fun Instant.isWithin(now: Instant, window: Duration): Boolean =
+    !isAfter(now) && Duration.between(this, now) < window
+
+private fun FlagsResult?.isCompleteRefresh(): Boolean =
+    this is FlagsResult.Success && refreshStatus == FlagRefreshStatus.COMPLETE && issue == null
+
+internal sealed interface ManualRefreshFeedback {
+    data class Updated(val seconds: Long) : ManualRefreshFeedback
+    data class RetryAt(val instant: Instant) : ManualRefreshFeedback
+}
 
 /**
  * State of the « Retirer le drapeau » interaction (#99). [Confirming] and [Removing] carry

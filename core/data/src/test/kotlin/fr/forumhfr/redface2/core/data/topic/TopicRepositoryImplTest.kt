@@ -6,6 +6,9 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.database.RedfaceDatabase
 import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.entities.FetchMode
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.flags.TopicRead
+import fr.forumhfr.redface2.core.domain.flags.TopicReadQueue
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
@@ -26,6 +29,7 @@ import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.EditorPreviewKey
 import fr.forumhfr.redface2.core.model.editor.EditorShortcut
@@ -34,12 +38,15 @@ import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.HfrParser
+import io.mockk.every
+import io.mockk.mockk
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
@@ -65,6 +72,8 @@ class TopicRepositoryImplTest {
     private lateinit var database: RedfaceDatabase
     private lateinit var dao: TopicDao
     private lateinit var client: HfrClient
+    private val topicReads = TopicReadQueue()
+    private val auth = MutableStateFlow<AuthState>(AuthState.Authenticated("XaT"))
 
     @Before
     fun setUp() {
@@ -90,6 +99,31 @@ class TopicRepositoryImplTest {
     fun tearDown() {
         database.close()
         server.shutdown()
+    }
+
+    @Test
+    fun `only an authenticated network topic load queues a read for Flags`() = runTest {
+        repeat(3) { server.enqueue(MockResponse().setBody(fixtureHtml("topic_page_single.html"))) }
+        val repository = repository(now = Instant.parse("2026-04-26T18:00:00Z"))
+        val read = TopicRead(1, 999_395)
+
+        repository.prefetch(read.cat, read.topicId, page = 1)
+        assertTrue(topicReads.drain("XaT", topicReads.checkpoint()).isEmpty())
+
+        // A search result or deep link uses the ordinary cache-first topic entry point.
+        repository.observeTopicPage(read.cat, read.topicId, page = 1).test {
+            assertTrue(awaitItem().provisional)
+            assertFalse(awaitItem().provisional)
+            awaitComplete()
+        }
+        assertEquals(setOf(read), topicReads.drain("xat", topicReads.checkpoint()))
+        repository.observeTopicPage(read.cat, read.topicId, page = 1).first()
+        assertTrue(topicReads.drain("XaT", topicReads.checkpoint()).isEmpty())
+
+        auth.value = AuthState.Anonymous
+        repository.refreshTopicPage(read.cat, read.topicId, page = 1)
+        assertTrue(topicReads.drain("XaT", topicReads.checkpoint()).isEmpty())
+        assertEquals(3, server.requestCount)
     }
 
     @Test
@@ -603,6 +637,8 @@ class TopicRepositoryImplTest {
         clock = Clock.fixed(now, ZoneOffset.UTC),
         userPreferencesRepository = userPreferences,
         ioDispatcher = Dispatchers.Unconfined,
+        authRepository = mockk<AuthRepository> { every { observeAuthState() } returns auth },
+        topicReads = topicReads,
     )
 
     private fun fixtureHtml(name: String): String {

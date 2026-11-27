@@ -272,6 +272,7 @@ fun FlagsRoute(
         onRetry = viewModel::retryRefreshWarning,
         hasRefreshBanner = flagsState.showsRefreshBanner(restBlockedUntil),
     )
+    ManualRefreshFeedbackEffect(viewModel.manualRefreshFeedback, authSessionKey, snackbarHostState)
 
     // #385 — hoisted list state + scroll-to-top when the unread filter flips (cf.
     // FilterFlipScrollResetEffect).
@@ -352,7 +353,7 @@ fun FlagsRoute(
     // bottom tab — AND when the user switches flag tab WITHOUT leaving the screen (#501: a tab
     // change kept FlagsRoute composed, so a Unit key never re-fired and the new tab showed stale
     // data). The ViewModel snapshots the tab at call time and gates the call (preference opt-out,
-    // auth, real tab, in-flight refresh, 15 s throttle PER TAB — #743: a landing on another tab is
+    // auth, in-flight refresh, two-minute window per type — #743: a landing on another tab is
     // never swallowed by this one's window, and one that meets an in-flight refresh is replayed once
     // it settles), so a rapid tab burst costs at most one fan-out per tab and reuses the
     // pull-to-refresh indicator as the visual cue.
@@ -570,11 +571,7 @@ fun FlagsRoute(
                                     ),
                                     actions = AuthenticatedActions(
                                         onSelectTab = viewModel::selectTab,
-                                        // #378 follow-up — record the read BEFORE navigating: returning
-                                        // from this topic must bypass the auto-refresh throttle (the flag
-                                        // state just changed), cf. FlagsViewModel.onFlagOpened.
                                         onOpenFlag = { flag ->
-                                            viewModel.onFlagOpened()
                                             // #638 — the row tap opens the page the READER needs: the
                                             // last-read one, or the next one when the last-read post was
                                             // the last of its page (thony94 / MisterDams). The sheet still
@@ -582,6 +579,7 @@ fun FlagsRoute(
                                             onOpenFlag(flag, flag.pageToOpen())
                                         },
                                         onRefresh = viewModel::refresh,
+                                        onPullRefresh = viewModel::pullRefresh,
                                         onLoginRequested = onLoginRequested,
                                         onLongPressFlag = { sheetFlag = it },
                                         onOpenCategory = onOpenCategory,
@@ -634,7 +632,6 @@ fun FlagsRoute(
         superFavoriteTopics = superFavoriteTopics,
         onOpen = { flag, page ->
             sheetFlag = null
-            viewModel.onFlagOpened()
             onOpenFlag(flag, page)
         },
         onReply = { flag ->
@@ -1614,10 +1611,7 @@ internal fun FlagListBody(
         isRefreshing = state.isRefreshing,
         // #728 — flag this refresh as MANUAL (gesture-driven): the rich contained indicator shows here
         // and the thin top bar is suppressed. Auto / cold refreshes never go through this lambda.
-        onRefresh = {
-            onManualRefresh()
-            actions.onRefresh()
-        },
+        onRefresh = { actions.onPullRefresh(onManualRefresh) },
         state = pullState,
         indicator = {
             val puckTop = pullPuckTopOffset()
@@ -2935,6 +2929,10 @@ internal data class AuthenticatedActions(
     val onOpenMultiMp: (threadId: Int, page: Int, wasUnread: Boolean) -> Unit = { _, _, _ -> },
     /** #6 — explicit user reload of the DT list (retry). */
     val onRefreshDt: () -> Unit = {},
+    val onPullRefresh: (() -> Unit) -> Unit = { onAdmitted ->
+        onAdmitted()
+        onRefresh()
+    },
 )
 
 /**

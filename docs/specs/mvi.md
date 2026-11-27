@@ -186,12 +186,13 @@ class FlagsViewModel @Inject constructor(
 
 > **Polish #154 → #198** — `MessagesRepository` n'est plus injectée dans `FlagsViewModel` : l'ancien `unreadMpCount` était surfacé dans le footer Drapeaux mais ce footer (pseudo, logout, version, signalement, Diagnostics) est passé par `MessagesScreen` (#154) avant d'être hoisté en Phase 2 finish (#198) dans le menu compte global (`RedfaceAccountMenu`, alimenté par `AppAccountViewModel`) accessible depuis chaque écran principal. Le compteur MP reviendra à côté de la liste réelle des MPs, pas en tant qu'overlay temporaire.
 
-`FlagRepository` est livrée comme un contrat à deux verbes (cf. `core/domain/.../FlagRepository.kt`) :
+`FlagRepository` expose les lectures d’inventaire et la réconciliation ciblée (cf. `core/domain/.../FlagRepository.kt`).
 
 ```kotlin
 interface FlagRepository {
     fun observe(type: FlagType): Flow<FlagsResult>
     suspend fun refresh(type: FlagType): FlagsResult
+    suspend fun reconcileTopicReads(reads: Set<TopicRead>, visibleTypes: List<FlagType>) = Unit
     fun clearSessionCache()
 }
 
@@ -203,11 +204,13 @@ sealed class FlagsResult {
 ```
 
 `FlagRefreshIssue` (types définis dans `core/domain/.../FlagRepository.kt`) porte les catégories dont
-le complément des épinglés manque et la pagination certainement tronquée (#984). Les lignes reçues
-sont affichées et remplacent le cache Room, sans conserver les anciennes lignes des parties en échec.
+le complément des épinglés manque et la pagination certainement tronquée (#984). Une collecte
+d’inventaire remplace les partitions reçues et conserve les anciennes lignes des partitions en échec dans Room.
 L'avertissement reste transitoire : le ViewModel expose un effet consommable vers le `SnackbarHost`,
 avec « Réessayer » sur l'onglet d'origine ; Super agrège le lot Cyan → Rouge → Favoris sans l'interrompre.
-Un résultat incomplet ne bénéficie ni du TTL disque de 30 s ni de la fenêtre d'auto-refresh de 15 s.
+La fraîcheur disque de 30 s est réservée aux instantanés complets. Les tentatives incomplètes
+arment aussi la fenêtre automatique. Les règles de cadence et de réconciliation sont dans
+l’[ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride).
 Une page vide avant le compteur annoncé reste un indice diagnostique, sans avertissement utilisateur :
 le compteur peut diverger sans prouver une perte de lignes. Le plafond de pagination produit l'avertissement.
 

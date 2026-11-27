@@ -20,6 +20,7 @@ import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshStrategy
 import fr.forumhfr.redface2.core.domain.flags.FlagPullBatch
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
+import fr.forumhfr.redface2.core.domain.flags.TopicRead
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -147,6 +148,11 @@ class DefaultFlagRepository @Inject constructor(
             FlagType.entries.forEach { put(it, 0) }
         }
     private val cacheWriteMutexes: Map<FlagType, Mutex> = FlagType.entries.associateWith { Mutex() }
+    private val reconciliationMutex = Mutex()
+    private var reconciliationSequence = 0L
+    // A completed targeted read owns its category over this inventory generation and its sweep.
+    // Guarded by cachedSuccesses, like the other cache generations.
+    private val reconciledCategories = mutableMapOf<Pair<FlagType, Int>, Int>()
 
     private val cacheUpdates = MutableSharedFlow<FlagType>(
         replay = 0,
@@ -196,7 +202,10 @@ class DefaultFlagRepository @Inject constructor(
         val sweepGeneration: Int,
         val policyGeneration: Int,
         val resolutionCat: Int? = null,
-    )
+        val reconciliationId: Long? = null,
+    ) {
+        val forced: Boolean get() = reconciliationId != null
+    }
 
     private class ActiveRefresh(val key: FetchKey, var callers: Int = 1) {
         // Under generationMutex; retained through publication, even after the Deferred completes.
@@ -350,6 +359,7 @@ class DefaultFlagRepository @Inject constructor(
                 ?: run {
                     if (pull == null || pullSweep != (pull to sweepGeneration)) {
                         sweepGeneration++
+                        reconciledCategories.clear()
                         pullSweep = pull?.let { it to sweepGeneration }
                     }
                     ActiveRefresh(fetchKey(type, userId.orEmpty())).also { activeRefreshes[type] = it }
@@ -357,6 +367,62 @@ class DefaultFlagRepository @Inject constructor(
         }
         cancelSupersededFetches()
         active
+    }
+
+    override suspend fun reconcileTopicReads(reads: Set<TopicRead>, visibleTypes: List<FlagType>) {
+        val userId = currentUserId() ?: return
+        reconciliationMutex.withLock {
+            if (reads.isEmpty() || userId != currentUserId()) return@withLock
+            val typesByCategory = reconciliationTypes(userId, reads, visibleTypes)
+            val reconciliationId = ++reconciliationSequence
+            try {
+                typesByCategory.forEach { (cat, types) ->
+                    reconcileCategory(userId, cat, types, reconciliationId)
+                }
+            } finally {
+                synchronized(stickySweeps) {
+                    stickySweeps.keys.removeAll { it.reconciliationId == reconciliationId }
+                }
+            }
+        }
+    }
+
+    private suspend fun reconciliationTypes(
+        userId: String,
+        reads: Set<TopicRead>,
+        visibleTypes: List<FlagType>,
+    ): Map<Int, List<FlagType>> {
+        val cachedReads = FlagType.entries.associateWith { type ->
+            val cached = synchronized(cachedSuccesses) { cachedSuccesses[type] }
+                ?: flagCacheStore.load(type, userId)?.result
+            cached?.flags.orEmpty().asSequence().map { TopicRead(it.cat, it.topicId) }
+                .filter { it in reads }.toSet()
+        }
+        return reads.groupBy { it.cat }.mapValues { (_, topics) ->
+            FlagType.entries.filter { type -> type in visibleTypes || topics.any { it in cachedReads.getValue(type) } }
+        }.filterValues { it.isNotEmpty() }
+    }
+
+    private suspend fun reconcileCategory(userId: String, cat: Int, types: List<FlagType>, id: Long) {
+        if (userId != currentUserId()) return
+        val trace = refreshDiagnostics.begin(FlagRefreshTrigger.TOPIC_RECONCILE, types)
+        try {
+            withContext(trace) {
+                types.map { type ->
+                    async {
+                        fetchDeduplicated(type, userId, resolutionCat = cat, reconciliationId = id) { result ->
+                            if (result is FlagsResult.Failure) trace.failure(result.cause)
+                            if (result is FlagsResult.Success) {
+                                refreshes.getValue(type).emit(result)
+                                trace.published()
+                            }
+                        }
+                    }
+                }.awaitAll()
+            }
+        } finally {
+            trace.finish()
+        }
     }
 
     override fun observeCacheUpdates(types: Set<FlagType>): Flow<FlagType> {
@@ -886,6 +952,7 @@ class DefaultFlagRepository @Inject constructor(
     /** Must be called under [cachedSuccesses]' monitor. */
     private fun bumpCacheGeneration(type: FlagType) {
         cacheGenerations[type] = cacheGenerations.getValue(type) + 1
+        reconciledCategories.keys.removeAll { it.first == type }
         cachedFetchKeys.remove(type)
     }
 
@@ -946,6 +1013,7 @@ class DefaultFlagRepository @Inject constructor(
         type: FlagType,
         userId: String,
         resolutionCat: Int? = null,
+        reconciliationId: Long? = null,
         publish: (suspend (FlagsResult) -> Unit)? = null,
     ): FlagsResult {
         policyOwner.synchronize()
@@ -957,7 +1025,7 @@ class DefaultFlagRepository @Inject constructor(
                 admission = admission.withPolicy(policy)
                 generationMutex.withLock {
                     val key = synchronized(cachedSuccesses) {
-                        fetchKey(type, userId).copy(resolutionCat = resolutionCat)
+                        fetchKey(type, userId).copy(resolutionCat = resolutionCat, reconciliationId = reconciliationId)
                     }
                     val observed = joinOrStartFetch(key, caller, admission)
                     key to observed
@@ -1090,9 +1158,9 @@ class DefaultFlagRepository @Inject constructor(
         }
         var resultTrace: FlagFetchTrace? = trace
         val owned = synchronized(cachedSuccesses) {
-            val current = fetchKey(type, userId).copy(resolutionCat = key.resolutionCat)
+            val current = currentFetchKey(key)
             when {
-                key == current -> result
+                key == current -> latestResult(key, result)
                 cachedFetchKeys[type] == current -> {
                     resultTrace = cachedFetchTraces[type]
                     cachedSuccesses[type]
@@ -1105,6 +1173,21 @@ class DefaultFlagRepository @Inject constructor(
         publish?.invoke(owned)
         owned
     }
+
+    /** Both callers hold the cache monitor. A reconcile may commit between fetch and publication. */
+    private fun latestResult(key: FetchKey, result: FlagsResult?): FlagsResult? {
+        if (key.forced) return result
+        val hasReconciliation = reconciledCategories.any { (partition, generation) ->
+            val catMatches = key.resolutionCat == null || key.resolutionCat == partition.second
+            catMatches && partition.first == key.type && generation == key.sweepGeneration
+        }
+        return if (hasReconciliation) cachedSuccesses[key.type] ?: result else result
+    }
+
+    private fun currentFetchKey(key: FetchKey): FetchKey = fetchKey(key.type, key.userId).copy(
+        resolutionCat = key.resolutionCat,
+        reconciliationId = key.reconciliationId,
+    )
 
     /** Must be called under [cachedSuccesses]' monitor. */
     private fun fetchKey(type: FlagType, userId: String): FetchKey = FetchKey(
@@ -1134,16 +1217,22 @@ class DefaultFlagRepository @Inject constructor(
             Log.w(LOG_TAG, "Flags REST fetch failed for ${key.type}", error)
             FlagRefreshBatch(null, emptyList(), clock.instant(), error)
         }
+        if (key.forced && (batch.outcomes.size != 2 || batch.outcomes.any { it.failure != null })) {
+            return@withContext FlagsResult.Failure(
+                batch.cause ?: IllegalStateException("Incomplete flags reconciliation for cat=${key.resolutionCat}"),
+            )
+        }
         commitFetchedSuccess(key, batch.copy(resolutionCat = key.resolutionCat)) ?: FlagsResult.Loading
     }
 
     private suspend fun publishIntermediate(key: FetchKey, result: FlagsResult) {
         cacheWriteMutexes.getValue(key.type).withLock {
             generationMutex.withLock {
-                val owns = currentUserId() == key.userId && synchronized(cachedSuccesses) {
-                    fetchKey(key.type, key.userId) == key
+                if (currentUserId() != key.userId) return@withLock
+                val owned = synchronized(cachedSuccesses) {
+                    if (currentFetchKey(key) == key) latestResult(key, result) else null
                 }
-                if (owns) refreshes.getValue(key.type).emit(result)
+                if (owned != null) refreshes.getValue(key.type).emit(owned)
             }
         }
     }
@@ -1199,7 +1288,7 @@ class DefaultFlagRepository @Inject constructor(
         }
 
     private fun resolutionBuckets(key: FetchKey, cats: List<Category>): List<Category> {
-        if (key.resolutionCat == null) return cats
+        if (key.resolutionCat == null || key.forced) return cats
         val coverage = synchronized(cachedSuccesses) { cachedSuccesses[key.type]?.coverage }
         return cats.filterNot { coverage?.isGlobalObservation == false && coverage.covers(it.id, FlagSource.BUCKET) }
     }
@@ -1245,14 +1334,12 @@ class DefaultFlagRepository @Inject constructor(
         return cacheWriteMutexes.getValue(type).withLock {
             generationMutex.withLock commit@{
                 trace?.phase(FlagRefreshPhase.MUTEX, mutexStart)
-                val ownsWrite = currentUserId() == key.userId && synchronized(cachedSuccesses) {
-                    fetchKey(type, key.userId).copy(resolutionCat = key.resolutionCat) == key
-                }
-                if (!ownsWrite) {
+                val retained = if (currentUserId() == key.userId) categoriesToRetain(key) else null
+                if (retained == null) {
                     trace?.gap(FlagRefreshGap.CACHE_GENERATION)
                     return@commit null
                 }
-                val snapshot = flagCacheStore.merge(key.userId, type, batch)
+                val snapshot = flagCacheStore.merge(key.userId, type, batch, retained)
                 currentCoroutineContext()[FlagReadSession]?.expiredCategories(
                     snapshot.coverage.filter { it.failure == FlagFailureKind.DEADLINE }.map { it.cat }.distinct().size,
                 )
@@ -1268,19 +1355,34 @@ class DefaultFlagRepository @Inject constructor(
                         it.copy(name = batch.categoryNames[it.id])
                     }))
                 }
-                if (!emptyGlobal) measured(FlagRefreshPhase.ROOM) { persistFlags(key.userId, type, snapshot) }
-                val committed = synchronized(cachedSuccesses) {
-                    if (fetchKey(type, key.userId).copy(resolutionCat = key.resolutionCat) == key) {
-                        cachedSuccesses[type] = result
-                        cachedFetchKeys[type] = key.takeIf { it.resolutionCat == null } ?: fetchKey(type, key.userId)
-                        if (trace != null) cachedFetchTraces[type] = trace else cachedFetchTraces.remove(type)
-                        true
-                    } else {
-                        false
-                    }
+                val writeError = if (emptyGlobal) null else measured(FlagRefreshPhase.ROOM) {
+                    persistFlags(key.userId, type, snapshot).exceptionOrNull()
                 }
-                if (committed) publishCacheUpdate(type)
+                if (key.forced && writeError != null) return@commit FlagsResult.Failure(writeError)
+                cacheFetchedResult(key, result, trace)
                 result
+            }
+        }
+    }
+
+    private fun cacheFetchedResult(key: FetchKey, result: FlagsResult.Success, trace: FlagFetchTrace?) {
+        val type = key.type
+        synchronized(cachedSuccesses) {
+            if (currentFetchKey(key) != key) return
+            if (key.forced) reconciledCategories[type to requireNotNull(key.resolutionCat)] = key.sweepGeneration
+            cachedSuccesses[type] = result
+            cachedFetchKeys[type] = key.takeIf { it.resolutionCat == null } ?: fetchKey(type, key.userId)
+            if (trace != null) cachedFetchTraces[type] = trace else cachedFetchTraces.remove(type)
+        }
+        publishCacheUpdate(type)
+    }
+
+    private fun categoriesToRetain(key: FetchKey): Set<Int>? = synchronized(cachedSuccesses) {
+        when {
+            currentFetchKey(key) != key -> null
+            key.forced -> emptySet()
+            else -> reconciledCategories.entries.mapNotNullTo(hashSetOf()) { (partition, generation) ->
+                partition.second.takeIf { partition.first == key.type && generation == key.sweepGeneration }
             }
         }
     }
@@ -1289,9 +1391,9 @@ class DefaultFlagRepository @Inject constructor(
         userId: String,
         type: FlagType,
         snapshot: fr.forumhfr.redface2.core.database.dao.FlagCacheSnapshot,
-    ) {
+    ): Result<Unit> {
         val trace = currentCoroutineContext()[FlagFetchTrace]
-        runCatching { flagCacheStore.save(userId, type, snapshot) }.onFailure { throwable ->
+        return runCatching { flagCacheStore.save(userId, type, snapshot) }.onFailure { throwable ->
             if (throwable is CancellationException) throw throwable
             trace?.gap(FlagRefreshGap.ROOM_WRITE)
             trace?.failed(FlagRefreshPhase.ROOM, throwable, fatal = false)
@@ -1447,12 +1549,11 @@ class DefaultFlagRepository @Inject constructor(
     ) {
         val userId = key.userId
         val sessionGen = key.sessionGeneration
-        val sweepGen = key.sweepGeneration
         // A stale generation (post-clearSessionCache caller, or a fetch that started under an
         // older refresh burst) or an empty catalogue all degrade to « no supplement » — never
         // create a sweep for a logged-out account, never join a newer burst's sweep.
         val trace = currentCoroutineContext()[FlagFetchTrace]
-        val sweep = if (cats.isEmpty()) null else stickySweep(cats, userId, sessionGen, sweepGen, trace)
+        val sweep = if (cats.isEmpty()) null else stickySweep(cats, key, trace)
         if (sweep == null) {
             if (cats.isNotEmpty()) trace?.gap(FlagRefreshGap.STICKY_GENERATION)
             cats.forEach { record(CategoryRefreshOutcome(it.id, FlagSource.STICKY,
@@ -1526,8 +1627,8 @@ class DefaultFlagRepository @Inject constructor(
      * #862 (gate Sol r2) — ONE `topics/last` sweep per REFRESH GENERATION, shared by the three
      * flag types : per-type sweeps would issue 3 × ~19 largely identical GETs on a full refresh
      * (57 instead of 19). This is a COALESCING device, never a temporal cache (no TTL, no wall
-     * clock) : the sweep is keyed by (session generation, sweep generation, user, category-set
-     * signature) — the types of one burst share exactly one [Deferred] ; one explicit pull, whether
+     * clock). The types of one burst share exactly one [Deferred] per category set. A forced topic
+     * reconciliation uses its own sweep identity and discards it after its types finish. One explicit pull, whether
      * for one type or a [FlagPullBatch], opens a fresh [sweepGeneration]. A partially failed sweep only
      * ever serves its own generation ; a stale post-[clearSessionCache] caller (its captured
      * session generation no longer matches) gets `null` and degrades instead of creating a sweep
@@ -1538,22 +1639,21 @@ class DefaultFlagRepository @Inject constructor(
      */
     private suspend fun stickySweep(
         cats: List<Category>,
-        userId: String,
-        sessionGen: Int,
-        sweepGen: Int,
+        fetch: FetchKey,
         parentTrace: FlagFetchTrace?,
     ): ObservedSweep? {
         val session = checkNotNull(currentCoroutineContext()[FlagReadSession])
         return synchronized(stickySweeps) {
             val ownsSweep = synchronized(cachedSuccesses) {
-                sessionGen == sessionGeneration && sweepGen == sweepGeneration
+                fetch.sessionGeneration == sessionGeneration && fetch.sweepGeneration == sweepGeneration
             }
             if (!ownsSweep) return@synchronized null
             val key = SweepKey(
-                sessionGeneration = sessionGen,
-                sweepGeneration = sweepGen,
-                userId = userId,
+                sessionGeneration = fetch.sessionGeneration,
+                sweepGeneration = fetch.sweepGeneration,
+                userId = fetch.userId,
                 catIds = cats.map { it.id },
+                reconciliationId = fetch.reconciliationId,
             )
             val existing = stickySweeps[key]
             if (existing != null && !existing.deferred.isCancelled) {
@@ -1618,6 +1718,7 @@ class DefaultFlagRepository @Inject constructor(
         val sweepGeneration: Int,
         val userId: String,
         val catIds: List<Int>,
+        val reconciliationId: Long?,
     )
 
     private class ObservedSweep(
@@ -1635,6 +1736,7 @@ class DefaultFlagRepository @Inject constructor(
         synchronized(cachedSuccesses) {
             policyGeneration++
             sweepGeneration++
+            reconciledCategories.clear()
             activeRefreshes.clear()
             cachedFetchKeys.clear()
         }

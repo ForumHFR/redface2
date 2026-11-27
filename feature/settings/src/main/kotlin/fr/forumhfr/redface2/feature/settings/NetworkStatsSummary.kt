@@ -167,6 +167,7 @@ private fun NetworkStatsMetrics.flagLines(resources: Resources) = with(resources
 private val flagTriggerLabels = mapOf(
     NetworkTrigger.LAUNCH to R.string.network_stats_trigger_launch,
     NetworkTrigger.RETURN_FROM_TOPIC to R.string.network_stats_trigger_return,
+    NetworkTrigger.TOPIC_RECONCILE to R.string.network_stats_trigger_topic_reconcile,
     NetworkTrigger.RESUME to R.string.network_stats_trigger_resume,
     NetworkTrigger.TAB to R.string.network_stats_trigger_tab,
     NetworkTrigger.PULL to R.string.network_stats_trigger_pull,

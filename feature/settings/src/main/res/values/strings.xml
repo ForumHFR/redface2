@@ -635,6 +635,7 @@
     <string name="network_stats_flag_row">%1$s — Admises : %2$d · Ignorées : %3$d · Requêtes : %4$d · Par actualisation admise : %5$s</string>
     <string name="network_stats_trigger_launch">Lancement</string>
     <string name="network_stats_trigger_return">Retour d’un sujet</string>
+    <string name="network_stats_trigger_topic_reconcile">Actualisation ciblée après lecture</string>
     <string name="network_stats_trigger_resume">Reprise</string>
     <string name="network_stats_trigger_tab">Changement d’onglet</string>
     <string name="network_stats_trigger_pull">Balayage</string>

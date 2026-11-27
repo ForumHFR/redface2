@@ -43,6 +43,9 @@ interface FlagRepository {
      */
     suspend fun refresh(type: FlagType): FlagsResult
 
+    /** Re-read touched categories for visible types and other cached types containing those topics. */
+    suspend fun reconcileTopicReads(reads: Set<TopicRead>, visibleTypes: List<FlagType>) = Unit
+
     /**
      * Passive cache invalidation signal for cache-only consumers. Unlike [observe], subscribing here
      * never triggers an initial fetch; emissions only mean one of [types]' in-memory snapshots changed

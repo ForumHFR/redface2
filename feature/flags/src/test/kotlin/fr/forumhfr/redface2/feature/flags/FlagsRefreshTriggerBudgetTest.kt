@@ -5,11 +5,15 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
+import fr.forumhfr.redface2.core.domain.error.HfrRestAvailability
 import fr.forumhfr.redface2.core.domain.flags.FlagLookup
 import fr.forumhfr.redface2.core.domain.flags.FlagPullBatch
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
+import fr.forumhfr.redface2.core.domain.flags.TopicRead
+import fr.forumhfr.redface2.core.domain.flags.TopicReadQueue
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
@@ -17,6 +21,9 @@ import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteRepository
 import fr.forumhfr.redface2.core.domain.preferences.SuperFavoriteTopic
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.NetworkTrigger
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.Flag
@@ -36,11 +43,13 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.TestScope
@@ -63,14 +72,18 @@ import org.junit.Test
  * | --- | --- | --- |
  * | Cold start on CYAN (landing + resume) | CYAN → CYAN | CYAN → CYAN |
  * | First RED visit, then first FAVORITE visit | RED, FAVORITE → RED, FAVORITE | RED, FAVORITE → RED, FAVORITE |
- * | Return from a CYAN topic within the window | CYAN → CYAN | 0 → 0 |
- * | Return from a Super topic | 0 → 0 | 0 → 0 |
- * | Switch back to CYAN after that Super return, still within the window | CYAN → CYAN | 0 → 0 |
- * | Resume after 10 s / 20 s | 0 / CYAN → 0 / CYAN | 0 / 0 → 0 / 0 |
+ * | Return from a CYAN topic within / past the window | CYAN / CYAN → targeted / CYAN | 0 → 0 |
+ * | Return from a topic opened outside Flags after 30 s | CYAN → targeted | 0 → 0 |
+ * | Two CYAN topic returns inside the window | CYAN twice → targeted twice | 0 → 0 |
+ * | Return on Super, then switch to CYAN | 0 + CYAN → targeted + 0 | 0 → 0 |
+ * | Resume after 10 s / 20 s | 0 / CYAN → 0 / 0 | 0 → 0 |
+ * | Resume at 30 s / 90 s / 130 s | CYAN / CYAN / CYAN → 0 / 0 / CYAN | 0 → 0 |
  * | CYAN pull | CYAN → CYAN | 0 → 0 |
  * | Super pull | CYAN, RED, FAVORITE → same types in one sweep batch (120 → 80 REST calls) | 0 → 0 |
  * | Super pull joining in-flight CYAN | CYAN, RED, FAVORITE → same types in one sweep batch (120 → 80) | 0 → 0 |
- * | Two completed CYAN pulls 5 s apart | CYAN, CYAN → CYAN, CYAN | 0 → 0 |
+ * | Two CYAN pulls 5 s apart | CYAN, CYAN → CYAN | 0 → 0 |
+ * | Banner or snackbar Retry inside the floor after an incomplete refresh | CYAN → 0 | 0 → 0 |
+ * | Super pull inside the floor of one of its types | CYAN, RED, FAVORITE → 0 | 0 → 0 |
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class FlagsRefreshTriggerBudgetTest {
@@ -102,49 +115,84 @@ class FlagsRefreshTriggerBudgetTest {
     }
 
     @Test
-    fun `returning from a CYAN topic bypasses the throttle once without a cold observe`() = runTest {
+    fun `returning twice within the window reconciles twice without a full refresh or a cold observe`() = runTest {
         scenario {
             startOnCyan()
 
-            returnFromTopic()
-
-            assertCalls(refreshes = listOf(FlagType.CYAN))
-            assertPinned(FlagTab.Cyan, FlagType.CYAN, explicitRefreshes = 2)
+            repeat(2) { index ->
+                returnFromTopic()
+                assertCalls(reconciles = listOf(listOf(FlagType.CYAN)))
+                assertPinned(FlagTab.Cyan, FlagType.CYAN, explicitRefreshes = 2 + index, read = true)
+            }
         }
     }
 
     @Test
-    fun `returning from a Super topic sends no refresh and leaves the bypass pending for CYAN`() = runTest {
+    fun `a topic opened outside Flags still reconciles on landing`() = runTest {
+        scenario {
+            startOnCyan()
+            returnFromTopic(afterMillis = 30_000)
+            assertCalls(reconciles = listOf(listOf(FlagType.CYAN)))
+            assertPinned(FlagTab.Cyan, FlagType.CYAN, explicitRefreshes = 2, read = true)
+        }
+    }
+
+    @Test
+    fun `returning after the window runs only the full fetch and drains the topic reads`() = runTest {
+        scenario {
+            startOnCyan()
+            returnFromTopic(afterMillis = 130_000)
+            assertCalls(refreshes = listOf(FlagType.CYAN))
+            assertPinned(FlagTab.Cyan, FlagType.CYAN, explicitRefreshes = 2)
+            landAndResume()
+            assertCalls()
+        }
+    }
+
+    @Test
+    fun `returning on Super reconciles all backing types without a second refresh on Cyan`() = runTest {
         scenario {
             startOnCyan()
             visit(FlagTab.Super)
             assertCalls()
-            assertPinned(FlagTab.Super, FlagType.CYAN)
 
             returnFromTopic()
 
-            assertCalls()
-            assertPinned(FlagTab.Super, FlagType.CYAN)
+            assertCalls(reconciles = listOf(FlagType.entries))
+            assertPinned(FlagTab.Super, FlagType.CYAN, explicitRefreshes = 2, read = true)
 
             visit(FlagTab.Cyan)
-            assertCalls(refreshes = listOf(FlagType.CYAN))
-            assertPinned(FlagTab.Cyan, FlagType.CYAN, explicitRefreshes = 2)
+            assertCalls()
+            assertPinned(FlagTab.Cyan, FlagType.CYAN, explicitRefreshes = 2, read = true)
         }
     }
 
     @Test
-    fun `resume after ten seconds stays inside the window and resume after twenty seconds refreshes`() = runTest {
+    fun `resumes at ten and twenty seconds both stay inside the window`() = runTest {
+        scenario {
+            startOnCyan()
+            repeat(2) {
+                resumeAfter(10_000)
+                assertCalls()
+                assertPinned(FlagTab.Cyan, FlagType.CYAN)
+            }
+        }
+    }
+
+    @Test
+    fun `resumes at thirty and ninety seconds are ignored while the one at 130 seconds refreshes`() = runTest {
         scenario {
             startOnCyan()
 
-            resumeAfter(10_000)
+            val ignoredBeforeResume = ignored(NetworkTrigger.RESUME)
+            resumeAfter(30_000)
             assertCalls()
-            assertPinned(FlagTab.Cyan, FlagType.CYAN)
-
-            // The throttled resume did not re-arm the window. This is t = 20 s from landing.
-            resumeAfter(10_000)
+            resumeAfter(60_000)
+            assertCalls()
+            resumeAfter(40_000)
             assertCalls(refreshes = listOf(FlagType.CYAN))
             assertPinned(FlagTab.Cyan, FlagType.CYAN, explicitRefreshes = 2)
+            assertEquals(2, ignored(NetworkTrigger.RESUME) - ignoredBeforeResume)
         }
     }
 
@@ -152,6 +200,7 @@ class FlagsRefreshTriggerBudgetTest {
     fun `CYAN pull refreshes only CYAN inside the automatic window`() = runTest {
         scenario {
             startOnCyan()
+            advance(30_000)
 
             pull()
 
@@ -164,6 +213,7 @@ class FlagsRefreshTriggerBudgetTest {
     fun `Super pull refreshes the three backing types in order without observing them`() = runTest {
         scenario {
             startOnCyan()
+            advance(30_000)
             visit(FlagTab.Super)
             assertCalls()
 
@@ -178,6 +228,7 @@ class FlagsRefreshTriggerBudgetTest {
     fun `Super pull shares the sticky sweep of a Cyan refresh already in flight`() = runTest {
         scenario {
             startOnCyan()
+            advance(30_000)
             val finishCyan = holdNextRefresh()
             pull()
 
@@ -191,17 +242,110 @@ class FlagsRefreshTriggerBudgetTest {
     }
 
     @Test
-    fun `completed pulls five seconds apart each refresh CYAN`() = runTest {
+    fun `a second pull five seconds after completion sends nothing and does not arm the spinner`() = runTest {
         scenario {
             startOnCyan()
-
+            advance(30_000)
+            val finish = holdNextRefresh()
             pull()
+            advance(35_000)
+            finish()
+            assertCalls(refreshes = listOf(FlagType.CYAN))
+
+            advance(5_000)
+            pull(expectAdmission = false)
+            assertCalls()
+            assertEquals(listOf(ManualRefreshFeedback.Updated(5)), feedback)
+            assertEquals(1, ignored(NetworkTrigger.PULL))
             assertPinned(FlagTab.Cyan, FlagType.CYAN, explicitRefreshes = 2)
 
-            advanceTimeBy(5_000)
+            advance(25_000)
             pull()
-            assertCalls(refreshes = listOf(FlagType.CYAN, FlagType.CYAN))
-            assertPinned(FlagTab.Cyan, FlagType.CYAN, explicitRefreshes = 3)
+            assertCalls(refreshes = listOf(FlagType.CYAN))
+        }
+    }
+
+    @Test
+    fun `banner and snackbar Retry obey the same floor after a failed refresh`() = runTest {
+        scenario {
+            startOnCyan()
+            advance(30_000)
+            flags.incomplete = true
+            pull()
+            assertCalls(refreshes = listOf(FlagType.CYAN))
+            advance(5_000)
+
+            retryWarning()
+            pull(expectAdmission = false)
+            assertCalls()
+            val retry = ManualRefreshFeedback.RetryAt(Instant.EPOCH.plusSeconds(60))
+            assertEquals(listOf(retry, retry), feedback)
+            assertEquals(2, ignored(NetworkTrigger.PULL))
+        }
+    }
+
+    @Test
+    fun `Super is refused as a whole when any backing type is inside the floor`() = runTest {
+        scenario {
+            startOnCyan()
+            advance(5_000)
+            visit(FlagTab.Super)
+            pull(expectAdmission = false)
+
+            assertCalls()
+            assertEquals(3, ignored(NetworkTrigger.PULL))
+            assertEquals(listOf(ManualRefreshFeedback.Updated(5)), feedback)
+            assertPinned(FlagTab.Super, FlagType.CYAN)
+
+            advance(25_000)
+            pull()
+            assertCalls(refreshes = FlagType.entries, sharedSweep = true)
+            advance(5_000)
+            pull(expectAdmission = false)
+            assertCalls()
+        }
+    }
+
+    @Test
+    fun `a blocked pull arms the floor and the pause also suppresses reconciliation`() = runTest {
+        scenario {
+            startOnCyan()
+            advance(30_000)
+            val deadline = Instant.EPOCH.plusSeconds(45)
+            blockedUntil.value = deadline
+            settle()
+            pull(expectAdmission = false)
+            assertCalls()
+            assertEquals(listOf(ManualRefreshFeedback.RetryAt(Instant.EPOCH.plusSeconds(60))), feedback)
+
+            returnFromTopic()
+            assertCalls()
+            assertEquals(1, ignored(NetworkTrigger.TOPIC_RECONCILE))
+
+            advance(10_000)
+            blockedUntil.value = null
+            settle()
+            advance(5_000)
+            pull(expectAdmission = false)
+            assertCalls()
+            assertEquals(List(2) { ManualRefreshFeedback.RetryAt(Instant.EPOCH.plusSeconds(60)) }, feedback)
+        }
+    }
+
+    @Test
+    fun `changing account clears both refresh windows`() = runTest {
+        scenario {
+            startOnCyan()
+            advance(5_000)
+            auth.value = AuthState.Authenticated("Other")
+            settle()
+            landAndResume()
+            assertCalls(refreshes = listOf(FlagType.CYAN), observations = listOf(FlagType.CYAN))
+
+            auth.value = AuthState.Authenticated("Third")
+            settle()
+            pull()
+            assertCalls(refreshes = listOf(FlagType.CYAN), observations = listOf(FlagType.CYAN))
         }
     }
 
@@ -209,10 +353,22 @@ class FlagsRefreshTriggerBudgetTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         try {
             val flags = RecordingFlagRepository()
-            val vm = viewModel(flags)
+            val topicReads = TopicReadQueue()
+            val blockedUntil = MutableStateFlow<Instant?>(null)
+            val auth = MutableStateFlow<AuthState>(AuthState.Authenticated("XaT"))
+            val ignored = mutableMapOf<NetworkTrigger, Int>()
+            val actions = NetworkActionRecorder { action, trigger, count ->
+                if (action == NetworkAction.FLAG_REFRESH_IGNORED) {
+                    ignored[trigger] = ignored.getOrDefault(trigger, 0) + count.toInt()
+                }
+            }
+            val vm = viewModel(flags, topicReads, auth, blockedUntil, actions)
             try {
+                val scenario = Scenario(this, vm, flags, topicReads, auth, blockedUntil, ignored)
+                vm.viewModelScope.launch { vm.manualRefreshFeedback.collect { scenario.feedback += it } }
+                vm.viewModelScope.launch { vm.restBlockedUntil.collect() }
                 runCurrent()
-                Scenario(this, vm, flags).block()
+                scenario.block()
             } finally {
                 vm.viewModelScope.cancel()
                 runCurrent()
@@ -222,7 +378,13 @@ class FlagsRefreshTriggerBudgetTest {
         }
     }
 
-    private fun TestScope.viewModel(flags: FlagRepository): FlagsViewModel {
+    private fun TestScope.viewModel(
+        flags: FlagRepository,
+        topicReads: TopicReadQueue,
+        auth: MutableStateFlow<AuthState>,
+        blockedUntil: MutableStateFlow<Instant?>,
+        actions: NetworkActionRecorder,
+    ): FlagsViewModel {
         val categories = ForumResult.Success(listOf(
             Category(id = CATEGORY_ID, name = "IA", forceSubcat = false, subcategoryCount = 0),
         ))
@@ -239,7 +401,7 @@ class FlagsRefreshTriggerBudgetTest {
             every { observeFlagsHideReadCategories() } returns flowOf(false)
             every { observeFlagsPerTabOverride() } returns flowOf(false)
             every { observeFlagsViewSettings(any()) } answers {
-                flowOf(FlagsViewSettings(groupByCategory = false, unreadOnly = firstArg<FlagType>() == FlagType.CYAN))
+                flowOf(FlagsViewSettings(groupByCategory = false, unreadOnly = false))
             }
         }
         val superFavorites = mockk<SuperFavoriteRepository> {
@@ -249,7 +411,7 @@ class FlagsRefreshTriggerBudgetTest {
         }
         return FlagsViewModel(
             authRepository = mockk<AuthRepository> {
-                every { observeAuthState() } returns flowOf(AuthState.Authenticated("XaT"))
+                every { observeAuthState() } returns auth
             },
             flagRepository = flags,
             forumRepository = forum,
@@ -260,15 +422,32 @@ class FlagsRefreshTriggerBudgetTest {
             mpStorageRepository = mockk(),
             clock = SchedulerClock(testScheduler),
             externalScope = backgroundScope,
-            refreshDiagnostics = FlagRefreshDiagnostics(DiagnosticsLog()),
+            refreshDiagnostics = FlagRefreshDiagnostics(DiagnosticsLog(), networkActions = actions),
+            topicReads = topicReads,
+            restAvailability = object : HfrRestAvailability by HfrRestAvailability.Available {
+                override val blockedUntil: Flow<Instant?> = blockedUntil
+            },
         )
     }
 
+    @Suppress("LongParameterList") // Each input is shared with the scenario's ViewModel or collection scope.
     private class Scenario(
         private val scope: TestScope,
         private val vm: FlagsViewModel,
-        private val flags: RecordingFlagRepository,
+        val flags: RecordingFlagRepository,
+        private val topicReads: TopicReadQueue,
+        val auth: MutableStateFlow<AuthState>,
+        val blockedUntil: MutableStateFlow<Instant?>,
+        private val ignored: Map<NetworkTrigger, Int>,
     ) {
+        val feedback = mutableListOf<ManualRefreshFeedback>()
+
+        fun ignored(trigger: NetworkTrigger): Int = ignored.getOrDefault(trigger, 0)
+
+        fun advance(millis: Long) = scope.advanceTimeBy(millis)
+
+        fun settle() = scope.runCurrent()
+
         fun startOnCyan() {
             landAndResume()
             assertCalls(refreshes = listOf(FlagType.CYAN), observations = listOf(FlagType.CYAN))
@@ -288,9 +467,9 @@ class FlagsRefreshTriggerBudgetTest {
             scope.runCurrent()
         }
 
-        fun returnFromTopic() {
-            vm.onFlagOpened()
-            scope.advanceTimeBy(5_000)
+        fun returnFromTopic(afterMillis: Long = 5_000) {
+            topicReads.record("XaT", TopicRead(CATEGORY_ID, PINNED_TOPIC_ID))
+            advance(afterMillis)
             landAndResume()
         }
 
@@ -300,8 +479,16 @@ class FlagsRefreshTriggerBudgetTest {
             scope.runCurrent()
         }
 
-        fun pull() {
-            vm.refresh()
+        fun pull(expectAdmission: Boolean = true) {
+            var admitted = false
+            vm.pullRefresh { admitted = true }
+            assertEquals(expectAdmission, admitted)
+            scope.runCurrent()
+            if (!expectAdmission) assertFalse(vm.isRefreshing.value)
+        }
+
+        fun retryWarning() {
+            vm.retryRefreshWarning(requireNotNull(vm.refreshWarning.value))
             scope.runCurrent()
         }
 
@@ -318,7 +505,10 @@ class FlagsRefreshTriggerBudgetTest {
             refreshes: List<FlagType> = emptyList(),
             observations: List<FlagType> = emptyList(),
             sharedSweep: Boolean = false,
+            reconciles: List<List<FlagType>> = emptyList(),
         ) {
+            assertEquals("targeted reconciliations", reconciles, flags.reconciles.toList())
+            flags.reconciles.clear()
             assertEquals("explicit refreshes", refreshes, flags.refreshes.toList())
             assertEquals("cold observation fetches", observations, flags.initialObserves.toList())
             val sweepBatches = flags.pullBatches.map(::requireNotNull)
@@ -328,13 +518,14 @@ class FlagsRefreshTriggerBudgetTest {
             flags.initialObserves.clear()
         }
 
-        fun assertPinned(tab: FlagTab, type: FlagType, explicitRefreshes: Int = 1) {
+        fun assertPinned(tab: FlagTab, type: FlagType, explicitRefreshes: Int = 1, read: Boolean = false) {
             val tabState = vm.flagsTabState.value
             assertEquals(tab, tabState.tab)
             val state = tabState.flagsState as FlagsListUiState.Success
             assertEquals(FlagRefreshStatus.COMPLETE, state.refreshStatus)
             val row = (state.content as FlagsContent.Flat).rows.single().flag
-            assertEquals(pinnedFlag(type, INITIAL_ANCHOR + explicitRefreshes), row)
+            val expected = pinnedFlag(type, INITIAL_ANCHOR + explicitRefreshes)
+            assertEquals(if (read) expected.copy(hasUnread = false) else expected, row)
             assertFalse(vm.isRefreshing.value)
             assertNull(vm.refreshWarning.value)
         }
@@ -346,6 +537,8 @@ class FlagsRefreshTriggerBudgetTest {
         val refreshes = mutableListOf<FlagType>()
         val initialObserves = mutableListOf<FlagType>()
         val pullBatches = mutableListOf<FlagPullBatch?>()
+        val reconciles = mutableListOf<List<FlagType>>()
+        var incomplete = false
         var refreshGate: CompletableDeferred<Unit>? = null
         private var isRefreshing = false
 
@@ -370,14 +563,24 @@ class FlagsRefreshTriggerBudgetTest {
                 gate?.await()
                 yield()
                 val previousAnchor = snapshots.getValue(type).value?.flags?.single()?.lastPostReadId
-                return publish(pinnedFlag(type, (previousAnchor ?: INITIAL_ANCHOR) + 1))
+                val issue = if (incomplete) FlagRefreshIssue(paginationTruncated = true) else null
+                return publish(pinnedFlag(type, (previousAnchor ?: INITIAL_ANCHOR) + 1), issue)
             } finally {
                 isRefreshing = false
             }
         }
 
-        private suspend fun publish(flag: Flag): FlagsResult.Success =
-            FlagsResult.Success(listOf(flag)).also {
+        override suspend fun reconcileTopicReads(reads: Set<TopicRead>, visibleTypes: List<FlagType>) {
+            assertEquals(setOf(TopicRead(CATEGORY_ID, PINNED_TOPIC_ID)), reads)
+            reconciles += visibleTypes
+            visibleTypes.forEach { type ->
+                val flag = snapshots.getValue(type).value?.flags?.singleOrNull() ?: return@forEach
+                publish(flag.copy(hasUnread = false, lastPostReadId = requireNotNull(flag.lastPostReadId) + 1))
+            }
+        }
+
+        private suspend fun publish(flag: Flag, issue: FlagRefreshIssue? = null): FlagsResult.Success =
+            FlagsResult.Success(listOf(flag), issue).also {
                 snapshots.getValue(flag.type).value = it
                 cacheUpdates.emit(flag.type)
             }

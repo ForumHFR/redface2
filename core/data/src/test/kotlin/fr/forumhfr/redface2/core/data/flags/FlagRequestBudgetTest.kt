@@ -19,6 +19,7 @@ import fr.forumhfr.redface2.core.domain.flags.FlagPullBatch
 import fr.forumhfr.redface2.core.domain.flags.FlagLookup
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
+import fr.forumhfr.redface2.core.domain.flags.TopicRead
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Flag
@@ -45,10 +46,12 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -68,6 +71,7 @@ import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -86,6 +90,13 @@ import org.robolectric.annotation.Config
  * | CYAN cold refresh admitted before observation | 41 shared → 41 shared | 15 → 5 |
  * | First RED / FAVORITE observation after a completed sweep, then landing refresh | 20 + 40 → 20 + 40 each | 15 → 5 |
  * | Super pull, warm catalogue | 120 → 80 | 15 → 5 |
+ * | CYAN topic return within the window, one / two affected types | 40 → 2 / 3 | 15 → 1 / 2 |
+ * | CYAN topic return after 2 min | 40 → 40 | 15 → 5 |
+ * | Read from a link/search, back to CYAN after 30 s | 40 → 2 | 15 → 1 |
+ * | Two successive reads of the same category from CYAN | 80 → 4 | 15 → 1 |
+ * | Topic return on Super, no other landing | 0 → 4 | 0 → 3 |
+ * | Refused pull or banner/snackbar retry within 30 s, one type / Super | 40 / 120 → 0 / 0 | 15 → 0 |
+ * | Resume at 30 s then 90 s then 130 s from the first refresh | 40 + 40 + 40 → 0 + 0 + 40 | 15 → 5 |
  * | One Apache 403 amid other HTTP failures, then a healthy pull | 20 + 40 → 5 + 40 | 15 → 5 |
  * | Apache 403, warm catalogue, detecting pull | 20 → 5 | 15 → 5 |
  * | Apache 403, cold catalogue, two pulls that detect the block | 1 + 1 → 1 + 1 | 1 → 1 |
@@ -199,6 +210,99 @@ class FlagRequestBudgetTest {
     }
 
     @Test
+    fun `a topic return reads its bucket and a fresh sticky page each time`() = runTest {
+        repositories {
+            val old = primeCyan()
+            val read = TopicRead(23, 35395)
+            repeat(2) { index ->
+                val anchor = 2_783_260L + index
+                replaceReadState(read, Kind.BUCKET, "participated", anchor)
+                val published = start {
+                    flags.observe(FlagType.CYAN).drop(1).first { it is FlagsResult.Success }
+                }
+                request { flags.reconcileTopicReads(setOf(read), listOf(FlagType.CYAN)) }
+                val refreshed = published.await() as FlagsResult.Success
+                assertRead(refreshed, old, read, anchor)
+                assertReconcileBudget(read.cat, setOf("participated"), peak = 1)
+            }
+        }
+    }
+
+    @Test
+    fun `a cached topic in another type reconciles that type with one shared sticky page`() = runTest {
+        repositories {
+            val cyan = primeCyan()
+            val favorite = request { flags.refresh(FlagType.FAVORITE) } as FlagsResult.Success
+            assertSweep("favorites", catalogueCalls = 0, peak = 5)
+            val read = TopicRead(DISCUSSIONS, FAVORITE_PIN)
+            val anchor = 28_173_035L
+            replaceReadState(read, Kind.STICKY, anchor = anchor)
+
+            request { flags.reconcileTopicReads(setOf(read), listOf(FlagType.CYAN)) }
+
+            assertRead(snapshot(FlagType.FAVORITE), favorite, read, anchor)
+            val updatedCyan = snapshot(FlagType.CYAN)
+            assertEquals(cyan.flags, updatedCyan.flags)
+            assertEquals(cyan.refreshStatus, updatedCyan.refreshStatus)
+            assertCoverage(updatedCyan)
+            assertReconcileBudget(read.cat, setOf("participated", "favorites"), peak = 2)
+        }
+    }
+
+    @Test
+    fun `Super reconciles all three backing types with one sticky page`() = runTest {
+        repositories {
+            warmCatalogue()
+            val read = TopicRead(DISCUSSIONS, RED_PIN)
+            request { flags.reconcileTopicReads(setOf(read), FlagType.entries) }
+            assertPinned(snapshot(FlagType.RED).flags.single(), FlagType.RED)
+            assertPinned(snapshot(FlagType.FAVORITE).flags.single(), FlagType.FAVORITE)
+            assertReconcileBudget(read.cat, setOf("participated", "read", "favorites"), peak = 3)
+        }
+    }
+
+    @Test
+    fun `a failed sticky read commits neither source and retains the complete snapshot`() = runTest {
+        repositories {
+            val old = primeCyan()
+            val read = TopicRead(23, 35395)
+            replaceReadState(read, Kind.BUCKET, "participated", anchor = 2_783_260L)
+            http.failedKind = Kind.STICKY
+
+            request { flags.reconcileTopicReads(setOf(read), listOf(FlagType.CYAN)) }
+
+            assertEquals(old, snapshot(FlagType.CYAN))
+            assertReconcileBudget(read.cat, setOf("participated"), peak = 1)
+            flags.clearSessionCache()
+            assertEquals(old, snapshot(FlagType.CYAN))
+            assertBudget(RequestCounts(), peak = 0)
+        }
+    }
+
+    @Test
+    fun `full collection started before the topic read cannot overwrite a newer reconciliation`() = runTest {
+        repositories {
+            val old = primeCyan()
+            val inventory = start { flags.refresh(FlagType.CYAN) }
+            // Wait for the actual OKHttp calls. Dispatcher waves can include continuation work.
+            while (http.requestCounts()[Kind.BUCKET] != categoryIds.size) driveWave()
+            val release = http.holdNextCall() // Leave the full sweep in flight while the reconcile commits.
+            val read = TopicRead(23, 35395)
+            val anchor = 2_783_260L
+            replaceReadState(read, Kind.BUCKET, "participated", anchor)
+
+            request { flags.reconcileTopicReads(setOf(read), listOf(FlagType.CYAN)) }
+            assertFalse(inventory.isCompleted)
+            assertRead(snapshot(FlagType.CYAN), old, read, anchor)
+
+            release()
+            assertRead(request { inventory.await() } as FlagsResult.Success, old, read, anchor)
+            assertRead(snapshot(FlagType.CYAN), old, read, anchor)
+            assertBudget(RequestCounts(bucket = 21, sticky = 21), peak = 5)
+        }
+    }
+
+    @Test
     fun `one qualifying 403 stops the current collection without opening the breaker`() = runTest {
         repositories {
             val cached = primeCyan()
@@ -247,6 +351,11 @@ class FlagRequestBudgetTest {
             val startedAt = currentTime
             assertBlockedWarm(cached, bucketCalls = 5)
             assertBlockedWarm(cached, bucketCalls = 0)
+
+            val pausedSnapshot = snapshot(FlagType.CYAN)
+            request { flags.reconcileTopicReads(setOf(TopicRead(23, 35395)), listOf(FlagType.CYAN)) }
+            assertEquals(pausedSnapshot, snapshot(FlagType.CYAN))
+            assertBudget(RequestCounts(), peak = 0)
 
             assertEquals(FlagLookup.Unavailable, request { flags.findFlag(DISCUSSIONS, -1) })
             assertBudget(RequestCounts(), peak = 0)
@@ -362,6 +471,17 @@ class FlagRequestBudgetTest {
         assertEquals(expected, coverage.map { Triple(it.cat, it.source, it.failure) }.toSet())
     }
 
+    private fun assertRead(result: FlagsResult.Success, old: FlagsResult.Success, read: TopicRead, anchor: Long) {
+        assertEquals(FlagRefreshStatus.COMPLETE, result.refreshStatus)
+        assertNull(result.issue)
+        assertCoverage(result)
+        val row = result.flags.single { it.cat == read.cat && it.topicId == read.topicId }
+        assertFalse(row.hasUnread)
+        assertEquals(anchor, row.lastPostReadId)
+        assertEquals(old.flags.filterNot { it.cat == read.cat && it.topicId == read.topicId },
+            result.flags.filterNot { it.cat == read.cat && it.topicId == read.topicId })
+    }
+
     private fun pinId(type: FlagType): Int = when (type) {
         FlagType.CYAN -> CYAN_PIN
         FlagType.RED -> RED_PIN
@@ -470,14 +590,40 @@ class FlagRequestBudgetTest {
         val forum: DefaultForumRepository,
         val http: CountingHttp,
     ) {
-        suspend fun <T> request(operation: suspend () -> T): T {
-            val result = scope.async { operation() }
-            scope.runCurrent()
-            while (!result.isCompleted) {
-                check(http.executeAdmittedCalls()) { "Repository suspended with no admitted HTTP calls" }
-                scope.runCurrent()
+        fun <T> start(operation: suspend () -> T): Deferred<T> =
+            scope.async { operation() }.also { scope.runCurrent() }
+
+        fun driveWave() {
+            check(http.executeAdmittedCalls()) {
+                "Repository suspended after ${http.requestCounts()} with no admitted HTTP calls"
             }
+            scope.runCurrent()
+        }
+
+        suspend fun <T> request(operation: suspend () -> T): T {
+            val result = start(operation)
+            while (!result.isCompleted) driveWave()
             return result.await()
+        }
+
+        suspend fun snapshot(type: FlagType): FlagsResult.Success =
+            request { flags.observe(type).first { it is FlagsResult.Success } } as FlagsResult.Success
+
+        fun replaceReadState(read: TopicRead, kind: Kind, bucket: String? = null, anchor: Long) {
+            val entry = RecordedRequest(kind, read.cat, bucket, page = 1)
+            val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(http.body(entry))
+            val topics = envelope.resource.resources.map { topic ->
+                if (topic.id == read.topicId) topic.copy(isRead = true, lastPostReadId = anchor) else topic
+            }
+            http.overrideBody(entry, json.encodeToString(envelope.copy(resource = envelope.resource.copy(
+                resources = topics,
+            ))))
+        }
+
+        fun assertReconcileBudget(cat: Int, buckets: Set<String>, peak: Int) {
+            val calls = assertBudget(RequestCounts(bucket = buckets.size, sticky = 1), peak)
+            assertEquals(buckets.map { RecordedRequest(Kind.BUCKET, cat, it, page = 1) }.toSet() +
+                RecordedRequest(Kind.STICKY, cat, page = 1, resultsPerPage = 1), calls.toSet())
         }
 
         suspend fun warmCatalogue() {
@@ -563,6 +709,19 @@ class FlagRequestBudgetTest {
         private val reachedOkHttp = ThreadLocal<Boolean>()
         var failureCode: Int? = null
         var forbiddenCategory: Int? = null
+        var failedKind: Kind? = null
+        private val overrides = mutableMapOf<RecordedRequest, String>()
+
+        fun body(entry: RecordedRequest): String = overrides[entry] ?: bodies[entry] ?: EMPTY_LIST
+
+        fun overrideBody(entry: RecordedRequest, body: String) {
+            overrides[entry] = body
+        }
+
+        fun holdNextCall(): () -> Unit {
+            val held = checkNotNull(pending.poll())
+            return { pending.add(held) }
+        }
 
         override fun dispatch(context: CoroutineContext, block: Runnable) {
             pending.add(block)
@@ -596,12 +755,15 @@ class FlagRequestBudgetTest {
                 wave.countDown()
                 check(wave.await(WORKER_TIMEOUT_SECONDS, TimeUnit.SECONDS)) { "HTTP wave did not reach OkHttp" }
                 val defaultCode = if (entry.kind == Kind.OTHER) 404 else 200
-                val code = if (forbiddenCategory != null && entry.cat == forbiddenCategory) 403
-                    else failureCode ?: defaultCode
+                val code = when {
+                    forbiddenCategory != null && entry.cat == forbiddenCategory -> 403
+                    entry.kind == failedKind -> 500
+                    else -> failureCode ?: defaultCode
+                }
                 val contentType = if (code == 403) "text/html; charset=iso-8859-1" else "application/json"
                 val body = when (code) {
                     403 -> APACHE_FORBIDDEN
-                    200 -> bodies[entry.copy(resultsPerPage = null)] ?: EMPTY_LIST
+                    200 -> body(entry.copy(resultsPerPage = null))
                     else -> "{}"
                 }
                 return Response.Builder()
@@ -617,6 +779,8 @@ class FlagRequestBudgetTest {
                 inFlight.decrementAndGet()
             }
         }
+
+        fun requestCounts(): Map<Kind, Int> = requests.groupingBy { it.kind }.eachCount()
 
         fun takeRequests(): List<RecordedRequest> = generateSequence(requests::poll).toList()
 

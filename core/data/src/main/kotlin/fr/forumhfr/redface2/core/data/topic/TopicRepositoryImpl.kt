@@ -8,10 +8,14 @@ import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.database.entities.FetchMode
 import fr.forumhfr.redface2.core.database.entities.PostEntity
 import fr.forumhfr.redface2.core.database.entities.TopicEntity
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.flags.TopicRead
+import fr.forumhfr.redface2.core.domain.flags.TopicReadQueue
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.topic.TopicPageEmission
 import fr.forumhfr.redface2.core.domain.topic.TopicRepository
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.network.HfrClient
@@ -28,6 +32,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.withContext
 
 @Singleton
+@Suppress("LongParameterList") // The topic load and session handoff share this repository's network entry point.
 class TopicRepositoryImpl @Inject constructor(
     private val client: HfrClient,
     private val parser: HfrParser,
@@ -35,6 +40,8 @@ class TopicRepositoryImpl @Inject constructor(
     private val clock: Clock,
     private val userPreferencesRepository: UserPreferencesRepository,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    private val authRepository: AuthRepository,
+    private val topicReads: TopicReadQueue,
 ) : TopicRepository {
 
     /**
@@ -206,12 +213,17 @@ class TopicRepositoryImpl @Inject constructor(
         // wraps a `suspend` Room transaction that may resume on Room's executor thread, so the
         // synchronous per-thread `Trace.beginSection`/`endSection` would leak — we use the async
         // variant with a process-wide cookie instead.
+        val useAuth = authMode == FetchMode.AUTHENTICATED
+        val account = if (useAuth) authRepository.observeAuthState().first() as? AuthState.Authenticated else null
         val html = client.getTopicPage(
             cat = cat,
             post = post,
             page = page,
-            useAuth = authMode == FetchMode.AUTHENTICATED,
+            useAuth = useAuth,
         )
+        if (account != null && authRepository.observeAuthState().first() == account) {
+            topicReads.record(account.pseudo, TopicRead(cat, post))
+        }
         val topic = trace("rf2.topic.parse_html") { parser.parseTopicPage(html) }
         val (topicEntity, postEntities) = trace("rf2.topic.map_domain") {
             TopicMappers.toEntities(topic, clock.instant(), authMode)

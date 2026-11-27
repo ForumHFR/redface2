@@ -18,6 +18,8 @@ import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshCategory
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
+import fr.forumhfr.redface2.core.domain.flags.TopicRead
+import fr.forumhfr.redface2.core.domain.flags.TopicReadQueue
 import fr.forumhfr.redface2.core.domain.flags.FlagCategoryCoverage
 import fr.forumhfr.redface2.core.domain.flags.FlagCoverage
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshStatus
@@ -111,9 +113,8 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class FlagsViewModelTest {
 
-    /** Frozen clock for every test that does not exercise the #378 throttle window. */
-    private val fixedClock: Clock =
-        Clock.fixed(Instant.parse("2026-06-11T12:00:00Z"), ZoneOffset.UTC)
+    private val fixedClock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
+    private val topicReads = TopicReadQueue()
 
     @Before
     fun setUp() {
@@ -226,6 +227,7 @@ class FlagsViewModelTest {
         advanceUntilIdle()
         assertTrue(vm.refreshWarning.value === warning)
         vm.consumeRefreshWarning(warning)
+        fixedClock.now = fixedClock.now.plusSeconds(30)
         vm.retryRefreshWarning(warning)
         advanceUntilIdle()
         assertEquals(listOf(FlagType.CYAN, FlagType.CYAN), flags.refreshCalls)
@@ -310,6 +312,7 @@ class FlagsViewModelTest {
         advanceUntilIdle()
         val oldWarning = requireNotNull(vm.refreshWarning.value)
         flags.refreshGate = CompletableDeferred()
+        fixedClock.now = fixedClock.now.plusSeconds(30)
         vm.refresh()
         advanceUntilIdle()
         auth.emit(AuthState.Authenticated("new"))
@@ -323,7 +326,7 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `incomplete auto refresh keeps the fifteen second throttle for landings and resume - 984`() = runTest {
+    fun `incomplete auto refresh keeps the two minute throttle for landings and resume - 984`() = runTest {
         val flags = FakeFlagRepository().apply { refreshResults = mapOf(FlagType.CYAN to incompleteSuccess()) }
         val clock = SteppingClock(fixedClock.instant())
         val vm = viewModelWithClock(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, clock)
@@ -333,7 +336,7 @@ class FlagsViewModelTest {
         vm.maybeAutoRefresh(FlagRefreshTrigger.RESUME)
         advanceUntilIdle()
         assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
-        clock.now = clock.now.plusSeconds(14)
+        clock.now = clock.now.plusSeconds(119)
         vm.maybeAutoRefresh()
         advanceUntilIdle()
         assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
@@ -343,27 +346,6 @@ class FlagsViewModelTest {
         vm.maybeAutoRefresh()
         advanceUntilIdle()
         assertEquals(listOf(FlagType.CYAN, FlagType.CYAN), flags.refreshCalls)
-    }
-
-    @Test
-    fun `pull retry and return from a topic bypass the throttle after an incomplete attempt - 984`() = runTest {
-        val flags = FakeFlagRepository().apply { refreshResults = mapOf(FlagType.CYAN to incompleteSuccess()) }
-        val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
-        vm.maybeAutoRefresh()
-        advanceUntilIdle()
-        val warning = requireNotNull(vm.refreshWarning.value)
-        vm.consumeRefreshWarning(warning)
-        vm.retryRefreshWarning(warning)
-        advanceUntilIdle()
-        vm.refresh()
-        advanceUntilIdle()
-        vm.onFlagOpened()
-        vm.maybeAutoRefresh()
-        advanceUntilIdle()
-        assertEquals(List(4) { FlagType.CYAN }, flags.refreshCalls)
-        vm.maybeAutoRefresh(FlagRefreshTrigger.RESUME)
-        advanceUntilIdle()
-        assertEquals("automatic attempts are throttled again after the read", 4, flags.refreshCalls.size)
     }
 
     @Test
@@ -416,6 +398,7 @@ class FlagsViewModelTest {
         assertEquals(order, warning.retryTypes)
         flags.refreshResults = order.associateWith { FlagsResult.Success(emptyList()) }
         vm.consumeRefreshWarning(warning)
+        fixedClock.now = fixedClock.now.plusSeconds(30)
         vm.retryRefreshWarning(warning)
         advanceUntilIdle()
         assertEquals(order + order, flags.refreshCalls)
@@ -430,6 +413,7 @@ class FlagsViewModelTest {
         advanceUntilIdle()
         assertTrue(vm.refreshWarning.value != null)
         flags.refreshResults = mapOf(FlagType.CYAN to FlagsResult.Success(emptyList()))
+        fixedClock.now = fixedClock.now.plusSeconds(30)
         vm.refresh()
         advanceUntilIdle()
         assertNull(vm.refreshWarning.value)
@@ -462,6 +446,7 @@ class FlagsViewModelTest {
         assertTrue(requireNotNull(vm.refreshWarning.value).issue.stickyCategories.isNotEmpty())
         vm.selectTab(FlagTab.Cyan)
         flags.refreshResults = mapOf(FlagType.CYAN to FlagsResult.Success(emptyList()))
+        fixedClock.now = fixedClock.now.plusSeconds(30)
         vm.refresh()
         advanceUntilIdle()
         vm.selectTab(FlagTab.Super)
@@ -548,6 +533,7 @@ class FlagsViewModelTest {
         assertTrue(warning.issue.paginationTruncated)
         assertEquals(types, warning.retryTypes)
         flags.refreshResults = types.associateWith { FlagsResult.Success(emptyList()) }
+        fixedClock.now = fixedClock.now.plusSeconds(30)
         vm.retryRefreshWarning(warning)
         advanceUntilIdle()
         assertEquals(types + types, flags.refreshCalls)
@@ -577,6 +563,7 @@ class FlagsViewModelTest {
         assertEquals(types, warning.retryTypes)
         flags.refreshResults = types.associateWith { FlagsResult.Success(emptyList()) }
         vm.consumeRefreshWarning(warning)
+        fixedClock.now = fixedClock.now.plusSeconds(30)
         vm.retryRefreshWarning(warning)
         advanceUntilIdle()
         assertEquals(types + types, flags.refreshCalls)
@@ -2200,10 +2187,11 @@ class FlagsViewModelTest {
 
         vm.maybeAutoRefresh() // landing refresh → raises the signal
         vm.consumeRecallListToTop() // screen scrolled and consumed it
-        vm.onFlagOpened() // user opens a topic…
-        vm.maybeAutoRefresh() // …and returns (throttle bypassed): refreshes but must NOT re-raise
+        topicReads.record("XaT", TopicRead(13, 1))
+        vm.maybeAutoRefresh()
 
-        assertEquals(2, flags.refreshCalls.size)
+        assertEquals(1, flags.refreshCalls.size)
+        assertEquals(listOf(setOf(TopicRead(13, 1))), flags.reconciledReads)
         assertFalse(vm.recallListToTop.value)
     }
 
@@ -2244,7 +2232,7 @@ class FlagsViewModelTest {
         assertEquals(1, flags.refreshCalls.size)
         assertEquals(1, diagnostics.entries.value.count { it.message.contains("ignored=throttle") })
 
-        clock.now = clock.now.plusSeconds(16) // past the 15 s window
+        clock.now = clock.now.plusSeconds(121) // past the two-minute window
         vm.maybeAutoRefresh()
         assertEquals(2, flags.refreshCalls.size)
     }
@@ -2291,24 +2279,24 @@ class FlagsViewModelTest {
             flags.refreshCalls,
         )
 
-        clock.now = clock.now.plusSeconds(11) // t0+16 — Cyan's window elapsed, Red's (t0+2) has not
+        clock.now = clock.now.plusSeconds(116) // t0+121 — Cyan’s window elapsed, Red’s (t0+2) has not
         vm.maybeAutoRefresh()
         assertEquals(listOf(FlagType.CYAN, FlagType.RED, FlagType.CYAN), flags.refreshCalls)
         vm.selectTab(FlagTab.Red)
         vm.maybeAutoRefresh()
         assertEquals(
-            "Red's window runs until t0+17",
+            "Red's window runs until t0+122",
             listOf(FlagType.CYAN, FlagType.RED, FlagType.CYAN),
             flags.refreshCalls,
         )
 
-        clock.now = clock.now.plusSeconds(2) // t0+18 — Red's window elapsed too
+        clock.now = clock.now.plusSeconds(2) // t0+123 — Red's window elapsed too
         vm.maybeAutoRefresh()
         assertEquals(listOf(FlagType.CYAN, FlagType.RED, FlagType.CYAN, FlagType.RED), flags.refreshCalls)
     }
 
     @Test
-    fun `a manual refresh is never throttled by the per-tab window either (#743)`() = runTest {
+    fun `a manual refresh past its floor still runs within the automatic window (#743)`() = runTest {
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
         val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
@@ -2318,8 +2306,8 @@ class FlagsViewModelTest {
         clock.now = clock.now.plusSeconds(2)
         vm.selectTab(FlagTab.Red)
         vm.maybeAutoRefresh() // Red @ t0+2, arms Red's window
-        clock.now = clock.now.plusSeconds(1)
-        vm.refresh() // user pull on Red inside its window — goes straight through
+        clock.now = clock.now.plusSeconds(30)
+        vm.refresh() // Red is past its manual floor and still inside the auto window.
 
         assertEquals(listOf(FlagType.CYAN, FlagType.RED, FlagType.RED), flags.refreshCalls)
     }
@@ -2426,86 +2414,25 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `maybeAutoRefresh bypasses the throttle when a topic was opened since the last refresh`() = runTest {
-        // #378 follow-up (retours dev v118, Dintr-un lemn + bitubo) — coming back from a
-        // just-read topic must refresh even inside the 15 s window: the read changed the state.
-        val flags = FakeFlagRepository()
-        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
-        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
-        val vm = viewModelWithClock(auth, flags, clock)
-
-        vm.maybeAutoRefresh() // landing refresh, arms the throttle
-        vm.onFlagOpened() // user opens a topic from the list…
-        vm.maybeAutoRefresh() // …and comes right back (< 15 s)
-
-        assertEquals(2, flags.refreshCalls.size)
-    }
-
-    @Test
-    fun `the topic-opened bypass is consumed by the refresh it triggers`() = runTest {
-        val flags = FakeFlagRepository()
-        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
-        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
-        val vm = viewModelWithClock(auth, flags, clock)
-
-        vm.maybeAutoRefresh()
-        vm.onFlagOpened()
-        vm.maybeAutoRefresh() // bypass consumed here
-        vm.maybeAutoRefresh() // plain re-landing without a new read — throttled again
-
-        assertEquals(2, flags.refreshCalls.size)
-    }
-
-    @Test
-    fun `a read armed while the landing refresh is suspended stays pending for the return`() = runTest {
-        // Codex review — maybeAutoRefresh snapshots the opened-generation at CALL time: a topic
-        // opened while the landing refresh is still queued/suspended on its pref/auth gates must
-        // NOT be consumed by that refresh (it cannot have captured the reading yet), so the
-        // actual return from the topic still bypasses the throttle.
+    fun `a read queued while a landing is suspended belongs to the next landing`() = runTest {
         Dispatchers.setMain(StandardTestDispatcher(testScheduler))
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
         val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
         val vm = viewModelWithClock(auth, flags, clock)
-        advanceUntilIdle() // settle the init collectors
-
-        vm.maybeAutoRefresh() // landing — generation snapshot taken now, body not yet run
-        vm.onFlagOpened() // user opens a topic before the landing refresh resumed
-        advanceUntilIdle() // landing refresh runs: throttle armed, the read is NOT consumed
-        assertEquals(1, flags.refreshCalls.size)
-
-        vm.maybeAutoRefresh() // back from the topic, inside the 15 s window — still bypasses
         advanceUntilIdle()
-        assertEquals(2, flags.refreshCalls.size)
-    }
-
-    @Test
-    fun `a manual refresh consumes the pending topic-opened bypass`() = runTest {
-        // The pull captured the post-reading state already; the next landing inside the window
-        // must not duplicate the REST fan-out.
-        val flags = FakeFlagRepository()
-        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
-        val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
-        val vm = viewModelWithClock(auth, flags, clock)
-
-        vm.maybeAutoRefresh() // arms the throttle
-        vm.onFlagOpened()
-        vm.refresh() // manual pull right after coming back
-        vm.maybeAutoRefresh() // landing inside the window, no new read since the pull
-
-        assertEquals(2, flags.refreshCalls.size)
-    }
-
-    @Test
-    fun `manual refresh is never throttled by a preceding auto-refresh`() = runTest {
-        val flags = FakeFlagRepository()
-        val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
-        val vm = viewModel(auth, flags, FakeForumRepository())
 
         vm.maybeAutoRefresh()
-        vm.refresh() // user pull-to-refresh right after the auto pass
+        val read = TopicRead(13, 1)
+        topicReads.record("XaT", read)
+        advanceUntilIdle()
+        assertEquals(1, flags.refreshCalls.size)
+        assertTrue(flags.reconciledReads.isEmpty())
 
-        assertEquals(2, flags.refreshCalls.size)
+        vm.maybeAutoRefresh()
+        advanceUntilIdle()
+        assertEquals(1, flags.refreshCalls.size)
+        assertEquals(listOf(setOf(read)), flags.reconciledReads)
     }
 
     // #6 — DT tab: MultiMP list + best-effort MPStorage enrichment.
@@ -3396,6 +3323,7 @@ class FlagsViewModelTest {
             externalScope = externalScope,
             refreshDiagnostics = FlagRefreshDiagnostics(diagnostics, networkActions = networkActions),
             networkActions = networkActions,
+            topicReads = topicReads,
         )
 
     /** Builds a ViewModel with a custom [clock] for the #378 throttle tests; everything else is a
@@ -3420,6 +3348,7 @@ class FlagsViewModelTest {
             clock = clock,
             externalScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
             refreshDiagnostics = FlagRefreshDiagnostics(diagnostics),
+            topicReads = topicReads,
         )
     }
 
@@ -3536,6 +3465,11 @@ class FlagsViewModelTest {
         private val cacheUpdates = MutableSharedFlow<FlagType>(extraBufferCapacity = 8)
         var refreshCalls: List<FlagType> = emptyList()
             private set
+        val reconciledReads = mutableListOf<Set<TopicRead>>()
+
+        override suspend fun reconcileTopicReads(reads: Set<TopicRead>, visibleTypes: List<FlagType>) {
+            reconciledReads += reads
+        }
         var clearSessionCacheCallCount: Int = 0
             private set
         var removeFlagCalls: List<Flag> = emptyList()

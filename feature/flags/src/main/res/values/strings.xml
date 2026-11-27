@@ -164,6 +164,8 @@
     <string name="flags_update_failed">Actualisation impossible. Les données disponibles sont affichées.</string>
     <string name="flags_invalid_response">Réponse HFR non reconnue. Les données disponibles sont affichées.</string>
     <string name="flags_retry">Réessayer</string>
+    <string name="flags_refreshed_ago">Actualisé il y a %1$d s</string>
+    <string name="flags_retry_at">Nouvel essai possible à %1$s</string>
     <!-- #984 — best-effort list warning; %1$s contains the missing parts of this refresh. -->
     <string name="flags_incomplete">Liste incomplète : %1$s</string>
     <!-- At most two catalogue names, then +N. -->

@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.data.topic
 
 import fr.forumhfr.redface2.core.database.dao.TopicDao
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
+import fr.forumhfr.redface2.core.domain.flags.TopicReadQueue
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostContent
@@ -110,6 +111,8 @@ class TopicRepositoryCitingPostsTest {
         clock = Clock.systemUTC(),
         userPreferencesRepository = mockk<UserPreferencesRepository>(relaxed = true),
         ioDispatcher = ioDispatcher,
+        authRepository = mockk(),
+        topicReads = TopicReadQueue(),
     )
 
     private fun fakePost(

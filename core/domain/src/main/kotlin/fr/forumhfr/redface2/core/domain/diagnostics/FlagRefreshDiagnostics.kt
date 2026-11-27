@@ -18,7 +18,7 @@ import kotlin.coroutines.CoroutineContext
 
 enum class FlagRefreshTrigger(val label: String) {
     LAUNCH("launch"), RETURN_FROM_TOPIC("return-from-topic"), RESUME("resume"),
-    TAB("tab"), PULL("pull"), INITIAL_OBSERVE("initial-observe"),
+    TAB("tab"), PULL("pull"), INITIAL_OBSERVE("initial-observe"), TOPIC_RECONCILE("topic-reconcile"),
 }
 
 enum class FlagRefreshGap {

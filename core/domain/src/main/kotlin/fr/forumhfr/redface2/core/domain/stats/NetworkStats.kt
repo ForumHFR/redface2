@@ -28,6 +28,7 @@ enum class NetworkTrigger(val flags: FlagRefreshTrigger? = null) {
     TAB(FlagRefreshTrigger.TAB),
     PULL(FlagRefreshTrigger.PULL),
     INITIAL_OBSERVE(FlagRefreshTrigger.INITIAL_OBSERVE),
+    TOPIC_RECONCILE(FlagRefreshTrigger.TOPIC_RECONCILE),
     MP_BADGE,
     NONE,
     ;

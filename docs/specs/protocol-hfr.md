@@ -1543,6 +1543,8 @@ Implémenté de façon validante (host + scheme + préfixe `/api/` enforcés) da
 
 Le coupe-circuit REST s’ouvre après deux réponses qualifiantes sans 2xx intermédiaire. Une réponse qualifiante est un HTTP 429 de `rest_api.php` ou un HTTP 403 de ce même endpoint, au format `text/html`, dont le corps contient la signature de refus Apache. Le premier refus qualifiant arrête les nouveaux envois de la collecte de drapeaux en cours. La pause s’enregistre sur l’appareil et dure 10, 20, 40 puis 60 minutes. Une valeur `Retry-After` plus longue prévaut jusqu’à deux heures. À échéance, une seule lecture REST à la fois peut vérifier la reprise. Un 2xx réinitialise le coupe-circuit. Le test de connexion de Diagnostics reste bloqué jusqu’à ce 2xx.
 
+Pendant cette pause, le retour d’un sujet, le geste d’actualisation des drapeaux et « Réessayer » n’envoient aucune requête REST. Sans pause, la collecte automatique d’un type est espacée de deux minutes à partir de sa tentative. Un retour de lecture dans cette fenêtre relit uniquement les catégories touchées. Le geste et les boutons de réessai ont un délai commun de 30 s après la dernière collecte terminée. Voir la décision 8 de l’[ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride) pour les règles par compte, par type et pour Super.
+
 ### Champs présents en JSON / absents en HTML
 
 - `views` (compteur de vues) : absent du JSON. Si on a besoin du chiffre, c'est HTML uniquement.

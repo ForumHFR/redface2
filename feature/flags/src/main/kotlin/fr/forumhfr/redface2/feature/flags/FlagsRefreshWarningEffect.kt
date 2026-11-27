@@ -12,11 +12,36 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalContext
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+
+@Composable
+internal fun ManualRefreshFeedbackEffect(
+    feedback: Flow<ManualRefreshFeedback>,
+    authSessionKey: String?,
+    host: SnackbarHostState,
+) {
+    val resources = LocalContext.current.resources
+    LaunchedEffect(feedback, authSessionKey, host, resources) {
+        feedback.collectLatest { event ->
+            val message = when (event) {
+                is ManualRefreshFeedback.Updated -> resources.getString(R.string.flags_refreshed_ago, event.seconds)
+                is ManualRefreshFeedback.RetryAt -> {
+                    val time = DateTimeFormatter.ofPattern("HH:mm").withZone(ZoneId.systemDefault())
+                    resources.getString(R.string.flags_retry_at, time.format(event.instant))
+                }
+            }
+            host.showSnackbar(message)
+        }
+    }
+}
 
 /** Session/view changes cancel both the display and its locally retained Retry action. */
 @Composable

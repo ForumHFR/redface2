@@ -37,10 +37,21 @@ class FlagCacheStore @Inject constructor(
         result.coverage.oldestSuccessAt?.let { CachePolicy.isFresh(it, CachePolicy.flags, clock) } == true
 
     /** Builds the next snapshot before the single guarded write; retained rows keep their dates. */
-    internal suspend fun merge(userId: String, type: FlagType, batch: FlagRefreshBatch): FlagCacheSnapshot =
-        withContext(ioDispatcher) {
-            mergeFlagSnapshot(flagDao.getSnapshot(userId, type), userId, type, batch)
-        }
+    internal suspend fun merge(
+        userId: String,
+        type: FlagType,
+        batch: FlagRefreshBatch,
+        reconciledCats: Set<Int> = emptySet(),
+    ): FlagCacheSnapshot = withContext(ioDispatcher) {
+        val previous = flagDao.getSnapshot(userId, type)
+        val merged = mergeFlagSnapshot(previous, userId, type, batch)
+        if (reconciledCats.isEmpty()) merged else FlagCacheSnapshot(
+            rows = merged.rows.filterNot { it.cat in reconciledCats } +
+                previous.rows.filter { it.cat in reconciledCats },
+            coverage = merged.coverage.filterNot { it.cat in reconciledCats } +
+                previous.coverage.filter { it.cat in reconciledCats },
+        )
+    }
 
     internal suspend fun save(userId: String, type: FlagType, snapshot: FlagCacheSnapshot) {
         withContext(ioDispatcher) { flagDao.replaceSnapshot(userId, type, snapshot) }

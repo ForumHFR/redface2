@@ -64,7 +64,10 @@ class NetworkStatsSummaryTest {
                     NetworkPeakKey(72, NetworkPeakGroup.FORUM) to NetworkPeaks(1, 2, 3),
                     NetworkPeakKey(72, NetworkPeakGroup.PROBE) to NetworkPeaks(4, 5, 6),
                 ),
-                actions = mapOf(NetworkActionKey(72, NetworkAction.FLAG_REFRESH_ADMITTED, NetworkTrigger.PULL) to 2),
+                actions = mapOf(
+                    NetworkActionKey(72, NetworkAction.FLAG_REFRESH_ADMITTED, NetworkTrigger.PULL) to 2,
+                    NetworkActionKey(72, NetworkAction.FLAG_REFRESH_IGNORED, NetworkTrigger.TOPIC_RECONCILE) to 1,
+                ),
             ),
         )
         val older = NetworkStatsDay(
@@ -89,6 +92,7 @@ class NetworkStatsSummaryTest {
         assertTrue(blocks[0].contains("Forum — Par seconde : 1 · Par minute : 2 · En vol : 3"))
         assertTrue(blocks[0].contains("Sonde — Par seconde : 4 · Par minute : 5 · En vol : 6"))
         assertTrue(blocks[0].contains("Requêtes : 5 · Par actualisation admise : 2,5"))
+        assertTrue(blocks[0].contains("Actualisation ciblée après lecture"))
         assertTrue(blocks[1].contains("Listes affichées : 1"))
         assertFalse(blocks.any { it.contains("REST_GLOBAL_READ") || it.contains("2026-11-27T") })
     }
