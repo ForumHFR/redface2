@@ -131,7 +131,7 @@ class NetworkStatsBufferTest {
         val recorder = NetworkStatsBuffer(
             NetworkStatsProcess(72, isMain = true),
             elapsed = DiagnosticsClock {
-                if (Thread.currentThread().name == "stats-test-writer") {
+                if (Thread.currentThread().name.startsWith("stats-test-writer")) {
                     checkpointing.countDown()
                     check(release.await(30, TimeUnit.SECONDS))
                 }
@@ -163,7 +163,7 @@ class NetworkStatsBufferTest {
             Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
             DiagnosticsClock {
                 val timestamp = nanos.get()
-                if (Thread.currentThread().name == "stats-test-lifecycle") {
+                if (Thread.currentThread().name.startsWith("stats-test-lifecycle")) {
                     timestamped.countDown()
                     check(publish.await(30, TimeUnit.SECONDS))
                 }

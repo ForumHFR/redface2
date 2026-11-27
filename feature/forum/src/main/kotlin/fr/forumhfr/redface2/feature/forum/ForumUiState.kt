@@ -17,7 +17,7 @@ import kotlin.math.ceil
  */
 sealed interface ForumUiState {
     data object Loading : ForumUiState
-    data class Content(val categories: List<Category>) : ForumUiState
+    data class Content(val categories: List<Category>, internal val listGeneration: Int) : ForumUiState
 
     /**
      * [kind] (#324) is the type-derived classification: ServerDown / Network make the

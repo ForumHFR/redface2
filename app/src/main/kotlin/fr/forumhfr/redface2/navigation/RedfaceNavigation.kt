@@ -2477,6 +2477,7 @@ private fun RedfaceNavHost(
             }
             entry<ForumRoute> {
                 ForumScreen(
+                    isCurrentRoute = { currentBackStack.value.lastOrNull() == ForumRoute },
                     onOpenCategory = { category ->
                         backStack.add(CategoryRoute(cat = category.id, subcat = null, page = 1))
                     },

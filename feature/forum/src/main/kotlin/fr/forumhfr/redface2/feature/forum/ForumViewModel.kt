@@ -15,7 +15,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -37,16 +36,11 @@ class ForumViewModel @Inject constructor(
     private val _isRefreshing: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing
 
-    private var initialListDisplayed = false
+    private var listGeneration = 0
+    private var presentedListGeneration = 0
 
     val uiState: StateFlow<ForumUiState> = forumRepository.observeCategoryUpdates()
-        .onEach { update ->
-            if (update.result is ForumResult.Success && (!initialListDisplayed || update.isRefresh)) {
-                networkActions.recordSafely(NetworkAction.LIST)
-                initialListDisplayed = true
-            }
-        }
-        .map { it.result.toUiState() }
+        .map { it.result.toUiState(it.isRefresh) }
         .keepContentDuringRefresh(
             isLoading = { it is ForumUiState.Loading },
             isContent = { it is ForumUiState.Content },
@@ -56,6 +50,15 @@ class ForumViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
             initialValue = ForumUiState.Loading,
         )
+
+    internal fun onCategoriesPresented(generation: Int, isCurrentRoute: Boolean) {
+        if (!isCurrentRoute) return
+        val current = uiState.value as? ForumUiState.Content ?: return
+        if (generation == current.listGeneration && generation != presentedListGeneration) {
+            presentedListGeneration = generation
+            networkActions.recordSafely(NetworkAction.LIST)
+        }
+    }
 
     fun refresh() {
         viewModelScope.launch {
@@ -68,10 +71,15 @@ class ForumViewModel @Inject constructor(
         }
     }
 
-    private fun ForumResult<List<Category>>.toUiState(): ForumUiState =
+    private fun ForumResult<List<Category>>.toUiState(isRefresh: Boolean): ForumUiState =
         when (this) {
             ForumResult.Loading -> ForumUiState.Loading
-            is ForumResult.Success -> ForumUiState.Content(value)
+            is ForumResult.Success -> {
+                // Cache and revalidation belong to the same presentation. An explicit refresh
+                // can be a new presentation even when the categories haven't changed.
+                if (listGeneration == 0 || isRefresh) listGeneration++
+                ForumUiState.Content(value, listGeneration)
+            }
             // #324 — kind derives from the exception TYPE so the screen can tell an HFR
             // 5xx outage from a local network cut.
             is ForumResult.Failure -> ForumUiState.Error(cause.message, classifyHfrError(cause))

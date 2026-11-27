@@ -61,10 +61,14 @@ class ForumViewModelTest {
 
             vm.refresh()
             repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES), isRefresh = true)
-            assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES), awaitItem())
+            val initial = awaitItem() as ForumUiState.Content
+            assertEquals(SAMPLE_CATEGORIES, initial.categories)
+            vm.onCategoriesPresented(initial.listGeneration, isCurrentRoute = true)
             assertEquals(listOf(NetworkAction.LIST), actions)
             repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES.take(1)))
-            assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES.take(1)), awaitItem())
+            val revalidated = awaitItem() as ForumUiState.Content
+            assertEquals(SAMPLE_CATEGORIES.take(1), revalidated.categories)
+            vm.onCategoriesPresented(revalidated.listGeneration, isCurrentRoute = true)
             assertEquals(listOf(NetworkAction.LIST), actions)
 
             vm.refresh()
@@ -74,7 +78,9 @@ class ForumViewModelTest {
 
             vm.refresh()
             repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES), isRefresh = true)
-            assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES), awaitItem())
+            val refreshed = awaitItem() as ForumUiState.Content
+            assertEquals(SAMPLE_CATEGORIES, refreshed.categories)
+            vm.onCategoriesPresented(refreshed.listGeneration, isCurrentRoute = true)
             assertEquals(listOf(NetworkAction.LIST, NetworkAction.LIST), actions)
             cancelAndIgnoreRemainingEvents()
         }
@@ -83,9 +89,13 @@ class ForumViewModelTest {
         repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES))
 
         vm.uiState.test {
-            assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES), awaitItem())
+            val cached = awaitItem() as ForumUiState.Content
+            assertEquals(SAMPLE_CATEGORIES, cached.categories)
+            vm.onCategoriesPresented(cached.listGeneration, isCurrentRoute = true)
             repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES.take(1)))
-            assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES.take(1)), awaitItem())
+            val revalidated = awaitItem() as ForumUiState.Content
+            assertEquals(SAMPLE_CATEGORIES.take(1), revalidated.categories)
+            vm.onCategoriesPresented(revalidated.listGeneration, isCurrentRoute = true)
             assertEquals(listOf(NetworkAction.LIST, NetworkAction.LIST), actions)
             cancelAndIgnoreRemainingEvents()
         }
@@ -102,7 +112,9 @@ class ForumViewModelTest {
         vm.uiState.test {
             assertEquals(ForumUiState.Loading, awaitItem())
             repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES))
-            assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES), awaitItem())
+            val initial = awaitItem() as ForumUiState.Content
+            assertEquals(SAMPLE_CATEGORIES, initial.categories)
+            vm.onCategoriesPresented(initial.listGeneration, isCurrentRoute = true)
             actions.clear()
 
             repo.suspendRefreshCategoriesUntil = first
@@ -115,8 +127,47 @@ class ForumViewModelTest {
             assertEquals(ForumUiState.Error("offline"), awaitItem())
             assertTrue(actions.isEmpty())
             second.complete(ForumResult.Success(SAMPLE_CATEGORIES))
-            assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES), awaitItem())
+            val refreshed = awaitItem() as ForumUiState.Content
+            assertEquals(SAMPLE_CATEGORIES, refreshed.categories)
+            vm.onCategoriesPresented(refreshed.listGeneration, isCurrentRoute = true)
             assertEquals(listOf(NetworkAction.LIST), actions)
+        }
+    }
+
+    @Test
+    fun `a refresh completed behind a category only counts when Forum is presented again`() = runTest {
+        val repo = FakeForumRepository()
+        val actions = mutableListOf<NetworkAction>()
+        val vm = ForumViewModel(repo, NetworkActionRecorder { action, _, _ -> actions += action })
+        val pendingRefresh = CompletableDeferred<ForumResult<List<Category>>>()
+        repo.suspendRefreshCategoriesUntil = pendingRefresh
+
+        vm.uiState.test {
+            assertEquals(ForumUiState.Loading, awaitItem())
+            repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES))
+            val initial = awaitItem() as ForumUiState.Content
+            vm.onCategoriesPresented(initial.listGeneration, isCurrentRoute = true)
+            assertEquals(listOf(NetworkAction.LIST), actions)
+            actions.clear()
+
+            vm.refresh()
+            assertTrue(vm.isRefreshing.value)
+            // Opening a category removes the Forum UI collector while the upstream is still shared.
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        pendingRefresh.complete(ForumResult.Success(SAMPLE_CATEGORIES))
+        runCurrent()
+        val refreshed = vm.uiState.value as ForumUiState.Content
+        vm.onCategoriesPresented(refreshed.listGeneration, isCurrentRoute = false)
+        assertTrue(actions.isEmpty())
+
+        vm.uiState.test {
+            assertEquals(refreshed, awaitItem())
+            vm.onCategoriesPresented(refreshed.listGeneration, isCurrentRoute = true)
+            vm.onCategoriesPresented(refreshed.listGeneration, isCurrentRoute = true)
+            assertEquals(listOf(NetworkAction.LIST), actions)
+            assertEquals(1, repo.refreshCategoriesCalls)
         }
     }
 
