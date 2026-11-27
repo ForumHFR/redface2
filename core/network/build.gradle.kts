@@ -42,9 +42,19 @@ dependencies {
     testImplementation(testFixtures(project(":core:domain")))
 }
 
-// Tests read captures from :core:parser's fixtures by relative path (sharedParserFixture).
+// Tests read captures from :core:parser and :core:data by relative path.
 tasks.withType<Test>().configureEach {
     inputs.dir(rootProject.layout.projectDirectory.dir("core/parser/src/test/resources/fixtures"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
         .withPropertyName("sharedParserFixtures")
+    inputs.files(rootProject.fileTree("core/data/src/test/resources/fixtures") {
+        include(
+            "rest_categories*.json",
+            "rest_topics_cat23_subcat550_p1.json",
+            "rest_cat23_participated.json",
+            "rest_cat13_favorites_empty_despite_sticky.json",
+            "rest_global_participated.json",
+        )
+    }).withPathSensitivity(PathSensitivity.RELATIVE)
+        .withPropertyName("sharedRestFixtures")
 }

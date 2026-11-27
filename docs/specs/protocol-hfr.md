@@ -1165,7 +1165,7 @@ classement des favoris dans la recherche wiki. Ces comportements ne sont pas des
 | Cookie | Rôle | Durée |
 |---|---|---|
 | `md_user` | Pseudo utilisateur — **indicateur de session active** | 1 an |
-| `md_pass` | Token de session | 1 an |
+| `md_passs` | Token de session | 1 an |
 | `md_forum` | Identifiant de forum | session |
 | Cookies divers (tracking interne HFR) | — | variable |
 
@@ -1546,6 +1546,8 @@ Le coupe-circuit REST s’ouvre après deux réponses qualifiantes sans 2xx inte
 La pause s’enregistre sur l’appareil avec le palier et le mode d’authentification du refus. Les paliers durent 10, 20, 40 puis 60 minutes. Le plus long `Retry-After` qualifiant, même reçu tardivement, prévaut jusqu’à deux heures. Le processus mesure la durée avec une horloge monotone. Il utilise la date murale au chargement et à l’écriture de l’échéance persistée, et l’affiche en heure locale. Si la lecture du stockage échoue, le client journalise l’erreur et démarre avec le coupe-circuit disponible.
 
 À échéance, une lecture ordinaire dans le mode d’authentification refusé peut émettre un échange, avec le User-Agent habituel. Si le catalogue est froid après un refus authentifié, la collecte des drapeaux utilise le client authentifié pour le charger. Les appels simultanés attendent l’issue de la reprise dans la limite de leur propre délai. En cas de succès, la collecte reprend normalement et Diagnostics redevient disponible. Un nouveau refus qualifiant prolonge la pause. L’attente locale sans refus HTTP ne marque aucune catégorie comme bloquée.
+
+La reprise authentifiée vérifie `md_user` dans la requête envoyée et recherche des clés dans le corps brut. Dans le catalogue, les liens d’une catégorie doivent présenter les clés `read_topics`, `participated_topics` et `favorite_topics`. Dans un bucket, chaque liste non vide doit présenter une clé `is_read` associée à une valeur booléenne. Pour une liste vide, la reprise s’appuie sur le cookie envoyé et la réponse de l’endpoint protégé. Une redirection vers le login signale la session expirée dès le premier échange et maintient la pause. Le décodage JSON reste dans `:core:data`.
 
 Pendant la pause, le retour d’un sujet, le geste d’actualisation des drapeaux et « Réessayer » n’envoient aucune requête REST. La décision 8 de l’[ADR-003]({{ site.baseurl }}/adr/003-api-rest-hfr-hybride) définit la cadence, la file de lectures et le budget de réconciliation.
 

@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.network.cookie.CookieStore
 import fr.forumhfr.redface2.core.network.cookie.PersistentCookieJar
 import io.mockk.every
 import io.mockk.mockk
+import java.io.File
 import java.io.IOException
 import java.time.Clock
 import java.time.Duration
@@ -18,6 +19,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -142,9 +144,10 @@ class HfrRestExchangeTest {
         val store = MemoryStore(saved)
         val breaker = breaker(store)
         val api = api(breaker)
-        server.enqueue(MockResponse().setBody("catalogue"))
+        val catalogue = sharedRestFixture("rest_categories_auth.json")
+        server.enqueue(MockResponse().setBody(catalogue))
 
-        assertEquals("catalogue", withContext(FlagReadSession()) { api.getCategories() })
+        assertEquals(catalogue, withContext(FlagReadSession()) { api.getCategories() })
         breaker.checkProbeAllowed()
         assertNull(store.saved)
         assertEquals(1, server.requestCount)
@@ -168,7 +171,7 @@ class HfrRestExchangeTest {
             override suspend fun save(cookies: List<Cookie>) = Unit
             override suspend fun clear() = Unit
         }
-        server.enqueue(MockResponse().setBody("public catalogue"))
+        server.enqueue(MockResponse().setBody(sharedRestFixture("rest_categories.json")))
 
         PersistentCookieJar(cookieStore, Dispatchers.IO).use { jar ->
             val api = api(breaker, client.newBuilder().cookieJar(jar).build())
@@ -180,6 +183,112 @@ class HfrRestExchangeTest {
             assertEquals(saved, store.saved)
             assertTrue(runCatching { breaker.checkProbeAllowed() }.exceptionOrNull() is HfrRestBlockedException)
         }
+    }
+
+    @Test
+    fun `a public catalogue received with session cookies keeps the authenticated pause`() = runBlocking {
+        val saved = HfrRestCooldown(clock.instant(), 0, HfrRestContext.AUTHENTICATED)
+        val store = MemoryStore(saved)
+        val breaker = breaker(store)
+        val api = api(breaker)
+        server.enqueue(MockResponse().setBody(sharedRestFixture("rest_categories.json")))
+
+        val error = runCatching { withContext(FlagReadSession()) { api.getCategories() } }.exceptionOrNull()
+
+        assertTrue(error is HfrRestRecoveryPendingException)
+        assertEquals(1, server.requestCount)
+        val sent = requireNotNull(server.takeRequest(1, TimeUnit.SECONDS))
+        assertEquals("GET", sent.method)
+        assertEquals("forums/hardwarefr/categories/", sent.requestUrl?.queryParameter("uri"))
+        assertEquals(SESSION_COOKIES, sent.getHeader("Cookie"))
+        assertEquals(saved, store.saved)
+        assertTrue(breaker.probeBlocked.first())
+        assertTrue(runCatching { breaker.checkProbeAllowed() }.exceptionOrNull() is HfrRestBlockedException)
+    }
+
+    @Test
+    fun `a public catalogue cannot supply read_topics through text`() =
+        assertPublicCatalogueRejectsLinkText("read_topics")
+
+    @Test
+    fun `a public catalogue cannot supply participated_topics through text`() =
+        assertPublicCatalogueRejectsLinkText("participated_topics")
+
+    @Test
+    fun `a public catalogue cannot supply favorite_topics through text`() =
+        assertPublicCatalogueRejectsLinkText("favorite_topics")
+
+    @Test
+    fun `a public list of topics cannot confirm an authenticated bucket recovery`() = runBlocking {
+        val saved = HfrRestCooldown(clock.instant(), 0, HfrRestContext.AUTHENTICATED)
+        val store = MemoryStore(saved)
+        val breaker = breaker(store)
+        val api = api(breaker)
+        server.enqueue(MockResponse().setBody(sharedRestFixture("rest_topics_cat23_subcat550_p1.json")))
+
+        val error = runCatching { api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED) }.exceptionOrNull()
+
+        assertTrue(error is HfrRestRecoveryPendingException)
+        assertEquals(1, server.requestCount)
+        assertEquals(SESSION_COOKIES, requireNotNull(server.takeRequest(1, TimeUnit.SECONDS)).getHeader("Cookie"))
+        assertEquals(saved, store.saved)
+        assertTrue(breaker.probeBlocked.first())
+
+        val bucket = sharedRestFixture("rest_cat23_participated.json")
+        server.enqueue(MockResponse().setBody(bucket))
+        assertEquals(bucket, api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED))
+        assertEquals(2, server.requestCount)
+        assertNull(store.saved)
+        breaker.checkProbeAllowed()
+    }
+
+    @Test
+    fun `a public topic title cannot supply the bucket read state`() = runBlocking {
+        val saved = HfrRestCooldown(clock.instant(), 0, HfrRestContext.AUTHENTICATED)
+        val store = MemoryStore(saved)
+        val api = api(breaker(store))
+        val body = sharedRestFixture("rest_topics_cat23_subcat550_p1.json").replaceFirst(
+            """"title": """",
+            """"title": "\"is_read\": true, """,
+        )
+        server.enqueue(MockResponse().setBody(body))
+
+        val error = runCatching { api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED) }.exceptionOrNull()
+
+        assertTrue(error is HfrRestRecoveryPendingException)
+        assertEquals(saved, store.saved)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun `a grouped bucket confirms authenticated recovery using its nested topics`() = runBlocking {
+        val store = MemoryStore(HfrRestCooldown(clock.instant(), 0, HfrRestContext.AUTHENTICATED))
+        val breaker = breaker(store)
+        val api = api(breaker)
+        val bucket = sharedRestFixture("rest_global_participated.json")
+        server.enqueue(MockResponse().setBody(bucket))
+
+        assertEquals(bucket, api.getGlobalFlagTopics(HfrRestFlagBucket.PARTICIPATED))
+        assertEquals(1, server.requestCount)
+        assertNull(store.saved)
+        breaker.checkProbeAllowed()
+    }
+
+    @Test
+    fun `each nonempty group needs its own read state to confirm recovery`() = runBlocking {
+        val saved = HfrRestCooldown(clock.instant(), 0, HfrRestContext.AUTHENTICATED)
+        val store = MemoryStore(saved)
+        val api = api(breaker(store))
+        val bucket = sharedRestFixture("rest_global_participated.json")
+        val body = bucket.replaceFirst(Regex(""""is_read": (?:true|false),"""), "")
+        assertTrue(body != bucket)
+        server.enqueue(MockResponse().setBody(body))
+
+        val error = runCatching { api.getGlobalFlagTopics(HfrRestFlagBucket.PARTICIPATED) }.exceptionOrNull()
+
+        assertTrue(error is HfrRestRecoveryPendingException)
+        assertEquals(saved, store.saved)
+        assertEquals(1, server.requestCount)
     }
 
     @Test
@@ -203,14 +312,39 @@ class HfrRestExchangeTest {
     }
 
     @Test
+    fun `a login redirect during authenticated recovery surfaces the expired session in one exchange`() = runBlocking {
+        val saved = HfrRestCooldown(clock.instant(), 0, HfrRestContext.AUTHENTICATED)
+        val store = MemoryStore(saved)
+        val breaker = breaker(store)
+        val api = api(breaker)
+        server.enqueue(MockResponse().setResponseCode(302).addHeader("Location", "/login.php"))
+        server.enqueue(MockResponse().setBody("login form"))
+
+        val error = runCatching {
+            withContext(FlagReadSession()) { api.getCategoryFlagTopics(13, HfrRestFlagBucket.READ) }
+        }.exceptionOrNull()
+
+        assertEquals(server.url("/login.php").toString(), (error as? SessionExpiredException)?.finalUrl)
+        assertEquals(1, server.requestCount)
+        val sent = requireNotNull(server.takeRequest(1, TimeUnit.SECONDS))
+        assertEquals("GET", sent.method)
+        assertEquals("forums/hardwarefr/categories/13/topics/read/", sent.requestUrl?.queryParameter("uri"))
+        assertEquals(SESSION_COOKIES, sent.getHeader("Cookie"))
+        assertEquals(saved, store.saved)
+        assertTrue(breaker.probeBlocked.first())
+        assertTrue(runCatching { breaker.checkProbeAllowed() }.exceptionOrNull() is HfrRestBlockedException)
+    }
+
+    @Test
     fun `an anonymous catalogue cannot clear the authenticated pause or unlock Diagnostics`() = runBlocking {
         val breaker = breaker(MemoryStore(HfrRestCooldown(clock.instant(), 0, HfrRestContext.AUTHENTICATED)))
         val api = api(breaker)
         assertTrue(runCatching { api.getCategories() }.exceptionOrNull() is HfrRestRecoveryPendingException)
         assertTrue(runCatching { breaker.checkProbeAllowed() }.isFailure)
         assertEquals(0, server.requestCount)
-        server.enqueue(MockResponse().setBody("account flags"))
-        assertEquals("account flags", api.getCategoryFlagTopics(13, HfrRestFlagBucket.READ, useAuth = true))
+        val emptyBucket = sharedRestFixture("rest_cat13_favorites_empty_despite_sticky.json")
+        server.enqueue(MockResponse().setBody(emptyBucket))
+        assertEquals(emptyBucket, api.getCategoryFlagTopics(13, HfrRestFlagBucket.FAVORITES))
         breaker.checkProbeAllowed()
         assertEquals(1, server.requestCount)
         val sent = requireNotNull(server.takeRequest(1, TimeUnit.SECONDS))
@@ -252,6 +386,35 @@ class HfrRestExchangeTest {
 
     private fun api(breaker: HfrRestCircuitBreaker, authenticatedClient: OkHttpClient = authenticated) =
         HfrApiClient(authenticatedClient, client, server.url("/"), Dispatchers.IO, breaker = breaker)
+
+    private fun assertPublicCatalogueRejectsLinkText(missing: String) = runBlocking {
+        val saved = HfrRestCooldown(clock.instant(), 0, HfrRestContext.AUTHENTICATED)
+        val store = MemoryStore(saved)
+        val api = api(breaker(store))
+        val accountLinks = listOf("read_topics", "participated_topics", "favorite_topics")
+        val otherLinks = (accountLinks - missing).joinToString("") { """"$it":{},""" }
+        val body = sharedRestFixture("rest_categories.json").replaceFirst(
+            """"links": {""",
+            """"links": {$otherLinks"label":"\"$missing\": {}", """,
+        )
+        server.enqueue(MockResponse().setBody(body))
+
+        val error = runCatching { withContext(FlagReadSession()) { api.getCategories() } }.exceptionOrNull()
+
+        assertTrue(error is HfrRestRecoveryPendingException)
+        assertEquals(saved, store.saved)
+        assertEquals(1, server.requestCount)
+    }
+
+    private fun sharedRestFixture(name: String): String {
+        val candidates = listOf(
+            File("../data/src/test/resources/fixtures", name),
+            File("core/data/src/test/resources/fixtures", name),
+        )
+        val file = candidates.firstOrNull { it.isFile }
+            ?: error("Shared REST fixture not found: $name (tried $candidates)")
+        return file.readText()
+    }
 
     private class MemoryStore(var saved: HfrRestCooldown? = null) : HfrRestCooldownStore {
         override suspend fun read(): HfrRestCooldown? = saved

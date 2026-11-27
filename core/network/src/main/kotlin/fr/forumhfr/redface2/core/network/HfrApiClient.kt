@@ -37,8 +37,9 @@ import okhttp3.Response
  * server contract advertises and what the captured fixtures confirm.
  *
  * The client returns raw JSON [String]. Parsing lives in `:core:data` next to its
- * consuming repositories (per ADR-003, "Frontières de modules"). On non-2xx the call
- * raises [HfrServerException] with the HTTP status and a short body excerpt for diagnostics.
+ * consuming repositories (per ADR-003, "Frontières de modules"). During authenticated
+ * recovery the client checks the raw body for session markers before closing the breaker.
+ * On non-2xx the call raises [HfrServerException] with the HTTP status and a short body excerpt.
  * Qualifying refusals and local cooldown rejections raise [HfrRestBlockedException].
  *
  * Authenticated calls run through [readJson] which surfaces a
@@ -216,8 +217,9 @@ class HfrApiClient @Inject constructor(
         .addNetworkInterceptor { chain ->
             val attempt = checkNotNull(chain.call().request().tag(RestAttempt::class.java))
             attempt.session?.checkNotBlocked()
-            breaker.checkExchange(checkNotNull(attempt.admission), attempt.session?.singleExchange == true)
-            chain.proceed(chain.request())
+            val admission = checkNotNull(attempt.admission)
+            breaker.checkExchange(admission, attempt.session?.singleExchange == true)
+            chain.proceed(chain.request()).also { it.checkRecoveryRedirect(admission) }
         }
         .build()
 
@@ -243,10 +245,10 @@ class HfrApiClient @Inject constructor(
             .build().withHfrDiagnostics(coroutine)
         val client = if (useAuth) authenticatedRest else anonymousRest
         return if (session == null || flagOperation == null) {
-            client.newCall(request).executeCancellable(useAuth)
+            client.newCall(request).executeCancellable(useAuth, flagOperation)
         } else {
             flagReadExecutor.execute(client, request, flagOperation, session) { call, admitted ->
-                call.executeCancellable(useAuth, admitted)
+                call.executeCancellable(useAuth, flagOperation, admitted)
             }
         }
     }
@@ -254,6 +256,7 @@ class HfrApiClient @Inject constructor(
     /** Keep the cancellation bridge alive through both headers and body, as in [HfrClient]. */
     private suspend fun Call.executeCancellable(
         useAuth: Boolean,
+        flagOperation: FlagReadOperation?,
         admitted: () -> Unit = {},
     ): String = withContext(ioDispatcher) {
         val call = this@executeCancellable
@@ -293,7 +296,7 @@ class HfrApiClient @Inject constructor(
                             throw session.blocked(response.code)
                         }
                         readJson(response, body, useAuth).also {
-                            response.checkRecoveryContext(admission)
+                            response.checkRecoveryContext(admission, flagOperation, it)
                             reply = classified
                         }
                     }
@@ -319,15 +322,56 @@ class HfrApiClient @Inject constructor(
     private fun FlagReadSession?.blocked(code: Int): HfrRestBlockedException =
         HfrRestBlockedException(code).also { this?.abort(it) }
 
-    private fun Response.checkRecoveryContext(admission: HfrRestCircuitBreaker.Admission) {
+    private fun Response.checkRecoveryRedirect(admission: HfrRestCircuitBreaker.Admission) {
+        if (!admission.isRecovery || admission.context != HfrRestContext.AUTHENTICATED) return
+        if (!isRestReply || !isRedirect) return
+        val target = header("Location")?.let(request.url::resolve)
+        if (target != null && target.isLoginUrl()) {
+            // This is the only allowed exchange. Detect login before OkHttp tries the redirect.
+            close()
+            throw SessionExpiredException(target.toString())
+        }
+    }
+
+    private fun Response.checkRecoveryContext(
+        admission: HfrRestCircuitBreaker.Admission,
+        flagOperation: FlagReadOperation?,
+        body: String,
+    ) {
         if (!admission.isRecovery) return
         // OkHttp's outer response request predates cookie selection. Use the wire request.
         val exchange = networkResponse?.takeIf { it.isRestReply && it.isSuccessful }
         val expectsAuthentication = admission.context == HfrRestContext.AUTHENTICATED
-        if (exchange?.request?.hasHfrSession() != expectsAuthentication) {
+        if (exchange?.request?.hasHfrSession() != expectsAuthentication ||
+            (expectsAuthentication && !body.confirmsAuthentication(flagOperation))
+        ) {
             throw HfrRestRecoveryPendingException()
         }
     }
+
+    private fun String.confirmsAuthentication(operation: FlagReadOperation?): Boolean = when (operation) {
+        FlagReadOperation.CATALOGUE -> LINKS_START.splitToSequence(this).drop(1).any { links ->
+            AUTHENTICATED_CATEGORY_LINKS.all { it.containsMatchIn(links) }
+        }
+        FlagReadOperation.CATEGORY_BUCKET -> confirmsBucketAuthentication(grouped = false)
+        FlagReadOperation.GLOBAL_BUCKET -> confirmsBucketAuthentication(grouped = true)
+        else -> true
+    }
+
+    private fun String.confirmsBucketAuthentication(grouped: Boolean): Boolean {
+        val lists = RESOURCES_START.splitToSequence(this).drop(1).iterator()
+        if (!lists.hasNext()) return false
+        val first = lists.next()
+        return if (grouped && !first.startsWith(']')) {
+            // The first "resources" belongs to the envelope. Check each nested topic list separately.
+            lists.hasNext() && lists.asSequence().all { it.hasBucketMarker() }
+        } else {
+            first.hasBucketMarker()
+        }
+    }
+
+    // An empty protected list has no read state. Its status and the cookie supply the signal.
+    private fun String.hasBucketMarker(): Boolean = startsWith(']') || READ_STATE.containsMatchIn(this)
 
     private fun Request.hasHfrSession(): Boolean {
         val cookieNames = headers.values("Cookie").flatMap { it.split(';') }.mapNotNull { entry ->
@@ -381,5 +425,11 @@ class HfrApiClient @Inject constructor(
         const val DEFAULT_RESULTS_PER_PAGE = 50
         const val MAX_RESULTS_PER_PAGE = 100
         const val BODY_EXCERPT_CHARS = 240
+        val LINKS_START = Regex("""(?<!\\)"links"\s*:\s*\{""")
+        val AUTHENTICATED_CATEGORY_LINKS = listOf("read_topics", "participated_topics", "favorite_topics").map { key ->
+            Regex("""(?<!\\)"$key"\s*:\s*\{""")
+        }
+        val RESOURCES_START = Regex("""(?<!\\)"resources"\s*:\s*\[\s*""")
+        val READ_STATE = Regex("""(?<!\\)"is_read"\s*:\s*(?:true|false)(?=\s*[,}])""")
     }
 }
