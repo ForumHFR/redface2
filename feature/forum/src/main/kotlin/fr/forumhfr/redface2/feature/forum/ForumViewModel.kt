@@ -15,7 +15,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -39,26 +38,19 @@ class ForumViewModel @Inject constructor(
     val isRefreshing: StateFlow<Boolean> = _isRefreshing
 
     private var initialListDisplayed = false
-    private var refreshAwaitingContent = false
 
-    val uiState: StateFlow<ForumUiState> = forumRepository.observeCategories()
-        .map { it.toUiState() }
+    val uiState: StateFlow<ForumUiState> = forumRepository.observeCategoryUpdates()
+        .onEach { update ->
+            if (update.result is ForumResult.Success && (!initialListDisplayed || update.isRefresh)) {
+                networkActions.recordSafely(NetworkAction.LIST)
+                initialListDisplayed = true
+            }
+        }
+        .map { it.result.toUiState() }
         .keepContentDuringRefresh(
             isLoading = { it is ForumUiState.Loading },
             isContent = { it is ForumUiState.Content },
         )
-        .onEach { state ->
-            when (state) {
-                is ForumUiState.Content -> {
-                    if (!initialListDisplayed || refreshAwaitingContent) networkActions.recordSafely(NetworkAction.LIST)
-                    initialListDisplayed = true
-                    refreshAwaitingContent = false
-                }
-                is ForumUiState.Error -> refreshAwaitingContent = false
-                ForumUiState.Loading -> Unit
-            }
-        }
-        .onCompletion { refreshAwaitingContent = false }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
@@ -67,7 +59,6 @@ class ForumViewModel @Inject constructor(
 
     fun refresh() {
         viewModelScope.launch {
-            refreshAwaitingContent = true
             _isRefreshing.value = true
             try {
                 forumRepository.refreshCategories()

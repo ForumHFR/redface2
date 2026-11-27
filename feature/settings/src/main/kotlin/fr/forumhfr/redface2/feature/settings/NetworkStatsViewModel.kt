@@ -33,10 +33,13 @@ internal data class NetworkStatsUiState(
     val metrics: NetworkStatsMetrics = NetworkStatsMetrics(),
     val history: List<NetworkStatsDay> = emptyList(),
     val historyDates: ClosedRange<LocalDate>? = null,
+    val truncatedHistoryDay: LocalDate? = null,
     val dialog: NetworkStatsDialog? = null,
     val resetFailed: Boolean = false,
 ) {
-    val canCopy: Boolean get() = !loading && history.isNotEmpty()
+    val summaryDays: List<NetworkStatsDay> =
+        if (truncatedHistoryDay == null) history else history.filterNot { it.dayUtc == truncatedHistoryDay }
+    val canCopy: Boolean get() = !loading && summaryDays.isNotEmpty()
     val canReset: Boolean get() = !loading && recordedSince != null
 }
 
@@ -81,7 +84,7 @@ internal class NetworkStatsViewModel @Inject constructor(
                 _state.value = current.copy(dialog = NetworkStatsDialog.SUMMARY)
             }
             NetworkStatsIntent.CopySummary -> if (current.dialog == NetworkStatsDialog.SUMMARY) {
-                _effects.trySend(NetworkStatsEffect.CopySummary(current.history))
+                _effects.trySend(NetworkStatsEffect.CopySummary(current.summaryDays))
                 _state.value = current.copy(dialog = null)
             }
             NetworkStatsIntent.AskReset -> if (current.canReset) {
@@ -103,6 +106,8 @@ internal class NetworkStatsViewModel @Inject constructor(
         val currentHour = clock.instant().truncatedTo(ChronoUnit.HOURS)
         val until = currentHour.plus(1, ChronoUnit.HOURS)
         val historyStart = until.minus(NetworkStatsPeriod.MONTH.duration)
+        val historyStartUtc = historyStart.atOffset(ZoneOffset.UTC)
+        val firstHistoryDate = historyStartUtc.toLocalDate()
         val history = repository.read(historyStart, until)
         val selected = if (period == NetworkStatsPeriod.MONTH) history else {
             repository.read(until.minus(period.duration), until)
@@ -113,8 +118,8 @@ internal class NetworkStatsViewModel @Inject constructor(
             versions = selected.versions,
             metrics = selected.period.toMetrics(),
             history = history.days,
-            historyDates = historyStart.atOffset(ZoneOffset.UTC).toLocalDate()..
-                currentHour.atOffset(ZoneOffset.UTC).toLocalDate(),
+            historyDates = firstHistoryDate..currentHour.atOffset(ZoneOffset.UTC).toLocalDate(),
+            truncatedHistoryDay = firstHistoryDate.takeIf { historyStartUtc.hour != 0 },
         )
     }
 

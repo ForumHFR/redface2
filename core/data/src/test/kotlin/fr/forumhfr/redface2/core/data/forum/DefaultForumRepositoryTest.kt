@@ -292,6 +292,31 @@ class DefaultForumRepositoryTest {
     }
 
     @Test
+    fun `category updates mark only the explicit refresh emissions`() = runTest {
+        val apiClient = mockk<HfrApiClient> {
+            coEvery { getCategories(any()) } returns fixture("rest_categories.json")
+        }
+        val repo = repository(apiClient)
+
+        repo.observeCategoryUpdates().test {
+            assertFalse(awaitItem().isRefresh)
+            val initial = awaitItem()
+            assertTrue(initial.result is ForumResult.Success)
+            assertFalse(initial.isRefresh)
+
+            repo.refreshCategories()
+            val loading = awaitItem()
+            assertEquals(ForumResult.Loading, loading.result)
+            assertTrue(loading.isRefresh)
+            val refreshed = awaitItem()
+            assertEquals(initial.result, refreshed.result)
+            assertTrue(refreshed.isRefresh)
+        }
+
+        coVerify(exactly = 2) { apiClient.getCategories(useAuth = false) }
+    }
+
+    @Test
     fun `observeCachedSubcategories emits null on cold cache without fetching`() = runTest {
         val apiClient = mockk<HfrApiClient>(relaxed = true)
         val repo = repository(apiClient)

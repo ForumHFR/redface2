@@ -84,7 +84,7 @@ private fun NetworkTarget.isForumPageOrApi(): Boolean =
 internal fun NetworkStatsTotals.forumRequests(): Long =
     requests.entries.sumOf { (key, counts) -> if (key.dimensions.target.isForumPageOrApi()) counts.requests else 0L }
 
-/** Builds the clipboard content from the same UTC date aggregates and labels as the screen. */
+/** Formats the UTC date aggregates selected for the preview and clipboard. */
 internal fun Resources.formatNetworkStatsSummary(days: List<NetworkStatsDay>): String =
     days.sortedByDescending { it.dayUtc }.joinToString("\n\n") { day ->
         val dayMetrics = day.totals.toMetrics()
@@ -129,6 +129,7 @@ private fun NetworkStatsMetrics.unsentLines(resources: Resources) = with(resourc
             NoRequestReason.DNS -> R.string.network_stats_unsent_dns
             NoRequestReason.CONNECT -> R.string.network_stats_unsent_connect
             NoRequestReason.TCP_TIMEOUT -> R.string.network_stats_unsent_tcp_timeout
+            NoRequestReason.PROXY_TIMEOUT -> R.string.network_stats_unsent_proxy_timeout
             NoRequestReason.TLS -> R.string.network_stats_unsent_tls
             NoRequestReason.OTHER_IO -> R.string.network_stats_unsent_other
         }

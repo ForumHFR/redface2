@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.network.diagnostics
 
 import fr.forumhfr.redface2.core.domain.diagnostics.AppForegroundDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallIntent
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrConnectErrno
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsContext
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsContextProvider
 import fr.forumhfr.redface2.core.domain.stats.NetworkRequestCounts
@@ -16,7 +17,6 @@ import java.net.ConnectException
 import java.net.InetSocketAddress
 import java.net.NoRouteToHostException
 import java.net.Proxy
-import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.time.Clock
 import java.util.concurrent.ConcurrentHashMap
@@ -64,7 +64,7 @@ internal class NetworkStatsEventListener(
     private var exchange: Exchange? = null
     private var sent = false
     // Fast fallback can race TCP attempts on other threads while handshaking on the call thread.
-    private val tcpTimeouts = ConcurrentHashMap.newKeySet<IOException>()
+    private val connectTimeouts = ConcurrentHashMap<IOException, NoRequestReason>()
     private val handshaking = ThreadLocal<Boolean>()
 
     override fun secureConnectStart(call: Call) = record {
@@ -81,9 +81,11 @@ internal class NetworkStatsEventListener(
         protocol: Protocol?,
         ioe: IOException,
     ) = record {
-        // An HTTPS tunnel through an HTTP proxy can time out before secureConnectStart as well.
-        val mayBeTunnel = proxy.type() == Proxy.Type.HTTP && call.request().url.isHttps
-        if (ioe is SocketTimeoutException && handshaking.get() != true && !mayBeTunnel) tcpTimeouts.add(ioe)
+        if (handshaking.get() != true && classifyConnectErrno(ioe) == HfrConnectErrno.TIMEOUT) {
+            // For HTTPS via an HTTP proxy, connectFailed before TLS covers both TCP and CONNECT.
+            val mayBeTunnel = proxy.type() == Proxy.Type.HTTP && call.request().url.isHttps
+            connectTimeouts[ioe] = if (mayBeTunnel) NoRequestReason.PROXY_TIMEOUT else NoRequestReason.TCP_TIMEOUT
+        }
         handshaking.remove()
     }
 
@@ -178,13 +180,14 @@ internal class NetworkStatsEventListener(
         }
     }
 
-    private fun noRequestReason(call: Call, error: IOException): NoRequestReason = when {
-        call.isCanceled() -> NoRequestReason.CANCELLED
-        error is UnknownHostException -> NoRequestReason.DNS
-        error is SocketTimeoutException && error in tcpTimeouts -> NoRequestReason.TCP_TIMEOUT
-        error is ConnectException || error is NoRouteToHostException -> NoRequestReason.CONNECT
-        error is SSLException -> NoRequestReason.TLS
-        else -> NoRequestReason.OTHER_IO
+    private fun noRequestReason(call: Call, error: IOException): NoRequestReason {
+        if (call.isCanceled()) return NoRequestReason.CANCELLED
+        return connectTimeouts[error] ?: when (error) {
+            is UnknownHostException -> NoRequestReason.DNS
+            is ConnectException, is NoRouteToHostException -> NoRequestReason.CONNECT
+            is SSLException -> NoRequestReason.TLS
+            else -> NoRequestReason.OTHER_IO
+        }
     }
 
     private fun responseStatus(code: Int): NetworkStatus = when (code) {

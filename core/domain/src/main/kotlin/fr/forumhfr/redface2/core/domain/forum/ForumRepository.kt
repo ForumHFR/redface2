@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 
 /**
  * Read access to the HFR forum browsing layer (categories, subcategories, topic lists).
@@ -21,6 +22,10 @@ import kotlinx.coroutines.flow.flowOf
 interface ForumRepository {
 
     fun observeCategories(): Flow<ForumResult<List<Category>>>
+
+    /** Like [observeCategories], with the origin attached to each refresh result. */
+    fun observeCategoryUpdates(): Flow<ForumCategoriesUpdate> =
+        observeCategories().map { ForumCategoriesUpdate(it) }
 
     /**
      * Cache-only category stream for adornments that need ordering/labels but must not trigger the
@@ -127,6 +132,11 @@ interface ForumRepository {
  * (« lus uniquement »), FAVORITES = `owntopic=3` (« mes favoris »).
  */
 enum class FlagFilterBucket { PARTICIPATED, READ, FAVORITES }
+
+data class ForumCategoriesUpdate(
+    val result: ForumResult<List<Category>>,
+    val isRefresh: Boolean = false,
+)
 
 /**
  * Tri-state outcome of a forum browsing fetch. The domain layer stays Compose-free so

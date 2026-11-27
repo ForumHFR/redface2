@@ -2527,6 +2527,7 @@ private fun RedfaceNavHost(
             }
             entry<MessagesRoute> {
                 MessagesScreen(
+                    isCurrentRoute = { currentBackStack.value.lastOrNull() == MessagesRoute },
                     readThreadIds = privateMessageNavState.readThreadIds,
                     onOpenThread = { threadId, isMultiRecipient, openAtPage, wasUnread, openedAtDate ->
                         // Record the multi-recipient hint in memory only; the route stays opaque.

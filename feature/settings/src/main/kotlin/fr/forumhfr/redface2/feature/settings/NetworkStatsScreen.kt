@@ -157,8 +157,8 @@ private fun NetworkStatsDialogs(state: NetworkStatsUiState, onIntent: (NetworkSt
     val dismiss = { onIntent(NetworkStatsIntent.DismissDialog) }
     when (state.dialog) {
         NetworkStatsDialog.SUMMARY -> {
-            val summary = remember(resources, resources.configuration.locales[0], state.history) {
-                resources.formatNetworkStatsSummary(state.history)
+            val summary = remember(resources, resources.configuration.locales[0], state.summaryDays) {
+                resources.formatNetworkStatsSummary(state.summaryDays)
             }
             AlertDialog(
                 onDismissRequest = dismiss,

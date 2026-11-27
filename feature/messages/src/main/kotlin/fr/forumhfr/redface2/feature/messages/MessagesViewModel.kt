@@ -48,6 +48,7 @@ class MessagesViewModel @Inject constructor(
     // newer page with its stale result.
     private var loadJob: Job? = null
     private var authenticatedPseudo: String? = null
+    private var presentedLoadGeneration = 0
 
     // One-shot guard for the MPStorage DT seed (#6, ADR-014). Reset whenever the active pseudo
     // changes so a re-login / account switch re-seeds for the new account, never carries the
@@ -115,9 +116,21 @@ class MessagesViewModel @Inject constructor(
         load(page = 1, refreshing = _state.value.page == 1)
     }
 
+    internal fun onInboxPresented(generation: Int, isCurrentRoute: Boolean) {
+        if (!isCurrentRoute) return
+        val current = _state.value
+        if (current.mode is MessagesUiState.Mode.Content &&
+            generation == current.networkLoadGeneration && generation != presentedLoadGeneration
+        ) {
+            presentedLoadGeneration = generation
+            networkActions.recordSafely(NetworkAction.LIST)
+        }
+    }
+
     private fun clearPrivateState() {
         authenticatedPseudo = null
         loadJob?.cancel()
+        presentedLoadGeneration = 0
         _state.value = MessagesUiState(mode = MessagesUiState.Mode.RequiresLogin)
     }
 
@@ -149,7 +162,6 @@ class MessagesViewModel @Inject constructor(
                         networkLoadGeneration = it.networkLoadGeneration + 1,
                     )
                 }
-                networkActions.recordSafely(NetworkAction.LIST)
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (

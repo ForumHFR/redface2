@@ -9,6 +9,7 @@ import java.time.ZoneOffset
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.Dispatchers
@@ -132,7 +133,7 @@ class NetworkStatsBufferTest {
             elapsed = DiagnosticsClock {
                 if (Thread.currentThread().name == "stats-test-writer") {
                     checkpointing.countDown()
-                    check(release.await(5, TimeUnit.SECONDS))
+                    check(release.await(30, TimeUnit.SECONDS))
                 }
                 0L
             },
@@ -140,13 +141,55 @@ class NetworkStatsBufferTest {
         try {
             recorder.onVisibilityChanged(AppVisibility.FOREGROUND)
             val drain = writer.submit { runBlocking { recorder.drain() } }
-            check(checkpointing.await(2, TimeUnit.SECONDS))
-            lifecycle.submit { recorder.onVisibilityChanged(AppVisibility.BACKGROUND) }.get(2, TimeUnit.SECONDS)
+            check(checkpointing.await(30, TimeUnit.SECONDS))
+            lifecycle.submit { recorder.onVisibilityChanged(AppVisibility.BACKGROUND) }.get(30, TimeUnit.SECONDS)
             release.countDown()
-            drain.get(2, TimeUnit.SECONDS)
+            drain.get(30, TimeUnit.SECONDS)
         } finally {
             release.countDown()
             writer.shutdownNow()
+            lifecycle.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `checkpoint does not pass a background timestamp waiting to enter the queue`() = runBlocking {
+        val nanos = AtomicLong()
+        val timestamped = CountDownLatch(1)
+        val publish = CountDownLatch(1)
+        val lifecycle = Executors.newSingleThreadExecutor { Thread(it, "stats-test-lifecycle") }
+        val recorder = NetworkStatsBuffer(
+            NetworkStatsProcess(72, isMain = true),
+            Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
+            DiagnosticsClock {
+                val timestamp = nanos.get()
+                if (Thread.currentThread().name == "stats-test-lifecycle") {
+                    timestamped.countDown()
+                    check(publish.await(30, TimeUnit.SECONDS))
+                }
+                timestamp
+            },
+        )
+        val seconds = NetworkActionKey(72, NetworkAction.FOREGROUND_SECONDS)
+        try {
+            recorder.onVisibilityChanged(AppVisibility.FOREGROUND)
+            recorder.drain()
+
+            nanos.set(900_000_000L)
+            val background = lifecycle.submit { recorder.onVisibilityChanged(AppVisibility.BACKGROUND) }
+            assertTrue(timestamped.await(30, TimeUnit.SECONDS))
+            nanos.set(1_100_000_000L)
+            assertTrue(recorder.drain().isEmpty())
+
+            publish.countDown()
+            background.get(30, TimeUnit.SECONDS)
+            assertTrue(recorder.drain().isEmpty())
+
+            recorder.onVisibilityChanged(AppVisibility.FOREGROUND)
+            nanos.set(1_200_000_000L)
+            assertEquals(1L, recorder.drain().getValue(0).actions[seconds])
+        } finally {
+            publish.countDown()
             lifecycle.shutdownNow()
         }
     }

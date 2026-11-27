@@ -48,7 +48,7 @@ class NetworkStatsViewModelTest {
     }
 
     @Test
-    fun `periods cover exact hourly buckets and the copied history uses the same month`() = runTest {
+    fun `periods cover exact hourly buckets and export requires a preview`() = runTest {
         val repository = FakeRepository()
         val model = NetworkStatsViewModel(repository, clock)
 
@@ -82,6 +82,33 @@ class NetworkStatsViewModelTest {
     }
 
     @Test
+    fun `export omits the oldest UTC date only if the history starts after midnight`() = runTest {
+        for (hour in listOf(22, 23)) {
+            val time = Instant.parse("2026-11-27T${hour}:15:00Z")
+            val end = time.truncatedTo(ChronoUnit.HOURS).plus(1, ChronoUnit.HOURS)
+            val start = end.minus(Duration.ofHours(720))
+            val oldest = NetworkStatsDay(start.atOffset(ZoneOffset.UTC).toLocalDate(), dailyTotals)
+            val latest = NetworkStatsDay(LocalDate.parse("2026-11-27"), dailyTotals)
+            val allDays = listOf(oldest, latest)
+            val expectedExport = if (hour == 22) listOf(latest) else allDays
+            val repository = FakeRepository(historyStart = start, days = allDays)
+            val model = NetworkStatsViewModel(repository, Clock.fixed(time, ZoneOffset.UTC))
+            model.submit(NetworkStatsIntent.SelectPeriod(NetworkStatsPeriod.MONTH))
+
+            assertEquals(start to end, repository.ranges.last())
+            assertEquals(allDays, model.state.value.history)
+            assertEquals(oldest.dayUtc..latest.dayUtc, model.state.value.historyDates)
+            model.effects.test {
+                model.submit(NetworkStatsIntent.PreviewSummary)
+                assertEquals(NetworkStatsDialog.SUMMARY, model.state.value.dialog)
+                assertEquals(expectedExport, model.state.value.summaryDays)
+                model.submit(NetworkStatsIntent.CopySummary)
+                assertEquals(NetworkStatsEffect.CopySummary(expectedExport), awaitItem())
+            }
+        }
+    }
+
+    @Test
     fun `reset requires confirmation and reloads the selected period on success`() = runTest {
         val repository = FakeRepository()
         val model = NetworkStatsViewModel(repository, clock)
@@ -111,7 +138,11 @@ class NetworkStatsViewModelTest {
         assertNull(model.state.value.dialog)
     }
 
-    private inner class FakeRepository(private val resetSucceeds: Boolean = true) : NetworkStatsRepository {
+    private inner class FakeRepository(
+        private val resetSucceeds: Boolean = true,
+        private val historyStart: Instant = fromHistory,
+        private val days: List<NetworkStatsDay> = history,
+    ) : NetworkStatsRepository {
         val ranges = mutableListOf<Pair<Instant, Instant>>()
         var resets = 0
 
@@ -120,8 +151,8 @@ class NetworkStatsViewModelTest {
             if (resets != 0 && resetSucceeds) return NetworkStatsReport()
             return NetworkStatsReport(
                 recordedSince = fromHistory.minus(Duration.ofDays(7)),
-                period = if (from == fromHistory) dailyTotals else periodTotals,
-                days = if (from == fromHistory) history else emptyList(),
+                period = if (from == historyStart) dailyTotals else periodTotals,
+                days = if (from == historyStart) days else emptyList(),
                 versions = setOf(71, 72),
             )
         }

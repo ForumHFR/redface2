@@ -621,6 +621,7 @@
     <string name="network_stats_unsent_dns">DNS</string>
     <string name="network_stats_unsent_connect">Connexion</string>
     <string name="network_stats_unsent_tcp_timeout">Délai de connexion TCP dépassé</string>
+    <string name="network_stats_unsent_proxy_timeout">Délai dépassé avant TLS via proxy HTTP</string>
     <string name="network_stats_unsent_tls">TLS</string>
     <string name="network_stats_unsent_other">Autre erreur réseau</string>
     <string name="network_stats_bytes">Octets approximatifs (tous hôtes) — Reçus : %1$d · Envoyés : %2$d</string>

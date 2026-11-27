@@ -56,6 +56,7 @@ class NetworkStatsSummaryTest {
                 noRequests = mapOf(
                     NoRequestKey(dimensions, NoRequestReason.DNS) to 9,
                     NoRequestKey(dimensions.copy(network = NetworkKind.CELLULAR), NoRequestReason.TCP_TIMEOUT) to 2,
+                    NoRequestKey(dimensions, NoRequestReason.PROXY_TIMEOUT) to 1,
                     NoRequestKey(dimensions, NoRequestReason.CANCELLED) to 50,
                     NoRequestKey(dimensions.copy(target = NetworkTarget.THIRD_PARTY_IMAGES), NoRequestReason.DNS) to 90,
                 ),
@@ -84,6 +85,7 @@ class NetworkStatsSummaryTest {
         assertTrue(blocks[0].contains("DNS : Wi-Fi 9 · Mobile 0"))
         assertTrue(blocks[0].contains("Annulation : Wi-Fi 50 · Mobile 0"))
         assertTrue(blocks[0].contains("Délai de connexion TCP dépassé : Wi-Fi 0 · Mobile 2"))
+        assertTrue(blocks[0].contains("Délai dépassé avant TLS via proxy HTTP : Wi-Fi 1 · Mobile 0"))
         assertTrue(blocks[0].contains("Forum — Par seconde : 1 · Par minute : 2 · En vol : 3"))
         assertTrue(blocks[0].contains("Sonde — Par seconde : 4 · Par minute : 5 · En vol : 6"))
         assertTrue(blocks[0].contains("Requêtes : 5 · Par actualisation admise : 2,5"))

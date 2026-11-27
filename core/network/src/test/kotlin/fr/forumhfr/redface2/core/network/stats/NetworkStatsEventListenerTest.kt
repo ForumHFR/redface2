@@ -33,6 +33,7 @@ import io.mockk.every
 import io.mockk.mockk
 import java.io.IOException
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.Socket
 import java.net.SocketAddress
@@ -175,12 +176,15 @@ class NetworkStatsEventListenerTest {
     }
 
     @Test
-    fun `a TCP connect timeout is counted separately from cancellation`() = runTest {
+    fun `direct and wrapped TCP connect timeouts are counted unless the call is cancelled`() = runTest {
+        var connectError: IOException = SocketTimeoutException("connect timed out")
+        var beforeConnectFailure: () -> Unit = {}
         val socketFactory = mockk<SocketFactory>()
         every { socketFactory.createSocket() } answers {
             object : Socket() {
                 override fun connect(endpoint: SocketAddress, timeout: Int) {
-                    throw SocketTimeoutException("connect timed out")
+                    beforeConnectFailure()
+                    throw connectError
                 }
             }
         }
@@ -190,12 +194,33 @@ class NetworkStatsEventListenerTest {
         val request = request("/forum2.php")
 
         assertTrue(runCatching { execute(client, request) }.exceptionOrNull() is SocketTimeoutException)
-        val cancelled = client.newCall(request).apply { cancel() }
+        connectError = IOException(SocketTimeoutException("wrapped connect timeout"))
+        assertTrue(runCatching { execute(client, request) }.exceptionOrNull()?.cause is SocketTimeoutException)
+        val cancelled = client.newCall(request)
+        beforeConnectFailure = cancelled::cancel
         assertTrue(runCatching { cancelled.execute().close() }.exceptionOrNull() is IOException)
 
         val totals = buffer.drain().getValue(0)
         assertTrue(totals.requests.isEmpty())
-        assertEquals(mapOf(NoRequestReason.TCP_TIMEOUT to 1L, NoRequestReason.CANCELLED to 1L),
+        assertEquals(mapOf(NoRequestReason.TCP_TIMEOUT to 2L, NoRequestReason.CANCELLED to 1L),
+            totals.noRequests.entries.associate { it.key.reason to it.value })
+    }
+
+    @Test
+    fun `an HTTPS CONNECT timeout is attributed to the proxy path`() = runTest {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        val client = NetworkModule.provideAnonymousClient(base, listeners).newBuilder()
+            .proxy(Proxy(Proxy.Type.HTTP, InetSocketAddress("127.0.0.1", server.port)))
+            .readTimeout(250, TimeUnit.MILLISECONDS)
+            .build()
+        val request = Request.Builder().url("https://forum.hardware.fr/forum2.php").build()
+
+        assertTrue(runCatching { execute(client, request) }.exceptionOrNull() is SocketTimeoutException)
+        assertEquals("CONNECT", server.takeRequest(2, TimeUnit.SECONDS)?.method)
+
+        val totals = buffer.drain().getValue(0)
+        assertTrue(totals.requests.isEmpty())
+        assertEquals(mapOf(NoRequestReason.PROXY_TIMEOUT to 1L),
             totals.noRequests.entries.associate { it.key.reason to it.value })
     }
 

@@ -74,17 +74,25 @@ class NetworkStatsBuffer @Inject constructor(
     /** The lifecycle thread only timestamps and queues transitions. The writer owns the cursor. */
     private inner class ForegroundTime {
         private val transitions = ConcurrentLinkedQueue<VisibilityTransition>()
+        private val publishing = AtomicInteger()
         private var cursor: ForegroundCursor? = null
         private var remainderNanos = 0L
 
         fun enqueue(visibility: AppVisibility) {
-            transitions.add(
-                VisibilityTransition(visibility, clock.instant().epochSecond, elapsed.elapsedRealtimeNanos()),
-            )
+            publishing.incrementAndGet()
+            try {
+                transitions.add(
+                    VisibilityTransition(visibility, clock.instant().epochSecond, elapsed.elapsedRealtimeNanos()),
+                )
+            } finally {
+                publishing.decrementAndGet()
+            }
         }
 
         fun checkpoint() {
             val now = elapsed.elapsedRealtimeNanos()
+            // Once this check sees zero, any transition timestamped before now is already queued.
+            val canAdvance = publishing.get() == 0
             while (true) {
                 val next = transitions.poll() ?: break
                 if (next.visibility == AppVisibility.FOREGROUND) {
@@ -98,7 +106,7 @@ class NetworkStatsBuffer @Inject constructor(
                     cursor = null
                 }
             }
-            checkpointAt(now)
+            if (canAdvance) checkpointAt(now)
         }
 
         private fun checkpointAt(now: Long) {

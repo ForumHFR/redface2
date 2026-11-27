@@ -4,6 +4,7 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
+import fr.forumhfr.redface2.core.domain.forum.ForumCategoriesUpdate
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.stats.NetworkAction
@@ -18,6 +19,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -58,7 +60,7 @@ class ForumViewModelTest {
             assertTrue(actions.isEmpty())
 
             vm.refresh()
-            repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES))
+            repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES), isRefresh = true)
             assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES), awaitItem())
             assertEquals(listOf(NetworkAction.LIST), actions)
             repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES.take(1)))
@@ -66,18 +68,19 @@ class ForumViewModelTest {
             assertEquals(listOf(NetworkAction.LIST), actions)
 
             vm.refresh()
-            repo.emitCategories(ForumResult.Failure(error))
+            repo.emitCategories(ForumResult.Failure(error), isRefresh = true)
             assertEquals(ForumUiState.Error(error.message), awaitItem())
             assertEquals(listOf(NetworkAction.LIST), actions)
 
             vm.refresh()
-            repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES))
+            repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES), isRefresh = true)
             assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES), awaitItem())
             assertEquals(listOf(NetworkAction.LIST, NetworkAction.LIST), actions)
             cancelAndIgnoreRemainingEvents()
         }
         advanceTimeBy(6_000)
         runCurrent()
+        repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES))
 
         vm.uiState.test {
             assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES), awaitItem())
@@ -85,6 +88,35 @@ class ForumViewModelTest {
             assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES.take(1)), awaitItem())
             assertEquals(listOf(NetworkAction.LIST, NetworkAction.LIST), actions)
             cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `the second of two overlapping refreshes counts when the first fails`() = runTest {
+        val repo = FakeForumRepository()
+        val actions = mutableListOf<NetworkAction>()
+        val vm = ForumViewModel(repo, NetworkActionRecorder { action, _, _ -> actions += action })
+        val first = CompletableDeferred<ForumResult<List<Category>>>()
+        val second = CompletableDeferred<ForumResult<List<Category>>>()
+
+        vm.uiState.test {
+            assertEquals(ForumUiState.Loading, awaitItem())
+            repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES))
+            assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES), awaitItem())
+            actions.clear()
+
+            repo.suspendRefreshCategoriesUntil = first
+            vm.refresh()
+            repo.suspendRefreshCategoriesUntil = second
+            vm.refresh()
+            assertEquals(2, repo.refreshCategoriesCalls)
+
+            first.complete(ForumResult.Failure(IllegalStateException("offline")))
+            assertEquals(ForumUiState.Error("offline"), awaitItem())
+            assertTrue(actions.isEmpty())
+            second.complete(ForumResult.Success(SAMPLE_CATEGORIES))
+            assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES), awaitItem())
+            assertEquals(listOf(NetworkAction.LIST), actions)
         }
     }
 
@@ -142,7 +174,7 @@ class ForumViewModelTest {
 
         vm.refresh()
 
-        assertTrue(repo.refreshCategoriesCalled)
+        assertEquals(1, repo.refreshCategoriesCalls)
     }
 
     @Test
@@ -168,7 +200,7 @@ class ForumViewModelTest {
 
             // Gate refreshCategories so the launched refresh coroutine suspends
             // mid-way. The flag must be true while the gate holds.
-            val gate = CompletableDeferred<Unit>()
+            val gate = CompletableDeferred<ForumResult<List<Category>>>()
             repo.suspendRefreshCategoriesUntil = gate
 
             vm.refresh()
@@ -176,7 +208,7 @@ class ForumViewModelTest {
             assertEquals(true, awaitItem())
 
             // Release the gate → finally branch flips the flag back off.
-            gate.complete(Unit)
+            gate.complete(ForumResult.Success(SAMPLE_CATEGORIES))
             assertEquals(false, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
@@ -191,22 +223,25 @@ class ForumViewModelTest {
     }
 
     private class FakeForumRepository : ForumRepository {
-        private val categories: MutableSharedFlow<ForumResult<List<Category>>> =
+        private val categories: MutableSharedFlow<ForumCategoriesUpdate> =
             MutableSharedFlow(replay = 1, extraBufferCapacity = 4)
-        var refreshCategoriesCalled: Boolean = false
+        var refreshCategoriesCalls = 0
             private set
-        var suspendRefreshCategoriesUntil: CompletableDeferred<Unit>? = null
+        var suspendRefreshCategoriesUntil: CompletableDeferred<ForumResult<List<Category>>>? = null
 
         override fun observeCategories(): Flow<ForumResult<List<Category>>> =
+            categories.map { it.result }
+
+        override fun observeCategoryUpdates(): Flow<ForumCategoriesUpdate> =
             categories.asSharedFlow()
 
         override suspend fun getCategories(forceRefreshIfStale: Boolean): ForumResult<List<Category>> =
-            categories.replayCache.lastOrNull { it !is ForumResult.Loading }
+            categories.replayCache.lastOrNull { it.result !is ForumResult.Loading }?.result
                 ?: ForumResult.Success(emptyList())
 
         override suspend fun refreshCategories() {
-            refreshCategoriesCalled = true
-            suspendRefreshCategoriesUntil?.await()
+            refreshCategoriesCalls++
+            suspendRefreshCategoriesUntil?.await()?.let { emitCategories(it, isRefresh = true) }
         }
 
         override fun observeSubcategories(cat: Int): Flow<ForumResult<List<SubCategory>>> =
@@ -235,8 +270,8 @@ class ForumViewModelTest {
             bucket: FlagFilterBucket,
         ): ForumResult<TopicListPage> = ForumResult.Failure(UnsupportedOperationException())
 
-        suspend fun emitCategories(result: ForumResult<List<Category>>) {
-            categories.emit(result)
+        suspend fun emitCategories(result: ForumResult<List<Category>>, isRefresh: Boolean = false) {
+            categories.emit(ForumCategoriesUpdate(result, isRefresh))
         }
     }
 }
