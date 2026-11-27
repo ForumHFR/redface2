@@ -108,6 +108,42 @@ jobs:
           # its push runs write too; PR runs (refs/pull/N/merge) stay read-only.
           cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' }}
 
+      # #1681 — Robolectric downloads its android-all-instrumented jars (~0.8 GB) from Maven Central
+      # itself, outside Gradle and the setup-gradle cache: one refused or cut download failed every
+      # class of the test JVM concerned; on 27/11/2026 Central answered 429 to runners on these jars
+      # with a ~17 h Retry-After. Restore them from a cache; on a miss, prefetch them before Gradle
+      # starts (scripts/robolectric-jars.sh: Google's Maven Central mirror first, Central as fallback,
+      # bounded retries, SHA-512 from Central first). Only push runs
+      # on main and dev save the entry, as with `cache-read-only` above: PR runs restore their base
+      # branch's entry without storing a ~0.8 GB copy each. The path is the JVM's user.home, which is
+      # not $HOME in this container job.
+      - name: Locate Robolectric jars
+        id: robolectric
+        if: matrix.task.name == 'test'
+        run: echo "dir=$(bash scripts/robolectric-jars.sh dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Robolectric jars
+        id: robolectric-cache
+        if: matrix.task.name == 'test'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.robolectric.outputs.dir }}
+          key: robolectric-android-all-${{ hashFiles('scripts/robolectric-jars.sh') }}
+
+      - name: Prefetch Robolectric jars
+        if: matrix.task.name == 'test' && steps.robolectric-cache.outputs.cache-hit != 'true'
+        run: bash scripts/robolectric-jars.sh prefetch
+
+      - name: Save Robolectric jars
+        if: >-
+          matrix.task.name == 'test' && steps.robolectric-cache.outputs.cache-hit != 'true'
+          && github.event_name == 'push'
+          && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.robolectric.outputs.dir }}
+          key: ${{ steps.robolectric-cache.outputs.cache-primary-key }}
+
       - name: ${{ matrix.task.name }}
         run: ./gradlew ${{ matrix.task.gradle }}
 
