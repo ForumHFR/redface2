@@ -28,6 +28,7 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
@@ -51,7 +52,6 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -69,6 +69,7 @@ import org.junit.Test
  * | Resume after 10 s / 20 s | 0 / CYAN → 0 / CYAN | 0 / 0 → 0 / 0 |
  * | CYAN pull | CYAN → CYAN | 0 → 0 |
  * | Super pull | CYAN, RED, FAVORITE → same types in one sweep batch (120 → 80 REST calls) | 0 → 0 |
+ * | Super pull joining in-flight CYAN | CYAN, RED, FAVORITE → same types in one sweep batch (120 → 80) | 0 → 0 |
  * | Two completed CYAN pulls 5 s apart | CYAN, CYAN → CYAN, CYAN | 0 → 0 |
  */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -174,17 +175,32 @@ class FlagsRefreshTriggerBudgetTest {
     }
 
     @Test
+    fun `Super pull shares the sticky sweep of a Cyan refresh already in flight`() = runTest {
+        scenario {
+            startOnCyan()
+            val finishCyan = holdNextRefresh()
+            pull()
+
+            visit(FlagTab.Super)
+            pull()
+            finishCyan()
+
+            assertCalls(refreshes = listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE), sharedSweep = true)
+            assertPinned(FlagTab.Super, FlagType.CYAN, explicitRefreshes = 2)
+        }
+    }
+
+    @Test
     fun `completed pulls five seconds apart each refresh CYAN`() = runTest {
         scenario {
             startOnCyan()
 
             pull()
-            assertCalls(refreshes = listOf(FlagType.CYAN))
             assertPinned(FlagTab.Cyan, FlagType.CYAN, explicitRefreshes = 2)
 
             advanceTimeBy(5_000)
             pull()
-            assertCalls(refreshes = listOf(FlagType.CYAN))
+            assertCalls(refreshes = listOf(FlagType.CYAN, FlagType.CYAN))
             assertPinned(FlagTab.Cyan, FlagType.CYAN, explicitRefreshes = 3)
         }
     }
@@ -289,6 +305,15 @@ class FlagsRefreshTriggerBudgetTest {
             scope.runCurrent()
         }
 
+        fun holdNextRefresh(): () -> Unit {
+            val gate = CompletableDeferred<Unit>()
+            flags.refreshGate = gate
+            return {
+                gate.complete(Unit)
+                scope.runCurrent()
+            }
+        }
+
         fun assertCalls(
             refreshes: List<FlagType> = emptyList(),
             observations: List<FlagType> = emptyList(),
@@ -296,8 +321,8 @@ class FlagsRefreshTriggerBudgetTest {
         ) {
             assertEquals("explicit refreshes", refreshes, flags.refreshes.toList())
             assertEquals("cold observation fetches", observations, flags.initialObserves.toList())
-            if (sharedSweep) assertNotNull(flags.pullBatches.distinct().single())
-            else assertEquals(List(refreshes.size) { null }, flags.pullBatches)
+            val sweepBatches = flags.pullBatches.map(::requireNotNull)
+            assertEquals("sticky sweep batches", if (sharedSweep) 1 else refreshes.size, sweepBatches.distinct().size)
             flags.pullBatches.clear()
             flags.refreshes.clear()
             flags.initialObserves.clear()
@@ -321,6 +346,7 @@ class FlagsRefreshTriggerBudgetTest {
         val refreshes = mutableListOf<FlagType>()
         val initialObserves = mutableListOf<FlagType>()
         val pullBatches = mutableListOf<FlagPullBatch?>()
+        var refreshGate: CompletableDeferred<Unit>? = null
         private var isRefreshing = false
 
         override fun observe(type: FlagType): Flow<FlagsResult> = flow {
@@ -339,6 +365,9 @@ class FlagsRefreshTriggerBudgetTest {
             try {
                 refreshes += type
                 pullBatches += currentCoroutineContext()[FlagPullBatch]
+                val gate = refreshGate
+                refreshGate = null
+                gate?.await()
                 yield()
                 val previousAnchor = snapshots.getValue(type).value?.flags?.single()?.lastPostReadId
                 return publish(pinnedFlag(type, (previousAnchor ?: INITIAL_ANCHOR) + 1))

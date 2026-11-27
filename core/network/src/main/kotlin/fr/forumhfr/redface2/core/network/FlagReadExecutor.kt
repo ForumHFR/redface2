@@ -52,8 +52,9 @@ class FlagReadExecutor @Inject constructor(
             } catch (error: IOException) {
                 currentCoroutineContext().ensureActive()
                 session.checkBudget()
+                if (!phase.canRetry(error)) return@withTimeoutOrNull Result.failure(error)
                 session.checkNotBlocked()
-                if (!phase.canRetry(error) || !session.reserveRetry()) throw error
+                if (!session.reserveRetry()) throw error
                 jitter.pause()
                 currentCoroutineContext().ensureActive()
                 session.checkBudget()

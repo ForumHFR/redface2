@@ -9,11 +9,15 @@ interface HfrRestAvailability {
     /** The current cooldown deadline, cleared on expiry even when no request is made. */
     val blockedUntil: Flow<Instant?>
 
+    /** Diagnostics stays blocked until an ordinary REST request confirms recovery. */
+    val probeBlocked: Flow<Boolean>
+
     /** Diagnostics traffic cannot claim the single REST recovery request. */
     suspend fun checkProbeAllowed()
 
     object Available : HfrRestAvailability {
         override val blockedUntil: Flow<Instant?> = flowOf(null)
+        override val probeBlocked: Flow<Boolean> = flowOf(false)
         override suspend fun checkProbeAllowed() = Unit
     }
 }

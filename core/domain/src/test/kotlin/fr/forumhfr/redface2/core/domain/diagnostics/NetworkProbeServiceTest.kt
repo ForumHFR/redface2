@@ -27,6 +27,7 @@ class NetworkProbeServiceTest {
     fun `REST pause refuses Diagnostics before it reserves a probe`() = runTest {
         val blocked = object : HfrRestAvailability {
             override val blockedUntil = flowOf(Instant.parse("2026-11-27T14:00:00Z"))
+            override val probeBlocked = flowOf(true)
             override suspend fun checkProbeAllowed() { throw HfrRestBlockedException() }
         }
         val service = NetworkProbeService(

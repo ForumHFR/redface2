@@ -120,18 +120,25 @@ class HfrRestCircuitBreakerTest {
     @Test
     fun `restored deadline is clamped and the live flow clears it without traffic`() = runTest {
         val observed = mutableListOf<Instant?>()
+        val probeBlocked = mutableListOf<Boolean>()
         store.saved = HfrRestCooldown(time.now.plusSeconds(86_400), level = 50)
         val deadline = time.now.plusSeconds(7200)
         val observing = launch { breaker.blockedUntil.take(2).toList(observed) }
+        val observingProbe = launch { breaker.probeBlocked.take(2).toList(probeBlocked) }
 
         runCurrent()
         assertEquals(listOf(deadline), observed)
+        assertEquals(listOf(true), probeBlocked)
         assertEquals(HfrRestCooldown(deadline, level = 3), store.saved)
         time.now = deadline
         advanceTimeBy(7_200_000)
         observing.join()
         assertEquals(listOf(deadline, null), observed)
         assertBlocked { breaker.checkProbeAllowed() }
+        assertEquals(listOf(true), probeBlocked)
+        breaker.reply(success)
+        observingProbe.join()
+        assertEquals(listOf(true, false), probeBlocked)
     }
 
     private suspend fun HfrRestCircuitBreaker.reply(reply: RestReply) = complete(admit(), reply)

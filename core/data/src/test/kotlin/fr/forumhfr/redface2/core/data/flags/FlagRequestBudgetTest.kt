@@ -86,11 +86,15 @@ import org.robolectric.annotation.Config
  * | CYAN cold refresh admitted before observation | 41 shared → 41 shared | 15 → 5 |
  * | First RED / FAVORITE observation after a completed sweep, then landing refresh | 20 + 40 → 20 + 40 each | 15 → 5 |
  * | Super pull, warm catalogue | 120 → 80 | 15 → 5 |
+ * | One Apache 403 amid other HTTP failures, then a healthy pull | 20 + 40 → 5 + 40 | 15 → 5 |
  * | Apache 403, warm catalogue, detecting pull | 20 → 5 | 15 → 5 |
  * | Apache 403, cold catalogue, two pulls that detect the block | 1 + 1 → 1 + 1 | 1 → 1 |
  * | HTTP 429 with Retry-After, warm catalogue, two pulls | 20 + 20 → 5 + 0 | 15 → 5 |
  * | HTTP 429 with Retry-After, cold catalogue, two pulls that detect the block | 1 + 1 → 1 + 1 | 1 → 1 |
  * | Pull during an active cooldown, warm / cold catalogue | 20 / 1 → 0 / 0 | 15 / 1 → 0 / 0 |
+ * | Cold RED observation during the pause | 1 → 0 | 1 → 0 |
+ * | Uncached findFlag during the pause | 3 → 0 | 3 → 0 |
+ * | Uncached resolveFavorite / subcategories during the pause | 1 / 1 → 0 / 0 | 1 / 1 → 0 / 0 |
  * | findFlag, cold catalogue / cached hit | 5 / 0 → 5 / 0 | 3 / 0 → 3 / 0 |
  * | resolveFavorite, sticky hit / memo hit | 2 / 0 → 2 / 0 | 1 / 0 → 1 / 0 |
  * | Subcategory names, cold / cached subscription | 1 / 0 → 1 / 0 | 1 / 0 → 1 / 0 |
@@ -195,6 +199,28 @@ class FlagRequestBudgetTest {
     }
 
     @Test
+    fun `one qualifying 403 stops the current collection without opening the breaker`() = runTest {
+        repositories {
+            val cached = primeCyan()
+            http.failureCode = 500
+            http.forbiddenCategory = categoryIds.first()
+
+            val result = request { flags.refresh(FlagType.CYAN) } as FlagsResult.Success
+            assertEquals(cached.flags, result.flags)
+            assertEquals(cached.cachedAt, result.cachedAt)
+            assertEquals(FlagRefreshStatus.FAILED, result.refreshStatus)
+            assertEquals(4, result.coverage.categories.count { it.failure == FlagFailureKind.SERVER })
+            assertEquals(36, result.coverage.categories.count { it.failure == FlagFailureKind.BLOCKED })
+            assertBudget(RequestCounts(bucket = 5), peak = 5)
+
+            http.failureCode = null
+            http.forbiddenCategory = null
+            assertComplete(request { flags.refresh(FlagType.CYAN) }, FlagType.CYAN)
+            assertSweep("participated", catalogueCalls = 0, peak = 5)
+        }
+    }
+
+    @Test
     fun `Apache 403 with a warm catalogue stops after the first wave and retains pinned rows`() = runTest {
         repositories {
             val cached = primeCyan()
@@ -223,8 +249,10 @@ class FlagRequestBudgetTest {
             assertBlockedWarm(cached, bucketCalls = 0)
 
             assertEquals(FlagLookup.Unavailable, request { flags.findFlag(DISCUSSIONS, -1) })
+            assertBudget(RequestCounts(), peak = 0)
             assertTrue(request { flags.resolveFavorite(DISCUSSIONS, FAVORITE_PIN) }
                 .exceptionOrNull() is HfrRestBlockedException)
+            assertBudget(RequestCounts(), peak = 0)
             request { forum.refreshSubcategories(DISCUSSIONS) }
             assertNull(request { forum.observeCachedSubcategories(DISCUSSIONS).first() })
             assertBudget(RequestCounts(), peak = 0)
@@ -534,6 +562,7 @@ class FlagRequestBudgetTest {
         private lateinit var wave: CountDownLatch
         private val reachedOkHttp = ThreadLocal<Boolean>()
         var failureCode: Int? = null
+        var forbiddenCategory: Int? = null
 
         override fun dispatch(context: CoroutineContext, block: Runnable) {
             pending.add(block)
@@ -566,7 +595,9 @@ class FlagRequestBudgetTest {
             try {
                 wave.countDown()
                 check(wave.await(WORKER_TIMEOUT_SECONDS, TimeUnit.SECONDS)) { "HTTP wave did not reach OkHttp" }
-                val code = failureCode ?: if (entry.kind == Kind.OTHER) 404 else 200
+                val defaultCode = if (entry.kind == Kind.OTHER) 404 else 200
+                val code = if (forbiddenCategory != null && entry.cat == forbiddenCategory) 403
+                    else failureCode ?: defaultCode
                 val contentType = if (code == 403) "text/html; charset=iso-8859-1" else "application/json"
                 val body = when (code) {
                     403 -> APACHE_FORBIDDEN

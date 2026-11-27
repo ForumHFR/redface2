@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.flags
 import android.content.ClipboardManager
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -15,6 +16,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.CrashReportStack
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeService
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeState
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeStatus
 import fr.forumhfr.redface2.core.domain.flags.FlagsRefreshPolicy
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import io.mockk.coEvery
@@ -109,9 +111,29 @@ class DiagnosticsScreenTest {
         compose.onNodeWithText("n’a pas pu être supprimé", substring = true).assertDoesNotExist()
     }
 
-    private fun show(log: DiagnosticsLog) {
+    @Test
+    fun `test connection stays disabled until REST recovers even with no local reservation`() {
+        val blocked = MutableStateFlow(true)
+        val pauseMessage = "Test indisponible pendant la pause des requêtes HFR."
+        show(DiagnosticsLog(), blocked, NetworkProbeState(status = NetworkProbeStatus.BLOCKED))
+
+        compose.onNodeWithText("Tester la connexion").assertIsNotEnabled()
+        compose.onNodeWithText(pauseMessage).assertIsDisplayed()
+
+        compose.runOnIdle { blocked.value = false }
+
+        compose.onNodeWithText("Tester la connexion").assertIsEnabled()
+        compose.onNodeWithText(pauseMessage).assertDoesNotExist()
+    }
+
+    private fun show(
+        log: DiagnosticsLog,
+        blocked: MutableStateFlow<Boolean> = MutableStateFlow(false),
+        probeState: NetworkProbeState = NetworkProbeState(),
+    ) {
         val probe = mockk<NetworkProbeService> {
-            every { state } returns MutableStateFlow(NetworkProbeState())
+            every { state } returns MutableStateFlow(probeState)
+            every { probeBlocked } returns blocked
             coEvery { remainingSeconds() } returns 0L
         }
         val preferences = mockk<UserPreferencesRepository> {

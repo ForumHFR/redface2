@@ -69,7 +69,7 @@ class OkHttpNetworkProbeRunnerTest {
     @After
     fun stop() { server.shutdown() }
 
-    /** Healthy connection test: 36 → 16 anonymous GETs. */
+    /** Healthy connection test: 36 → 16 anonymous GETs, peak 20 → 10. */
     @Test
     fun `exact waves use simultaneous fresh anonymous calls even with an existing session`() = runBlocking {
         val barrier = AtomicReference(CountDownLatch(1))
@@ -149,6 +149,7 @@ class OkHttpNetworkProbeRunnerTest {
         assertTrue(waves.all { it.disturbed })
     }
 
+    /** The first wave times out on the server: 36 → 16 requests, 35 → 15 successes. */
     @Test
     fun `wave deadline cancels unfinished call before advancing to the next wave`() = runBlocking {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
@@ -161,16 +162,19 @@ class OkHttpNetworkProbeRunnerTest {
         assertEquals(16, server.requestCount)
     }
 
+    /** HTTP 408: 36 → 16 requests, with one exchange per call. */
     @Test
     fun `408 followed by 200 uses exactly 16 server connections and coherent timings`() = runBlocking {
         assertSingleExchange(408)
     }
 
+    /** HTTP 503 with Retry-After: 36 → 16 requests, with one exchange per call. */
     @Test
     fun `503 Retry-After zero followed by 200 uses exactly 16 server connections and coherent timings`() = runBlocking {
         assertSingleExchange(503)
     }
 
+    /** All DNS lookups fail: 36 → 16 failed calls, 0 → 0 HTTP requests. */
     @Test
     fun `DNS failures export a closed category without a connection errno or exception message`() = runBlocking {
         val client = base.newBuilder().proxy(Proxy.NO_PROXY)
@@ -212,6 +216,7 @@ class OkHttpNetworkProbeRunnerTest {
         }
     }
 
+    /** The first DNS lookup times out: 35 → 15 requests reach the server. */
     @Test(timeout = 20_000)
     fun `deadline releases refresh lease without waiting for blocked DNS worker`() = runBlocking {
         repeat(15) { server.enqueue(MockResponse().setBody("catalogue")) }

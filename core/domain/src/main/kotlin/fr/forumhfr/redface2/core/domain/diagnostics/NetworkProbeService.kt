@@ -35,7 +35,7 @@ class NetworkProbeService @Inject constructor(
     private val execution = Mutex()
     private val mutableState = MutableStateFlow(NetworkProbeState())
     val state = mutableState.asStateFlow()
-    val restBlockedUntil = restAvailability.blockedUntil
+    val probeBlocked = restAvailability.probeBlocked
 
     suspend fun remainingSeconds(): Long = reservations.remainingSeconds()
 

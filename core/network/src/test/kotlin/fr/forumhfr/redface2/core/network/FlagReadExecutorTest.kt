@@ -85,8 +85,9 @@ class FlagReadExecutorTest {
         assertNull(original.executeNanos)
     }
 
+    /** Default limit across sessions: 15 → 5 calls in flight. */
     @Test
-    fun `fifteen Calls across sessions retain their permits through the response lifetime`() = runTest {
+    fun `five calls across sessions retain their permits through the response lifetime`() = runTest {
         val close = CompletableDeferred<Unit>()
         val sessions = List(3) { FlagReadSession { testScheduler.currentTime * NANOS_PER_MS } }
         var running = 0
@@ -111,6 +112,7 @@ class FlagReadExecutorTest {
         assertTrue(sessions.sumOf { it.counters().getValue("permitWaitMs") } >= 250)
     }
 
+    /** With the response blocked through the deadline, only 15 → 5 calls start. */
     @Test
     fun `deadline cancels active transports and permit waiters at twelve virtual seconds`() = runTest {
         val session = FlagReadSession { testScheduler.currentTime * NANOS_PER_MS }

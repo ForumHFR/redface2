@@ -372,6 +372,7 @@ class RestFlagMappersTest {
         assertEquals(100217, favorite.topicId)
         assertTrue(favorite.isFavorite)
         assertFalse(favorite.hasUnread)
+        assertEquals(1, favorite.lastPosition)
         assertEquals(1, favorite.lastReadPage)
         assertEquals(28173029L, favorite.lastPostReadId)
     }

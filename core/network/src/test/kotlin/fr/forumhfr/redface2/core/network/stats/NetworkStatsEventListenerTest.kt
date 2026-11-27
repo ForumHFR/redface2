@@ -13,6 +13,8 @@ import fr.forumhfr.redface2.core.domain.diagnostics.NetworkTransport
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeDisturbance
 import fr.forumhfr.redface2.core.domain.diagnostics.NetworkProbeRunner
 import fr.forumhfr.redface2.core.domain.error.HfrRestBlockedException
+import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.stats.NetworkPeakGroup
 import fr.forumhfr.redface2.core.domain.stats.NetworkRequestCounts
 import fr.forumhfr.redface2.core.domain.stats.NetworkRole
@@ -25,6 +27,7 @@ import fr.forumhfr.redface2.core.domain.stats.NoRequestReason
 import fr.forumhfr.redface2.core.network.HfrApiClient
 import fr.forumhfr.redface2.core.network.HfrFavoriteSmileyClient
 import fr.forumhfr.redface2.core.network.HfrRestCircuitBreaker
+import fr.forumhfr.redface2.core.network.HfrRestCooldownStore
 import fr.forumhfr.redface2.core.network.di.NetworkClientListeners
 import fr.forumhfr.redface2.core.network.di.NetworkModule
 import fr.forumhfr.redface2.core.network.diagnostics.HfrCallTag
@@ -32,6 +35,7 @@ import fr.forumhfr.redface2.core.network.diagnostics.HfrEventListenerFactory
 import fr.forumhfr.redface2.core.network.diagnostics.HfrNetworkDiagnostics
 import fr.forumhfr.redface2.core.network.diagnostics.NetworkStatsListenerFactory
 import fr.forumhfr.redface2.core.network.diagnostics.OkHttpNetworkProbeRunner
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import java.io.IOException
@@ -301,11 +305,14 @@ class NetworkStatsEventListenerTest {
         assertTrue(log.entries.value.isEmpty())
     }
 
+    /** A REST read / healthy Diagnostics test during a cooldown: 1 / 36 → 0 / 0 requests. */
     @Test
     fun `REST cooldown leaves measured requests intact and records no rejected call`() = runBlocking {
         repeat(2) { server.enqueue(MockResponse().setResponseCode(429).setHeader("Retry-After", "1800")) }
+        server.enqueue(MockResponse().setBody("recovered"))
         val client = NetworkModule.provideAnonymousClient(base, listeners)
-        val breaker = HfrRestCircuitBreaker.inMemory()
+        val storage = mockk<HfrRestCooldownStore>(relaxUnitFun = true) { coEvery { read() } returns null }
+        val breaker = HfrRestCircuitBreaker(storage, clock, log)
         val api = HfrApiClient(client, client, url("/"), Dispatchers.IO, breaker = breaker)
         val probe = OkHttpNetworkProbeRunner(base, url("/"), Dispatchers.IO, traffic, foreground,
             NetworkDiagnosticsContextProvider { NetworkDiagnosticsContext() }, stats, "Redface2/test", breaker)
@@ -321,8 +328,32 @@ class NetworkStatsEventListenerTest {
         assertEquals(2, server.requestCount)
         assertEquals(2L, rows.requests.values.sumOf { it.requests })
         assertTrue(rows.noRequests.isEmpty())
+
+        clock.now = clock.instant().plusSeconds(1800)
+        assertTrue(runCatching { probe.run({}, {}) }.exceptionOrNull() is HfrRestBlockedException)
+        assertEquals(2, server.requestCount)
+        assertEquals("recovered", api.getCategories())
+        assertEquals(3, server.requestCount)
+        assertEquals(1L, buffer.drain().getValue(1).requests.values.sumOf { it.requests })
     }
 
+    @Test
+    fun `REST sends the user agent supplied to the base client`() = runBlocking {
+        val userAgent = "Redface2/0.72.0 (Android; prod; +https://github.com/ForumHFR/redface2)"
+        val preferences = mockk<UserPreferencesRepository> {
+            every { readProxyConfigForNetworkBootstrap() } returns ProxyConfig()
+        }
+        val client = NetworkModule.provideBaseClient(preferences, listeners, userAgent).newBuilder()
+            .proxy(Proxy.NO_PROXY).dns(base.dns).build()
+        val anonymous = NetworkModule.provideAnonymousClient(client, listeners)
+        val api = HfrApiClient(anonymous, anonymous, url("/"), Dispatchers.IO)
+        server.enqueue(MockResponse().setBody("catalogue"))
+
+        assertEquals("catalogue", api.getCategories())
+        assertEquals(userAgent, server.takeRequest().getHeader("User-Agent"))
+    }
+
+    /** Diagnostics with healthy server: 36 → 16 recorded probe requests. */
     @Test
     fun `probe exchanges count as PROBE and never disturb their own wave`() = runBlocking {
         val count = NetworkProbeRunner.WAVE_SIZES.sum()

@@ -34,8 +34,8 @@ class DiagnosticsViewModel @Inject constructor(
     var policySaveFailed by mutableStateOf(false)
         private set
     val probeState = probe.state
-    val restBlockedUntil = probe.restBlockedUntil
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
+    val probeBlocked = probe.probeBlocked
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), false)
     private val mutableCooldownSeconds = MutableStateFlow<Long?>(null)
     val cooldownSeconds = mutableCooldownSeconds.asStateFlow()
     private var probeJob: Job? = null

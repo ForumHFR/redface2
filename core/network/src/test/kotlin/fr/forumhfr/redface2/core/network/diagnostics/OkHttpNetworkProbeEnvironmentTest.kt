@@ -42,6 +42,7 @@ class OkHttpNetworkProbeEnvironmentTest {
     private val network = RecordingNetwork()
     private val traffic = HfrProbeTraffic()
 
+    /** Last wave with DNS failures: 20 → 10 failed calls, 0 → 0 HTTP requests. */
     @Test
     fun `wave of 10 in the background is disturbed even when every DNS lookup fails`() = runBlocking {
         foreground.foregrounded()

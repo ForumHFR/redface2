@@ -106,7 +106,8 @@ class FlagsViewModel @Inject constructor(
     // The SAME issue object is replayed with its snapshot (including filter/mutation copies).
     // Reference equality avoids repeating it without suppressing a later, identical failed fetch.
     private val reportedRefreshIssues = mutableMapOf<FlagType, FlagRefreshIssue>()
-    val restBlockedUntil = restAvailability.blockedUntil.stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
+    val restBlockedUntil = restAvailability.blockedUntil
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), null)
     private val refreshWarnings = MutableStateFlow<Map<FlagTab, FlagsRefreshWarning>>(emptyMap())
 
     /**
@@ -1199,6 +1200,7 @@ class FlagsViewModel @Inject constructor(
         var types = initialTypes
         var initialBatch = true
         var batchStartedNanos = startedNanos
+        var pullBatch = FlagPullBatch()
         val session = flagsSessionGeneration
         val pseudo = (authState.value as? AuthState.Authenticated)?.pseudo
         // One bounded aggregate for the whole queue: a Super pull can join an in-flight type and
@@ -1209,7 +1211,7 @@ class FlagsViewModel @Inject constructor(
             while (true) {
                 fetchRefreshBatch(
                     types, if (initialBatch) trigger else FlagRefreshTrigger.PULL,
-                    batchStartedNanos,
+                    batchStartedNanos, pullBatch,
                 ) { type, result ->
                     if (isCurrentFlagsSession(session, pseudo)) collectRefreshIssue(type, result, issueTypes)
                 }
@@ -1224,6 +1226,8 @@ class FlagsViewModel @Inject constructor(
                 pendingManualRefreshTypes.clear()
                 if (deferredLanding?.type in types) discardDeferredLanding()
                 val batchWarningTabs = types.associateWith { requireNotNull(pendingManualWarningTabs.remove(it)) }
+                // A joined Super pull also uses the sticky data of the type it already covered.
+                if (batchWarningTabs.values.none { FlagTab.Super in it }) pullBatch = FlagPullBatch()
                 generation = beginRefresh(
                     type = types.first(), coveredTypes = types.toSet(), warningTabs = batchWarningTabs,
                 )
@@ -1276,12 +1280,12 @@ class FlagsViewModel @Inject constructor(
         types: List<FlagType>,
         trigger: FlagRefreshTrigger,
         startedNanos: Long,
+        pullBatch: FlagPullBatch,
         onResult: (FlagType, FlagsResult) -> Unit,
     ) {
         val trace = refreshDiagnostics.begin(trigger, types, startedNanos)
         try {
-            val context = if (types.size > 1) trace + FlagPullBatch() else trace
-            withContext(context) {
+            withContext(trace + pullBatch) {
                 types.forEach { type ->
                     refreshingType = type
                     val result = flagRepository.refresh(type)

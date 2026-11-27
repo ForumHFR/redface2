@@ -11,9 +11,12 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -41,22 +44,29 @@ class HfrRestCircuitBreaker @Inject constructor(
     private var recovering = false
     private var firstRefusalRetryUntil: Instant? = null
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    override val blockedUntil = flow {
+    private val liveCooldown = flow {
         try {
             load()
         } catch (error: IOException) {
             logStorageError(error)
         }
-        emitAll(cooldown.transformLatest { pause ->
-            if (pause != null && clock.instant().isBefore(pause.until)) {
-                val wait = Duration.between(clock.instant(), pause.until)
-                emit(pause.until)
-                delay(wait.toMillis().coerceAtLeast(1))
-            }
-            emit(null)
-        })
+        emitAll(cooldown)
     }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override val blockedUntil: Flow<Instant?> = liveCooldown.transformLatest { pause ->
+        if (pause != null) {
+            var remaining = Duration.between(clock.instant(), pause.until)
+            if (remaining > Duration.ZERO) emit(pause.until)
+            while (remaining > Duration.ZERO) {
+                delay(remaining.toMillis().coerceAtLeast(1))
+                remaining = Duration.between(clock.instant(), pause.until)
+            }
+        }
+        emit(null)
+    }
+
+    override val probeBlocked: Flow<Boolean> = liveCooldown.map { it != null }.distinctUntilChanged()
 
     override suspend fun checkProbeAllowed() {
         load()

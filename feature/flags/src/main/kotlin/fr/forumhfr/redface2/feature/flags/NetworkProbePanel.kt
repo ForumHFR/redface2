@@ -48,7 +48,7 @@ internal fun NetworkProbePanel(
                 style = MaterialTheme.typography.bodySmall,
             )
         }
-        ProbeStatus(if (hfrBlocked) NetworkProbeStatus.BLOCKED else state.status)
+        ProbeStatus(state.status, hfrBlocked)
         state.waves.forEach { wave ->
             val successes = pluralStringResource(R.plurals.diagnostics_probe_successes, wave.successes, wave.successes)
             val failures = pluralStringResource(R.plurals.diagnostics_probe_failures, wave.failures, wave.failures)
@@ -92,12 +92,11 @@ private fun ProbeControls(running: Boolean, canStart: Boolean, onStart: () -> Un
 }
 
 @Composable
-private fun ProbeStatus(status: NetworkProbeStatus) {
-    val message = when (status) {
+private fun ProbeStatus(status: NetworkProbeStatus, hfrBlocked: Boolean) {
+    val message = if (hfrBlocked) R.string.diagnostics_probe_hfr_blocked else when (status) {
         NetworkProbeStatus.COMPLETE -> R.string.diagnostics_probe_complete
         NetworkProbeStatus.CANCELLED -> R.string.diagnostics_probe_cancelled
         NetworkProbeStatus.REFRESH_ACTIVE -> R.string.diagnostics_probe_refresh_active
-        NetworkProbeStatus.BLOCKED -> R.string.diagnostics_probe_hfr_blocked
         NetworkProbeStatus.STORAGE_ERROR -> R.string.diagnostics_probe_storage_error
         NetworkProbeStatus.FAILED -> R.string.diagnostics_probe_failed
         else -> null

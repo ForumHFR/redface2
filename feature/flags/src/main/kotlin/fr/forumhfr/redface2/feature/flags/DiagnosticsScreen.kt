@@ -80,7 +80,7 @@ internal fun DiagnosticsScreen(
     val entries by viewModel.entries.collectAsStateWithLifecycle()
     val crashReportClear by viewModel.crashReportClear.collectAsStateWithLifecycle()
     val cooldownSeconds by viewModel.cooldownSeconds.collectAsStateWithLifecycle()
-    val restBlockedUntil by viewModel.restBlockedUntil.collectAsStateWithLifecycle()
+    val probeBlocked by viewModel.probeBlocked.collectAsStateWithLifecycle()
     val probeState by viewModel.probeState.collectAsStateWithLifecycle()
     val policy by viewModel.policy.collectAsStateWithLifecycle()
     var showPolicy by remember { mutableStateOf(false) }
@@ -152,7 +152,7 @@ internal fun DiagnosticsScreen(
             CrashReportClearStatus(crashReportClear.status, viewModel::retryCrashReportClear)
             NetworkProbePanel(
                 probeState, cooldownSeconds, viewModel::startProbe, viewModel::cancelProbe,
-                hfrBlocked = restBlockedUntil != null,
+                hfrBlocked = probeBlocked,
             )
             TextButton(
                 onClick = { showPolicy = true },
