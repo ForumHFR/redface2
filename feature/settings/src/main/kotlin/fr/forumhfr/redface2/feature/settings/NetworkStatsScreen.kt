@@ -40,6 +40,7 @@ import fr.forumhfr.redface2.core.domain.stats.NetworkStatsDay
 import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.time.format.FormatStyle
 
 @Composable
@@ -73,7 +74,7 @@ internal fun NetworkStatsContent(
     val locale = resources.configuration.locales[0]
     val dateFormat = remember(locale) { DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(locale) }
     val sections = remember(resources, locale, state.metrics) { state.metrics.sections(resources) }
-    val days = remember(state.todayUtc, state.history) { state.historyRows() }
+    val days = remember(state.historyDates, state.history) { state.historyRows() }
     val maxDay = days.maxOfOrNull(HistoryRow::requests)?.coerceAtLeast(1L) ?: 1L
 
     Scaffold(
@@ -219,12 +220,13 @@ private fun NetworkStatsHistoryRow(day: HistoryRow, dateFormat: DateTimeFormatte
 private data class HistoryRow(val date: LocalDate, val requests: Long, val versions: Set<Int>)
 
 private fun NetworkStatsUiState.historyRows(): List<HistoryRow> {
-    val today = todayUtc ?: return emptyList()
+    val dates = historyDates ?: return emptyList()
     val recorded = history.associateBy(NetworkStatsDay::dayUtc)
-    return List(NETWORK_STATS_HISTORY_DAYS) { daysAgo ->
-        val date = today.minusDays(daysAgo.toLong())
+    val dayCount = ChronoUnit.DAYS.between(dates.start, dates.endInclusive).toInt() + 1
+    return List(dayCount) { daysAgo ->
+        val date = dates.endInclusive.minusDays(daysAgo.toLong())
         val totals = recorded[date]?.totals
-        HistoryRow(date, totals?.requests?.values?.sumOf { it.requests } ?: 0L, totals?.versionCodes().orEmpty())
+        HistoryRow(date, totals?.forumRequests() ?: 0L, totals?.versionCodes().orEmpty())
     }
 }
 

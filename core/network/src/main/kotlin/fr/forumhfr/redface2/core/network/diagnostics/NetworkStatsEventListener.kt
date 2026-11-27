@@ -13,13 +13,18 @@ import fr.forumhfr.redface2.core.domain.stats.NetworkTrigger
 import fr.forumhfr.redface2.core.domain.stats.NoRequestReason
 import java.io.IOException
 import java.net.ConnectException
+import java.net.InetSocketAddress
 import java.net.NoRouteToHostException
+import java.net.Proxy
+import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.time.Clock
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.net.ssl.SSLException
 import okhttp3.Call
 import okhttp3.EventListener
+import okhttp3.Protocol
 import okhttp3.Request
 import okhttp3.Response
 
@@ -58,6 +63,29 @@ internal class NetworkStatsEventListener(
     private var headersStart: NetworkStatsRecorder.CallRecording? = null
     private var exchange: Exchange? = null
     private var sent = false
+    // Fast fallback can race TCP attempts on other threads while handshaking on the call thread.
+    private val tcpTimeouts = ConcurrentHashMap.newKeySet<IOException>()
+    private val handshaking = ThreadLocal<Boolean>()
+
+    override fun secureConnectStart(call: Call) = record {
+        handshaking.set(true)
+    }
+
+    override fun connectEnd(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy, protocol: Protocol?) =
+        record { handshaking.remove() }
+
+    override fun connectFailed(
+        call: Call,
+        inetSocketAddress: InetSocketAddress,
+        proxy: Proxy,
+        protocol: Protocol?,
+        ioe: IOException,
+    ) = record {
+        // An HTTPS tunnel through an HTTP proxy can time out before secureConnectStart as well.
+        val mayBeTunnel = proxy.type() == Proxy.Type.HTTP && call.request().url.isHttps
+        if (ioe is SocketTimeoutException && handshaking.get() != true && !mayBeTunnel) tcpTimeouts.add(ioe)
+        handshaking.remove()
+    }
 
     override fun callStart(call: Call) = record {
         initial = recorder.started(snapshot())
@@ -76,7 +104,7 @@ internal class NetworkStatsEventListener(
             val url = request.url
             val duplex = request.body?.isDuplex() == true
             val wire = recording.sent(
-                NetworkStatsClassifier.target(url, role), NetworkStatsClassifier.peakGroup(url), trigger(request),
+                NetworkStatsClassifier.target(url, role), NetworkStatsClassifier.peakGroup(url, role), trigger(request),
             )
             exchange = Exchange(wire, duplex)
         }
@@ -86,14 +114,9 @@ internal class NetworkStatsEventListener(
         exchange?.bodyOut = byteCount
     }
 
-    override fun requestFailed(call: Call, ioe: IOException) = record {
-        exchange?.bodyFailed = true
-    }
-
     override fun responseHeadersEnd(call: Call, response: Response) = record {
         exchange?.apply {
             status = responseStatus(response.code)
-            if (!hasNoBody(response)) expectedBytes = response.header("Content-Length")?.toLongOrNull()
         }
     }
 
@@ -120,7 +143,6 @@ internal class NetworkStatsEventListener(
     }
 
     override fun callFailed(call: Call, ioe: IOException) = record {
-        exchange?.let { if (it.bodyIn == null) it.bodyFailed = true }
         finishExchange()
         if (!sent) {
             val request = call.request()
@@ -135,8 +157,7 @@ internal class NetworkStatsEventListener(
         if (last != null) {
             // OkHttp supplies no partial byte count on a failed body callback.
             val bytesRead = last.bodyIn ?: 0
-            val incomplete = last.bodyFailed || last.status == NetworkStatus.NO_RESPONSE ||
-                last.expectedBytes?.let { bytesRead < it } == true
+            val incomplete = last.bodyFailed && last.status != NetworkStatus.NO_RESPONSE
             last.wire.finish(last.status, NetworkRequestCounts(1, bytesRead, last.bodyOut, if (incomplete) 1 else 0))
         }
     }
@@ -160,6 +181,7 @@ internal class NetworkStatsEventListener(
     private fun noRequestReason(call: Call, error: IOException): NoRequestReason = when {
         call.isCanceled() -> NoRequestReason.CANCELLED
         error is UnknownHostException -> NoRequestReason.DNS
+        error is SocketTimeoutException && error in tcpTimeouts -> NoRequestReason.TCP_TIMEOUT
         error is ConnectException || error is NoRouteToHostException -> NoRequestReason.CONNECT
         error is SSLException -> NoRequestReason.TLS
         else -> NoRequestReason.OTHER_IO
@@ -175,9 +197,6 @@ internal class NetworkStatsEventListener(
         else -> NetworkStatus.NO_RESPONSE
     }
 
-    private fun hasNoBody(response: Response): Boolean =
-        response.request.method == "HEAD" || response.code == 304 || response.code == 204
-
     private inline fun record(block: () -> Unit) {
         // A statistics failure must never escape into OkHttp or print request details.
         runCatching(block)
@@ -188,7 +207,6 @@ internal class NetworkStatsEventListener(
         val duplex: Boolean,
     ) {
         var status = NetworkStatus.NO_RESPONSE
-        var expectedBytes: Long? = null
         var bodyIn: Long? = null
         var bodyOut = 0L
         var bodyFailed = false

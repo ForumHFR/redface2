@@ -40,12 +40,17 @@ class NetworkStatsBuffer @Inject constructor(
     override fun started(start: NetworkStatsStart): NetworkStatsRecorder.CallRecording? =
         if (isEnabled) Recording(generation.get(), start) else null
 
+    @Suppress("TooGenericExceptionCaught") // Recording must not affect the measured action.
     override fun record(action: NetworkAction, trigger: NetworkTrigger, count: Long) {
-        if (isEnabled && count > 0) addAction(clock.instant().epochSecond, action, trigger, count)
+        try {
+            if (isEnabled && count > 0) addAction(clock.instant().epochSecond, action, trigger, count)
+        } catch (_: Exception) {
+            // Drop the sample.
+        }
     }
 
     fun onVisibilityChanged(visibility: AppVisibility) {
-        if (isEnabled) foreground.update(visibility)
+        if (isEnabled) runCatching { foreground.enqueue(visibility) }
     }
 
     private fun addAction(epochSecond: Long, action: NetworkAction, trigger: NetworkTrigger, count: Long) {
@@ -66,29 +71,35 @@ class NetworkStatsBuffer @Inject constructor(
         foreground.reset()
     }
 
-    /** Lifecycle and writer checkpoints share a monotonic cursor; OkHttp never takes this lock. */
+    /** The lifecycle thread only timestamps and queues transitions. The writer owns the cursor. */
     private inner class ForegroundTime {
+        private val transitions = ConcurrentLinkedQueue<VisibilityTransition>()
         private var cursor: ForegroundCursor? = null
         private var remainderNanos = 0L
 
-        @Synchronized
-        fun update(visibility: AppVisibility) {
-            if (visibility == AppVisibility.FOREGROUND) {
-                if (cursor == null) {
-                    val wall = clock.instant().epochSecond
-                    cursor = ForegroundCursor(wall, elapsed.elapsedRealtimeNanos() - remainderNanos)
-                    addAction(wall, NetworkAction.FOREGROUND_SESSION, NetworkTrigger.NONE, 1L)
-                }
-            } else {
-                val now = elapsed.elapsedRealtimeNanos()
-                checkpointAt(now)
-                cursor?.let { remainderNanos = (now - it.elapsedNanos).coerceAtLeast(0L) }
-                cursor = null
-            }
+        fun enqueue(visibility: AppVisibility) {
+            transitions.add(
+                VisibilityTransition(visibility, clock.instant().epochSecond, elapsed.elapsedRealtimeNanos()),
+            )
         }
 
-        @Synchronized
-        fun checkpoint() = checkpointAt(elapsed.elapsedRealtimeNanos())
+        fun checkpoint() {
+            val now = elapsed.elapsedRealtimeNanos()
+            while (true) {
+                val next = transitions.poll() ?: break
+                if (next.visibility == AppVisibility.FOREGROUND) {
+                    if (cursor == null) {
+                        cursor = ForegroundCursor(next.wallSecond, next.elapsedNanos - remainderNanos)
+                        addAction(next.wallSecond, NetworkAction.FOREGROUND_SESSION, NetworkTrigger.NONE, 1L)
+                    }
+                } else {
+                    checkpointAt(next.elapsedNanos)
+                    cursor?.let { remainderNanos = (next.elapsedNanos - it.elapsedNanos).coerceAtLeast(0L) }
+                    cursor = null
+                }
+            }
+            checkpointAt(now)
+        }
 
         private fun checkpointAt(now: Long) {
             val start = cursor ?: return
@@ -104,13 +115,19 @@ class NetworkStatsBuffer @Inject constructor(
             cursor = ForegroundCursor(wall, start.elapsedNanos + elapsedSeconds * NANOS_PER_SECOND)
         }
 
-        @Synchronized
         fun reset() {
+            checkpoint()
             generation.set(Generation())
             remainderNanos = 0L
             cursor = cursor?.let { ForegroundCursor(clock.instant().epochSecond, elapsed.elapsedRealtimeNanos()) }
         }
     }
+
+    private data class VisibilityTransition(
+        val visibility: AppVisibility,
+        val wallSecond: Long,
+        val elapsedNanos: Long,
+    )
 
     private data class ForegroundCursor(val wallSecond: Long, val elapsedNanos: Long)
 

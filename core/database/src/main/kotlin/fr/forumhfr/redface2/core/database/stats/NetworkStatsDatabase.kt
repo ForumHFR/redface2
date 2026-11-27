@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import java.io.File
 
 @Database(
     entities = [
@@ -19,7 +20,9 @@ abstract class NetworkStatsDatabase : RoomDatabase() {
         const val DATABASE_NAME = "network_stats.db"
 
         fun open(context: Context): NetworkStatsDatabase =
-            Room.databaseBuilder(context, NetworkStatsDatabase::class.java, DATABASE_NAME)
+            Room.databaseBuilder(
+                context, NetworkStatsDatabase::class.java, File(context.noBackupFilesDir, DATABASE_NAME).absolutePath,
+            )
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .fallbackToDestructiveMigrationOnDowngrade(dropAllTables = true)
                 .build()

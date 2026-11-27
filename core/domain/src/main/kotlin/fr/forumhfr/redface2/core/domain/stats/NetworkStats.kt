@@ -17,9 +17,9 @@ enum class NetworkRole { AUTH, ANON, MUTATION, UPLOAD, IMAGE, SMILEY, PROBE }
 
 enum class NetworkStatus { SUCCESS, REDIRECT, FORBIDDEN, RATE_LIMITED, OTHER_CLIENT_ERROR, SERVER_ERROR, NO_RESPONSE }
 
-enum class NoRequestReason { CANCELLED, DNS, CONNECT, TLS, OTHER_IO }
+enum class NoRequestReason { CANCELLED, DNS, CONNECT, TCP_TIMEOUT, TLS, OTHER_IO }
 
-enum class NetworkPeakGroup { FORUM, FORUM_IMAGES }
+enum class NetworkPeakGroup { FORUM, FORUM_IMAGES, PROBE }
 
 enum class NetworkTrigger(val flags: FlagRefreshTrigger? = null) {
     LAUNCH(FlagRefreshTrigger.LAUNCH),
@@ -35,7 +35,7 @@ enum class NetworkTrigger(val flags: FlagRefreshTrigger? = null) {
     companion object {
         private val byFlag = entries.filter { it.flags != null }.associateBy { it.flags }
 
-        fun fromFlags(trigger: FlagRefreshTrigger): NetworkTrigger = byFlag.getValue(trigger)
+        fun fromFlags(trigger: FlagRefreshTrigger): NetworkTrigger = byFlag[trigger] ?: NONE
     }
 }
 
@@ -93,6 +93,15 @@ fun interface NetworkActionRecorder {
     companion object {
         val None = NetworkActionRecorder { _, _, _ -> }
     }
+}
+
+/** Keep a failing recorder out of the operation whose outcome it measures. */
+fun NetworkActionRecorder.recordSafely(
+    action: NetworkAction,
+    trigger: NetworkTrigger = NetworkTrigger.NONE,
+    count: Long = 1,
+) {
+    if (count > 0) runCatching { record(action, trigger, count) }
 }
 
 data class NetworkStatsTotals(

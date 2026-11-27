@@ -50,13 +50,15 @@ class NetworkStatsClassifierTest {
     }
 
     @Test
-    fun `peaks group forum and forum images by destination`() {
-        assertEquals(NetworkPeakGroup.FORUM,
-            NetworkStatsClassifier.peakGroup("https://forum.hardware.fr/webservices/rest_api.php".toHttpUrl()))
-        assertEquals(NetworkPeakGroup.FORUM,
-            NetworkStatsClassifier.peakGroup("https://forum.hardware.fr/images/smiley.gif".toHttpUrl()))
-        assertEquals(NetworkPeakGroup.FORUM_IMAGES,
-            NetworkStatsClassifier.peakGroup("https://forum-images.hardware.fr/path".toHttpUrl()))
-        assertNull(NetworkStatsClassifier.peakGroup("https://image.invalid/path".toHttpUrl()))
+    fun `peaks separate the probe from other requests to the same host`() {
+        val forum = "https://forum.hardware.fr/webservices/rest_api.php".toHttpUrl()
+        val forumImage = "https://forum.hardware.fr/images/smiley.gif".toHttpUrl()
+        val imageHost = "https://forum-images.hardware.fr/path".toHttpUrl()
+        val thirdParty = "https://image.invalid/path".toHttpUrl()
+        assertEquals(NetworkPeakGroup.FORUM, NetworkStatsClassifier.peakGroup(forum, NetworkRole.AUTH))
+        assertEquals(NetworkPeakGroup.PROBE, NetworkStatsClassifier.peakGroup(forum, NetworkRole.PROBE))
+        assertEquals(NetworkPeakGroup.FORUM, NetworkStatsClassifier.peakGroup(forumImage, NetworkRole.IMAGE))
+        assertEquals(NetworkPeakGroup.FORUM_IMAGES, NetworkStatsClassifier.peakGroup(imageHost, NetworkRole.IMAGE))
+        assertNull(NetworkStatsClassifier.peakGroup(thirdParty, NetworkRole.IMAGE))
     }
 }

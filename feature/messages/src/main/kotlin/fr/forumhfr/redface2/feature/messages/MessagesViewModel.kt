@@ -10,10 +10,12 @@ import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageReadPositionSeeder
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.stats.NetworkAction
 import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.recordSafely
 import fr.forumhfr.redface2.core.model.AuthState
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -124,7 +126,6 @@ class MessagesViewModel @Inject constructor(
             clearPrivateState()
             return
         }
-        networkActions.record(NetworkAction.LIST)
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             _state.update { current ->
@@ -136,6 +137,7 @@ class MessagesViewModel @Inject constructor(
             }
             try {
                 val result = repository.getPrivateMessageList(page = page)
+                ensureActive()
                 _state.update {
                     it.copy(
                         mode = MessagesUiState.Mode.Content(result.items),
@@ -147,6 +149,7 @@ class MessagesViewModel @Inject constructor(
                         networkLoadGeneration = it.networkLoadGeneration + 1,
                     )
                 }
+                networkActions.recordSafely(NetworkAction.LIST)
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (

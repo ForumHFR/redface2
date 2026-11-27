@@ -11,13 +11,14 @@ import fr.forumhfr.redface2.core.domain.stats.NetworkStatsTotals
 import fr.forumhfr.redface2.core.domain.stats.NetworkStatus
 import fr.forumhfr.redface2.core.domain.stats.NetworkTarget
 import fr.forumhfr.redface2.core.domain.stats.NetworkTrigger
+import fr.forumhfr.redface2.core.domain.stats.NoRequestReason
 
 internal enum class NetworkStatsTraffic { API, PAGES, IMAGES, THIRD_PARTIES, PROBE }
 
 internal data class NetworkStatsMetrics(
     val traffic: Map<NetworkStatsTraffic, Long> = emptyMap(),
     val errors: Map<NetworkStatus, Long> = emptyMap(),
-    val unsent: Map<NetworkKind, Long> = emptyMap(),
+    val unsent: Map<Pair<NoRequestReason, NetworkKind>, Long> = emptyMap(),
     val transfers: NetworkRequestCounts = NetworkRequestCounts(),
     val peaks: Map<NetworkPeakGroup, NetworkPeaks> = emptyMap(),
     val actions: Map<NetworkAction, Long> = emptyMap(),
@@ -41,9 +42,11 @@ internal fun NetworkStatsTotals.toMetrics(): NetworkStatsMetrics {
     return NetworkStatsMetrics(
         traffic = requests.entries.groupingBy { it.key.dimensions.target.traffic() }
             .fold(0L) { count, (_, row) -> count + row.requests },
-        errors = requests.entries.groupingBy { it.key.status }
+        errors = requests.entries.filter { it.key.dimensions.target.isForumPageOrApi() }
+            .groupingBy { it.key.status }
             .fold(0L) { count, (_, row) -> count + row.requests },
-        unsent = noRequests.entries.groupingBy { it.key.dimensions.network }
+        unsent = noRequests.entries.filter { it.key.dimensions.target.isForumPageOrApi() }
+            .groupingBy { it.key.reason to it.key.dimensions.network }
             .fold(0L) { count, (_, value) -> count + value },
         transfers = requests.values.fold(NetworkRequestCounts(), NetworkRequestCounts::plus),
         peaks = peaks.entries.groupingBy { it.key.group }
@@ -72,7 +75,16 @@ private fun NetworkTarget.traffic(): NetworkStatsTraffic = when (this) {
     NetworkTarget.PROBE -> NetworkStatsTraffic.PROBE
 }
 
-/** Builds the clipboard content from complete UTC day aggregates, using the same labels as the screen. */
+private fun NetworkTarget.isForumPageOrApi(): Boolean =
+    when (traffic()) {
+        NetworkStatsTraffic.API, NetworkStatsTraffic.PAGES -> true
+        else -> false
+    }
+
+internal fun NetworkStatsTotals.forumRequests(): Long =
+    requests.entries.sumOf { (key, counts) -> if (key.dimensions.target.isForumPageOrApi()) counts.requests else 0L }
+
+/** Builds the clipboard content from the same UTC date aggregates and labels as the screen. */
 internal fun Resources.formatNetworkStatsSummary(days: List<NetworkStatsDay>): String =
     days.sortedByDescending { it.dayUtc }.joinToString("\n\n") { day ->
         val dayMetrics = day.totals.toMetrics()
@@ -104,13 +116,28 @@ private fun NetworkStatsMetrics.trafficLines(resources: Resources) = with(resour
             R.string.network_stats_errors, errors[NetworkStatus.FORBIDDEN] ?: 0L,
             errors[NetworkStatus.RATE_LIMITED] ?: 0L, errors[NetworkStatus.SERVER_ERROR] ?: 0L,
         ),
-        getString(
-            R.string.network_stats_unsent, unsent[NetworkKind.WIFI] ?: 0L, unsent[NetworkKind.CELLULAR] ?: 0L,
-            unsent[NetworkKind.OTHER] ?: 0L, unsent[NetworkKind.UNKNOWN] ?: 0L,
-        ),
+        getString(R.string.network_stats_no_response, errors[NetworkStatus.NO_RESPONSE] ?: 0L),
         getString(R.string.network_stats_bytes, transfers.bodyBytesIn, transfers.bodyBytesOut),
         getString(R.string.network_stats_incomplete, transfers.incompleteBodies),
-    )
+    ) + unsentLines(resources)
+}
+
+private fun NetworkStatsMetrics.unsentLines(resources: Resources) = with(resources) {
+    NoRequestReason.entries.map { reason ->
+        val label = when (reason) {
+            NoRequestReason.CANCELLED -> R.string.network_stats_unsent_cancelled
+            NoRequestReason.DNS -> R.string.network_stats_unsent_dns
+            NoRequestReason.CONNECT -> R.string.network_stats_unsent_connect
+            NoRequestReason.TCP_TIMEOUT -> R.string.network_stats_unsent_tcp_timeout
+            NoRequestReason.TLS -> R.string.network_stats_unsent_tls
+            NoRequestReason.OTHER_IO -> R.string.network_stats_unsent_other
+        }
+        getString(
+            R.string.network_stats_unsent, getString(label),
+            unsent[reason to NetworkKind.WIFI] ?: 0L, unsent[reason to NetworkKind.CELLULAR] ?: 0L,
+            unsent[reason to NetworkKind.OTHER] ?: 0L, unsent[reason to NetworkKind.UNKNOWN] ?: 0L,
+        )
+    }
 }
 
 private fun NetworkStatsMetrics.peakLines(resources: Resources) = NetworkPeakGroup.entries.map { group ->
@@ -118,6 +145,7 @@ private fun NetworkStatsMetrics.peakLines(resources: Resources) = NetworkPeakGro
     val label = when (group) {
         NetworkPeakGroup.FORUM -> R.string.network_stats_peak_forum
         NetworkPeakGroup.FORUM_IMAGES -> R.string.network_stats_peak_images
+        NetworkPeakGroup.PROBE -> R.string.network_stats_peak_probe
     }
     resources.getString(label, peak.perSecond, peak.perMinute, peak.inFlight)
 }

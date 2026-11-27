@@ -2,13 +2,18 @@ package fr.forumhfr.redface2.core.domain.stats
 
 import fr.forumhfr.redface2.core.domain.diagnostics.AppVisibility
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -20,6 +25,27 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class NetworkStatsBufferTest {
     private val buffer = NetworkStatsBuffer(NetworkStatsProcess(72, isMain = true))
+
+    @Test
+    fun `all current flag triggers have an explicit statistics mapping`() {
+        FlagRefreshTrigger.entries.forEach { trigger ->
+            assertEquals(trigger, NetworkTrigger.fromFlags(trigger).flags)
+        }
+    }
+
+    @Test
+    fun `a failing clock drops the action without failing the caller`() = runTest {
+        val clock = object : Clock() {
+            override fun getZone() = ZoneOffset.UTC
+            override fun withZone(zone: java.time.ZoneId) = this
+            override fun instant(): Instant = error("clock unavailable")
+        }
+        val recorder = NetworkStatsBuffer(NetworkStatsProcess(72, isMain = true), clock)
+
+        recorder.record(NetworkAction.LIST)
+
+        assertTrue(recorder.drain().isEmpty())
+    }
 
     @Test
     fun `one minute and second survive a drain and the hour boundary starts new windows`() = runTest {
@@ -93,6 +119,36 @@ class NetworkStatsBufferTest {
         secondary.onVisibilityChanged(AppVisibility.FOREGROUND)
         assertTrue(secondary.drain().isEmpty())
         assertTrue(NetworkStatsProcess.forApp(72, mainPackage, mainPackage).isMain)
+    }
+
+    @Test
+    fun `a visibility transition can enqueue while the writer is checkpointing`() {
+        val checkpointing = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val writer = Executors.newSingleThreadExecutor { Thread(it, "stats-test-writer") }
+        val lifecycle = Executors.newSingleThreadExecutor()
+        val recorder = NetworkStatsBuffer(
+            NetworkStatsProcess(72, isMain = true),
+            elapsed = DiagnosticsClock {
+                if (Thread.currentThread().name == "stats-test-writer") {
+                    checkpointing.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                }
+                0L
+            },
+        )
+        try {
+            recorder.onVisibilityChanged(AppVisibility.FOREGROUND)
+            val drain = writer.submit { runBlocking { recorder.drain() } }
+            check(checkpointing.await(2, TimeUnit.SECONDS))
+            lifecycle.submit { recorder.onVisibilityChanged(AppVisibility.BACKGROUND) }.get(2, TimeUnit.SECONDS)
+            release.countDown()
+            drain.get(2, TimeUnit.SECONDS)
+        } finally {
+            release.countDown()
+            writer.shutdownNow()
+            lifecycle.shutdownNow()
+        }
     }
 
     @Test

@@ -15,6 +15,9 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Test
@@ -76,6 +79,30 @@ class AndroidNetworkDiagnosticsMonitorTest {
         verify(exactly = 1) { manager.getNetworkCapabilities(any()) }
         verify(exactly = 1) { manager.registerDefaultNetworkCallback(any()) }
         verify(exactly = 0) { manager.unregisterNetworkCallback(any<ConnectivityManager.NetworkCallback>()) }
+    }
+
+    @Test
+    fun `observation returns while statistics startup is waiting for connectivity`() {
+        val reading = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        every { manager.activeNetwork } answers {
+            reading.countDown()
+            check(release.await(5, TimeUnit.SECONDS))
+            network
+        }
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val startup = executor.submit { provider.startNetworkKindTracking() }
+            check(reading.await(2, TimeUnit.SECONDS))
+            val subscription = executor.submit { provider.observe { }.close() }
+            subscription.get(2, TimeUnit.SECONDS)
+            release.countDown()
+            startup.get(2, TimeUnit.SECONDS)
+            verify(exactly = 1) { manager.registerDefaultNetworkCallback(any()) }
+        } finally {
+            release.countDown()
+            executor.shutdownNow()
+        }
     }
 
     @Test

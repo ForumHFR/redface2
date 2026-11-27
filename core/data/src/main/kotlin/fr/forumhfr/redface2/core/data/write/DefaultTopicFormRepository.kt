@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.domain.stats.NetworkAction
 import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.recordSafely
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
 import fr.forumhfr.redface2.core.model.write.NewTopicContext
 import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
@@ -137,7 +138,7 @@ class DefaultTopicFormRepository @Inject constructor(
                 val responseHtml = hfrClient.submitEditPost(formBody)
                 val outcome = replySubmitResponseParser.parse(responseHtml)
                 if (outcome is ReplySubmitResult.Success) {
-                    networkActions.record(NetworkAction.WRITE)
+                    networkActions.recordSafely(NetworkAction.WRITE)
                     smileyUsageRecorder.record(
                         smileyUsageOwner, formBody, options.smileyDisabled, form.initialContent,
                     )
@@ -348,6 +349,7 @@ class DefaultTopicFormRepository @Inject constructor(
                 // possible because HFR never exposes the freshly-allocated id.
                 when (val outcome = replySubmitResponseParser.parse(responseHtml)) {
                     is ReplySubmitResult.Success -> {
+                        networkActions.recordSafely(NetworkAction.WRITE)
                         smileyUsageRecorder.record(
                             smileyUsageOwner, formBody, options.smileyDisabled,
                         )

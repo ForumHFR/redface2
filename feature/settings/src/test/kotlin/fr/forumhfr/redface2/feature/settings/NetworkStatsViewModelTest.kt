@@ -12,6 +12,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -29,7 +30,8 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class NetworkStatsViewModelTest {
     private val now = Instant.parse("2026-11-27T12:15:00Z")
-    private val fromHistory = Instant.parse("2026-10-29T00:00:00Z")
+    private val until = Instant.parse("2026-11-27T13:00:00Z")
+    private val fromHistory = Instant.parse("2026-10-28T13:00:00Z")
     private val clock = Clock.fixed(now, ZoneOffset.UTC)
     private val dailyTotals = NetworkStatsTotals(actions = mapOf(NetworkActionKey(72, NetworkAction.TOPIC_PAGE) to 9L))
     private val periodTotals = NetworkStatsTotals(actions = mapOf(NetworkActionKey(72, NetworkAction.TOPIC_PAGE) to 2L))
@@ -46,20 +48,26 @@ class NetworkStatsViewModelTest {
     }
 
     @Test
-    fun `period selection changes only the metrics window and copy uses complete UTC days`() = runTest {
+    fun `periods cover exact hourly buckets and the copied history uses the same month`() = runTest {
         val repository = FakeRepository()
         val model = NetworkStatsViewModel(repository, clock)
 
         assertFalse(model.state.value.loading)
         assertEquals(NetworkStatsPeriod.DAY, model.state.value.period)
         for (period in NetworkStatsPeriod.entries) {
+            val before = repository.ranges.size
             model.submit(NetworkStatsIntent.SelectPeriod(period))
-            assertEquals(listOf(fromHistory to now, now.minus(period.duration) to now), repository.ranges.takeLast(2))
-            assertEquals(2L, model.state.value.metrics.actions[NetworkAction.TOPIC_PAGE])
+            val historyRange = fromHistory to until
+            val selectedRange = until.minus(period.duration) to until
+            assertEquals(listOf(historyRange, selectedRange).distinct(), repository.ranges.drop(before))
+            assertEquals(period.duration.toHours(), ChronoUnit.HOURS.between(selectedRange.first, selectedRange.second))
+            val expected = if (period == NetworkStatsPeriod.MONTH) 9L else 2L
+            assertEquals(expected, model.state.value.metrics.actions[NetworkAction.TOPIC_PAGE])
             assertEquals(setOf(71, 72), model.state.value.versions)
             assertEquals(history, model.state.value.history)
         }
-        assertEquals(now.minus(Duration.ofDays(30)) to now, repository.ranges.last())
+        assertEquals(fromHistory to until, repository.ranges.last())
+        assertEquals(LocalDate.parse("2026-10-28")..LocalDate.parse("2026-11-27"), model.state.value.historyDates)
 
         model.effects.test {
             model.submit(NetworkStatsIntent.CopySummary)
@@ -90,7 +98,7 @@ class NetworkStatsViewModelTest {
         assertNull(model.state.value.recordedSince)
         assertTrue(model.state.value.history.isEmpty())
         assertEquals(NetworkStatsPeriod.WEEK, model.state.value.period)
-        assertEquals(now.minus(Duration.ofDays(7)) to now, repository.ranges.last())
+        assertEquals(until.minus(Duration.ofDays(7)) to until, repository.ranges.last())
     }
 
     @Test

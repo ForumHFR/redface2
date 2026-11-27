@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.database.stats
 
 import android.content.Context
 import androidx.room.Room
+import java.io.File
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -106,8 +107,29 @@ class NetworkStatsDaoTest {
     }
 
     @Test
-    fun `opening version one over a future version recreates the statistics database`() = runTest {
+    fun `the opened database and WAL files live under noBackupFilesDir`() = runTest {
         val name = NetworkStatsDatabase.DATABASE_NAME
+        val file = File(context.noBackupFilesDir, name)
+        try {
+            NetworkStatsDatabase.open(context).withDatabase { database ->
+                database.openHelper.setWriteAheadLoggingEnabled(true)
+                database.statsDao().merge(batch(27))
+
+                val openedPath = requireNotNull(database.openHelper.readableDatabase.path)
+                assertEquals(file.canonicalPath, File(openedPath).canonicalPath)
+                for (suffix in listOf("", "-shm", "-wal")) {
+                    assertTrue(File(context.noBackupFilesDir, name + suffix).isFile)
+                    assertTrue(!context.getDatabasePath(name + suffix).exists())
+                }
+            }
+        } finally {
+            context.deleteDatabase(file.absolutePath)
+        }
+    }
+
+    @Test
+    fun `opening version one over a future version recreates the statistics database`() = runTest {
+        val name = File(context.noBackupFilesDir, NetworkStatsDatabase.DATABASE_NAME).absolutePath
         context.deleteDatabase(name)
         try {
             NetworkStatsDatabase.open(context).withDatabase { it.statsDao().merge(batch(27)) }

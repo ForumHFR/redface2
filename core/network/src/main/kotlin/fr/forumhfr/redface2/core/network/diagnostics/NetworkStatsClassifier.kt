@@ -19,9 +19,10 @@ internal object NetworkStatsClassifier {
         else -> NetworkTarget.OTHER_HOST
     }
 
-    fun peakGroup(url: HttpUrl): NetworkPeakGroup? = when (url.host) {
-        FORUM_IMAGES_HOST -> NetworkPeakGroup.FORUM_IMAGES
-        FORUM_HOST -> NetworkPeakGroup.FORUM
+    fun peakGroup(url: HttpUrl, role: NetworkRole): NetworkPeakGroup? = when {
+        role == NetworkRole.PROBE -> NetworkPeakGroup.PROBE
+        url.host == FORUM_IMAGES_HOST -> NetworkPeakGroup.FORUM_IMAGES
+        url.host == FORUM_HOST -> NetworkPeakGroup.FORUM
         else -> null
     }
 

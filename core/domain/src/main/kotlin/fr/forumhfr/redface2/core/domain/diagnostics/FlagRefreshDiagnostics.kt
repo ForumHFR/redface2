@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
 import fr.forumhfr.redface2.core.domain.stats.NetworkAction
 import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
 import fr.forumhfr.redface2.core.domain.stats.NetworkTrigger
+import fr.forumhfr.redface2.core.domain.stats.recordSafely
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.FlagType
 import java.util.concurrent.atomic.AtomicBoolean
@@ -51,7 +52,7 @@ class FlagRefreshDiagnostics @Inject constructor(
         types: List<FlagType>,
         startedNanos: Long = System.nanoTime(),
     ): FlagRefreshTrace {
-        networkActions.record(
+        networkActions.recordSafely(
             NetworkAction.FLAG_REFRESH_ADMITTED, NetworkTrigger.fromFlags(trigger), types.size.toLong(),
         )
         val environment = FlagRefreshEnvironment(foreground, networkContext, clock, activity.begin())
@@ -75,8 +76,9 @@ class FlagRefreshDiagnostics @Inject constructor(
         throttled: Boolean,
         deferredTypes: List<FlagType> = emptyList(),
     ) {
-        networkActions.record(
-            NetworkAction.FLAG_REFRESH_IGNORED, NetworkTrigger.fromFlags(trigger), types.size.toLong(),
+        networkActions.recordSafely(
+            NetworkAction.FLAG_REFRESH_IGNORED, NetworkTrigger.fromFlags(trigger),
+            (types.size - deferredTypes.size).toLong(),
         )
         log.record(DiagnosticsLog.Level.INFO, TAG,
             "trigger=${trigger.label} types=${types.joinToString { it.name }} " +

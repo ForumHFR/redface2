@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
 import fr.forumhfr.redface2.core.domain.stats.NetworkAction
 import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.recordSafely
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.PrivateMessageEditContext
@@ -155,7 +156,7 @@ class DefaultEditPostRepository @Inject constructor(
                 val responseHtml = hfrClient.submitEditPost(formBody)
                 val outcome = replySubmitResponseParser.parse(responseHtml)
                 if (outcome is ReplySubmitResult.Success) {
-                    networkActions.record(NetworkAction.WRITE)
+                    networkActions.recordSafely(NetworkAction.WRITE)
                     smileyUsageRecorder.record(
                         smileyUsageOwner, formBody, options.smileyDisabled, form.initialContent,
                     )
@@ -227,7 +228,7 @@ class DefaultEditPostRepository @Inject constructor(
         val owner = smileyUsageRecorder.captureOwner()
         val parsed = replySubmitResponseParser.parse(hfrClient.submitEditPost(body))
         val outcome = if (parsed is ReplySubmitResult.Success) {
-            networkActions.record(NetworkAction.WRITE)
+            networkActions.recordSafely(NetworkAction.WRITE)
             smileyUsageRecorder.record(owner, body, options.smileyDisabled, form.initialContent)
             // The private refresh has no `sujet_` segment (fixture private_message_edit_success_response):
             // thread and page come from the edit target, which already owns these coordinates.

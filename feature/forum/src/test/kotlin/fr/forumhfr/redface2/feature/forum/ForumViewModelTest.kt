@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -42,18 +44,45 @@ class ForumViewModelTest {
     }
 
     @Test
-    fun `initial categories load and manual refresh each count one list intention`() = runTest {
+    fun `categories count first content and successful refresh but not errors or resubscription`() = runTest {
+        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
         val repo = FakeForumRepository()
         val actions = mutableListOf<NetworkAction>()
         val vm = ForumViewModel(repo, NetworkActionRecorder { action, _, _ -> actions += action })
+        val error = IllegalStateException("offline")
 
-        assertTrue(actions.isEmpty())
         vm.uiState.test {
             assertEquals(ForumUiState.Loading, awaitItem())
+            repo.emitCategories(ForumResult.Failure(error))
+            assertEquals(ForumUiState.Error(error.message), awaitItem())
+            assertTrue(actions.isEmpty())
+
+            vm.refresh()
             repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES))
             assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES), awaitItem())
             assertEquals(listOf(NetworkAction.LIST), actions)
+            repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES.take(1)))
+            assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES.take(1)), awaitItem())
+            assertEquals(listOf(NetworkAction.LIST), actions)
+
             vm.refresh()
+            repo.emitCategories(ForumResult.Failure(error))
+            assertEquals(ForumUiState.Error(error.message), awaitItem())
+            assertEquals(listOf(NetworkAction.LIST), actions)
+
+            vm.refresh()
+            repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES))
+            assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES), awaitItem())
+            assertEquals(listOf(NetworkAction.LIST, NetworkAction.LIST), actions)
+            cancelAndIgnoreRemainingEvents()
+        }
+        advanceTimeBy(6_000)
+        runCurrent()
+
+        vm.uiState.test {
+            assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES), awaitItem())
+            repo.emitCategories(ForumResult.Success(SAMPLE_CATEGORIES.take(1)))
+            assertEquals(ForumUiState.Content(SAMPLE_CATEGORIES.take(1)), awaitItem())
             assertEquals(listOf(NetworkAction.LIST, NetworkAction.LIST), actions)
             cancelAndIgnoreRemainingEvents()
         }

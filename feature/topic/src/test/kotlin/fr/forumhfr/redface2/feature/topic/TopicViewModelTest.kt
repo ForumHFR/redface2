@@ -1152,6 +1152,7 @@ class TopicViewModelTest {
 
         viewModel.state.test {
             assertMode<TopicUiState.Mode.Loading>(awaitItem())
+            assertTrue(actions.isEmpty())
 
             controlled.emit(TopicPageEmission(cached, provisional = true))
             val provisional = assertMode<TopicUiState.Mode.Loaded>(awaitItem())
@@ -1169,7 +1170,44 @@ class TopicViewModelTest {
         assertEquals(listOf(2), repository.prefetches)
         assertEquals(listOf(NetworkAction.TOPIC_PAGE), actions)
         viewModel.switchToPage(2)
+        assertEquals(listOf(NetworkAction.TOPIC_PAGE), actions)
+        controlled.emit(TopicPageEmission(fakeTopic(page = 2, totalPages = 5), provisional = false))
         assertEquals(listOf(NetworkAction.TOPIC_PAGE, NetworkAction.TOPIC_PAGE), actions)
+    }
+
+    @Test
+    fun `failed and superseded topic loads count only the page that reaches the screen`() = runTest {
+        var attempts = 0
+        var retryCancelled = false
+        val repository = FakeStreamingEmissionTopicRepository(flow {
+            when (++attempts) {
+                1 -> throw IOException("offline")
+                2 -> try {
+                    kotlinx.coroutines.awaitCancellation()
+                } finally {
+                    retryCancelled = true
+                }
+                else -> emit(TopicPageEmission(fakeTopic(page = 2, totalPages = 5), provisional = false))
+            }
+        })
+        val actions = mutableListOf<NetworkAction>()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            networkActions = NetworkActionRecorder { action, _, _ -> actions += action },
+        )
+        assertMode<TopicUiState.Mode.Error>(viewModel.state.value)
+        assertTrue(actions.isEmpty())
+
+        viewModel.send(TopicIntent.Retry)
+        assertMode<TopicUiState.Mode.Loading>(viewModel.state.value)
+        assertTrue(actions.isEmpty())
+        viewModel.switchToPage(2)
+
+        assertTrue(retryCancelled)
+        assertEquals(2, assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.page)
+        assertEquals(listOf(NetworkAction.TOPIC_PAGE), actions)
     }
 
     @Test

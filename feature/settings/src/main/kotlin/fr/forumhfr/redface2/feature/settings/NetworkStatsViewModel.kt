@@ -10,6 +10,7 @@ import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
+import java.time.temporal.ChronoUnit
 import javax.inject.Inject
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -31,7 +32,7 @@ internal data class NetworkStatsUiState(
     val versions: Set<Int> = emptySet(),
     val metrics: NetworkStatsMetrics = NetworkStatsMetrics(),
     val history: List<NetworkStatsDay> = emptyList(),
-    val todayUtc: LocalDate? = null,
+    val historyDates: ClosedRange<LocalDate>? = null,
     val dialog: NetworkStatsDialog? = null,
     val resetFailed: Boolean = false,
 ) {
@@ -98,19 +99,22 @@ internal class NetworkStatsViewModel @Inject constructor(
     }
 
     private suspend fun load(period: NetworkStatsPeriod) {
-        val now = clock.instant()
-        val today = now.atOffset(ZoneOffset.UTC).toLocalDate()
-        val historyStart = today.minusDays(NETWORK_STATS_HISTORY_DAYS - 1L).atStartOfDay().toInstant(ZoneOffset.UTC)
-        val history = repository.read(historyStart, now)
-        val from = now.minus(period.duration)
-        val selected = if (from == historyStart) history else repository.read(from, now)
+        // Include the current UTC bucket and count backwards in whole stored hours.
+        val currentHour = clock.instant().truncatedTo(ChronoUnit.HOURS)
+        val until = currentHour.plus(1, ChronoUnit.HOURS)
+        val historyStart = until.minus(NetworkStatsPeriod.MONTH.duration)
+        val history = repository.read(historyStart, until)
+        val selected = if (period == NetworkStatsPeriod.MONTH) history else {
+            repository.read(until.minus(period.duration), until)
+        }
         _state.value = _state.value.copy(
             loading = false,
             recordedSince = selected.recordedSince,
             versions = selected.versions,
             metrics = selected.period.toMetrics(),
             history = history.days,
-            todayUtc = today,
+            historyDates = historyStart.atOffset(ZoneOffset.UTC).toLocalDate()..
+                currentHour.atOffset(ZoneOffset.UTC).toLocalDate(),
         )
     }
 
@@ -125,5 +129,3 @@ internal class NetworkStatsViewModel @Inject constructor(
         }
     }
 }
-
-internal const val NETWORK_STATS_HISTORY_DAYS = 30

@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageMutationResult
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.stats.NetworkAction
 import fr.forumhfr.redface2.core.domain.stats.NetworkActionKey
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
 import fr.forumhfr.redface2.core.domain.stats.NetworkStatsBuffer
 import fr.forumhfr.redface2.core.domain.stats.NetworkStatsProcess
 import fr.forumhfr.redface2.core.model.write.EditPostContext
@@ -104,6 +105,28 @@ class DefaultReplyRepositoryTest {
             stats.drain().values.flatMap { it.actions.entries }.groupingBy { it.key }.fold(0L) { count, row ->
                 count + row.value
             })
+    }
+
+    @Test
+    fun `a failing action recorder leaves a confirmed POST successful`() = runTest {
+        val repository = DefaultReplyRepository(
+            hfrClient = client,
+            replyFormParser = ReplyFormParser(),
+            replySubmitResponseParser = ReplySubmitResponseParser(),
+            diagnostics = DiagnosticsLog(),
+            smileyUsageRecorder = usage.recorder,
+            ioDispatcher = Dispatchers.Unconfined,
+            networkActions = NetworkActionRecorder { _, _, _ -> error("counter unavailable") },
+        )
+        val context = ReplyContext(23, 550, 35395, 20)
+        server.enqueue(MockResponse().setBody(fixture("write_reply_form_open_topic.html")))
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+
+        val form = repository.fetchReplyForm(context)
+        assertTrue(repository.submitReply(context, form, "Réponse") is ReplySubmitResult.Success)
+        assertEquals("GET", server.takeRequest().method)
+        assertEquals("POST", server.takeRequest().method)
+        assertEquals(2, server.requestCount)
     }
 
     @Test

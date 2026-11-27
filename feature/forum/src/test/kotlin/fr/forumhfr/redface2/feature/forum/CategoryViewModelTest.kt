@@ -7,6 +7,8 @@ import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.stats.NetworkAction
+import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.Category
@@ -122,6 +124,44 @@ class CategoryViewModelTest {
             assertEquals(1, afterSelect.page)
 
             repo.emitTopicList(cat = 23, subcat = 550, page = 1, result = ForumResult.Success(EMPTY_PAGE))
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `category counts only the first content of the active listing and a successful refresh`() = runTest {
+        val repo = FakeForumRepository()
+        val actions = mutableListOf<NetworkAction>()
+        val vm = CategoryViewModel(
+            request = CategoryRequest(cat = 23, initialSubcat = null),
+            forumRepository = repo,
+            authRepository = FakeAuthRepository(),
+            userPreferencesRepository = FakePreferences(),
+            networkActions = NetworkActionRecorder { action, _, _ -> actions += action },
+        )
+
+        vm.uiState.test {
+            awaitItem()
+            repo.emitTopicList(23, null, 1, ForumResult.Failure(IllegalStateException("offline")))
+            awaitContent { it.topics is TopicsUiState.Error }
+            assertTrue(actions.isEmpty())
+
+            vm.selectSubcategory(550)
+            repo.emitTopicList(23, null, 1, ForumResult.Success(EMPTY_PAGE.copy(subcat = null)))
+            assertTrue(actions.isEmpty())
+            val content = EMPTY_PAGE.copy(subcat = 550, totalTopics = 130)
+            repo.emitTopicList(23, 550, 1, ForumResult.Success(content))
+            awaitContent { it.layoutPreferencesReady && (it.topics as? TopicsUiState.Content)?.page == content }
+            assertEquals(listOf(NetworkAction.LIST), actions)
+
+            val fresh = content.copy(totalTopics = 120)
+            repo.emitTopicList(23, 550, 1, ForumResult.Success(fresh))
+            awaitContent { (it.topics as? TopicsUiState.Content)?.page == fresh }
+            assertEquals(listOf(NetworkAction.LIST), actions)
+
+            vm.refresh()
+            repo.emitTopicList(23, 550, 1, ForumResult.Success(fresh))
+            assertEquals(listOf(NetworkAction.LIST, NetworkAction.LIST), actions)
             cancelAndIgnoreRemainingEvents()
         }
     }

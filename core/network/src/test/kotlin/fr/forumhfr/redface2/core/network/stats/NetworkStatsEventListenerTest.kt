@@ -29,9 +29,14 @@ import fr.forumhfr.redface2.core.network.diagnostics.HfrEventListenerFactory
 import fr.forumhfr.redface2.core.network.diagnostics.HfrNetworkDiagnostics
 import fr.forumhfr.redface2.core.network.diagnostics.NetworkStatsListenerFactory
 import fr.forumhfr.redface2.core.network.diagnostics.OkHttpNetworkProbeRunner
+import io.mockk.every
+import io.mockk.mockk
 import java.io.IOException
 import java.net.InetAddress
 import java.net.Proxy
+import java.net.Socket
+import java.net.SocketAddress
+import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.time.Clock
 import java.time.Duration
@@ -39,6 +44,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.util.concurrent.TimeUnit
+import javax.net.SocketFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
@@ -112,7 +118,7 @@ class NetworkStatsEventListenerTest {
 
     @Test
     fun `redirects to and from HFR use each wire URL and its own status`() = runTest {
-        server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", url("/forum2.php")))
+        server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", url("/forum2.php")).setBody("Moved"))
         server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", url("/final", "other.invalid")))
         server.enqueue(MockResponse().setBody("done"))
         val client = NetworkModule.provideAnonymousClient(base, listeners)
@@ -125,6 +131,7 @@ class NetworkStatsEventListenerTest {
             NetworkTarget.HTML_FORUM2 to NetworkStatus.REDIRECT,
             NetworkTarget.OTHER_HOST to NetworkStatus.SUCCESS,
         ), rows.keys.map { it.dimensions.target to it.status }.toSet())
+        assertEquals(0L, rows.values.sumOf { it.incompleteBodies })
     }
 
     @Test
@@ -168,6 +175,31 @@ class NetworkStatsEventListenerTest {
     }
 
     @Test
+    fun `a TCP connect timeout is counted separately from cancellation`() = runTest {
+        val socketFactory = mockk<SocketFactory>()
+        every { socketFactory.createSocket() } answers {
+            object : Socket() {
+                override fun connect(endpoint: SocketAddress, timeout: Int) {
+                    throw SocketTimeoutException("connect timed out")
+                }
+            }
+        }
+        val client = NetworkModule.provideAnonymousClient(base, listeners).newBuilder()
+            .socketFactory(socketFactory)
+            .build()
+        val request = request("/forum2.php")
+
+        assertTrue(runCatching { execute(client, request) }.exceptionOrNull() is SocketTimeoutException)
+        val cancelled = client.newCall(request).apply { cancel() }
+        assertTrue(runCatching { cancelled.execute().close() }.exceptionOrNull() is IOException)
+
+        val totals = buffer.drain().getValue(0)
+        assertTrue(totals.requests.isEmpty())
+        assertEquals(mapOf(NoRequestReason.TCP_TIMEOUT to 1L, NoRequestReason.CANCELLED to 1L),
+            totals.noRequests.entries.associate { it.key.reason to it.value })
+    }
+
+    @Test
     fun `a wire request without response and a 403 with broken body keep distinct statuses`() = runTest {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST))
         server.enqueue(MockResponse().setResponseCode(403).setBody("denied".repeat(4000))
@@ -182,7 +214,8 @@ class NetworkStatsEventListenerTest {
         assertTrue(totals.noRequests.isEmpty())
         assertEquals(setOf(NetworkStatus.NO_RESPONSE, NetworkStatus.FORBIDDEN),
             totals.requests.keys.map { it.status }.toSet())
-        assertTrue(totals.requests.values.all { it.requests == 1L && it.incompleteBodies == 1L })
+        assertEquals(mapOf(NetworkStatus.NO_RESPONSE to 0L, NetworkStatus.FORBIDDEN to 1L),
+            totals.requests.entries.associate { it.key.status to it.value.incompleteBodies })
     }
 
     @Test
@@ -255,7 +288,7 @@ class NetworkStatsEventListenerTest {
         assertEquals(count.toLong(), rows.requests.values.single().requests)
         assertEquals(NetworkTarget.PROBE, rows.requests.keys.single().dimensions.target)
         assertEquals(NetworkRole.PROBE, rows.requests.keys.single().dimensions.role)
-        assertEquals(NetworkPeakGroup.FORUM, rows.peaks.keys.single().group)
+        assertEquals(NetworkPeakGroup.PROBE, rows.peaks.keys.single().group)
     }
 
     @Test

@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.domain.stats.NetworkAction
 import fr.forumhfr.redface2.core.domain.stats.NetworkActionRecorder
+import fr.forumhfr.redface2.core.domain.stats.recordSafely
 import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -238,7 +239,7 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
                 val responseHtml = hfrClient.submitReply(formBody)
                 val outcome = replySubmitResponseParser.parse(responseHtml)
                 if (outcome is ReplySubmitResult.Success) {
-                    networkActions.record(NetworkAction.WRITE)
+                    networkActions.recordSafely(NetworkAction.WRITE)
                     smileyUsageRecorder.record(
                         smileyUsageOwner, formBody, options.smileyDisabled,
                     )
@@ -362,7 +363,7 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
                 val responseHtml = hfrClient.submitReply(formBody)
                 val outcome = replySubmitResponseParser.parse(responseHtml)
                 if (outcome is ReplySubmitResult.Success) {
-                    networkActions.record(NetworkAction.WRITE)
+                    networkActions.recordSafely(NetworkAction.WRITE)
                     smileyUsageRecorder.record(
                         smileyUsageOwner, formBody, options.smileyDisabled,
                     )
